@@ -3,6 +3,17 @@ from __future__ import annotations
 from agent_cloud_common import ContextDocument, MemoryItem, SkillRef
 
 
+def _escape_xml(s: str) -> str:
+    # & 必须最先替换,否则会二次转义后续插入的实体;防止技能元数据破坏 <skill> XML 结构。
+    return (
+        s.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&apos;")
+    )
+
+
 def _render_docs(documents: list[ContextDocument]) -> list[str]:
     # 用户级在前,agent 级在后;各自保持输入顺序
     ordered = [d for d in documents if d.scope == "user"] + [
@@ -30,9 +41,9 @@ def _render_skills(skills: list[SkillRef]) -> list[str]:
     ]
     for s in skills:
         lines.append(
-            f"  <skill><name>{s.name}</name>"
-            f"<description>{s.description}</description>"
-            f"<location>{s.location}</location></skill>"
+            f"  <skill><name>{_escape_xml(s.name)}</name>"
+            f"<description>{_escape_xml(s.description)}</description>"
+            f"<location>{_escape_xml(s.location)}</location></skill>"
         )
     lines.append("</available_skills>")
     return ["\n".join(lines)]
