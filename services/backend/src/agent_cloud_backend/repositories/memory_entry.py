@@ -33,7 +33,9 @@ class MemoryEntryRepository(BaseRepository[MemoryEntry]):
         result = await self.session.execute(
             select(MemoryEntry)
             .where(MemoryEntry.scope == scope, MemoryEntry.owner_id == owner_id)
-            .order_by(MemoryEntry.created_at.desc())
+            # created_at (server_default now()) is constant within a transaction,
+            # so a stable tiebreaker is required for deterministic ordering.
+            .order_by(MemoryEntry.created_at.desc(), MemoryEntry.id.desc())
             .limit(limit)
         )
         return list(result.scalars().all())
