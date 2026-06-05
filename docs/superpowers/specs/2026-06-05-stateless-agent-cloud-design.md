@@ -46,6 +46,7 @@
 | 配置形态 | openclaw 式 markdown 文档(AGENTS/SOUL/IDENTITY/USER/TOOLS/…),非单个 system_prompt |
 | Memory | 读取+追加;存为 DB 行(非 .md 文件);分用户级 + 每 agent 级;预留向量检索 |
 | Skill | openclaw 式 `SKILL.md`;**用户级安装**(市场/上传 zip/卸载),**每 AgentConfig 选启用**;渐进式披露;文件物化进沙箱执行 |
+| 依赖 | 富基础镜像 + 项目级依赖(卷)+ 用户级 hermetic 包前缀(卷)+ 内部包代理;自定义 per-user 镜像 post-v1 |
 
 ---
 
@@ -268,6 +269,20 @@ exec_tool(call_id, tool_name, args, work_subdir) -> stream<tool_progress> + tool
   - 可选:**块卷 + S3 快照**(本地盘更快,跨 AZ 靠快照恢复)。
 - **skill 物化**:已启用 skill 从对象存储解包到沙箱 `/skills/<name>/`(只读层),缓存;install/uninstall 时失效,下回合重新物化。与用户工作文件分目录,互不混淆。
 
+### 9.1 依赖管理(沙箱里跑脚本的依赖)
+
+原则:**依赖也是状态 → 放持久层(用户卷 / 包前缀),沙箱保持临时**。与"文件/上下文放持久层、计算可弃"同构。分层:
+
+1. **基础镜像(共享·无状态)**:富基础镜像预装常见 runtime(Python/Node/Go/…)+ 系统工具(git/curl/build/jq/ffmpeg/ripgrep/…)。版本化、集中更新,覆盖大多数需求,零成本秒级。
+2. **项目级依赖(持久,在卷上)**:`venv` / `node_modules` / 项目本地包装在用户卷项目目录 → 与用户文件一起持久、跨实例自然存活(也是最佳实践)。
+3. **用户级包前缀(持久,在卷上)**:"全局型"工具用 hermetic 包管理器(Nix / micromamba / conda)装到卷上的 prefix,持久且对基镜变化稳健(避免 ABI 失配)。
+4. **Skill 依赖**:见 §12.5。
+5. **(post-v1)自定义 per-user 镜像**:devcontainer 式自定义基镜,应对重系统依赖。
+
+- **网络**:装包需出网,与 egress allowlist 冲突 → 走**内部包代理 / 镜像缓存**(PyPI/npm/…),沙箱只放行该代理;既限外泄又加速(缓存)。首次装慢,缓存在卷上后续快。
+- **风险兜底**:卷上二进制可能因基镜升级失配 → 用 hermetic 包管理器 + 固定 per-user 基镜版本。
+- **v1 范围**:富镜 + 项目级 + 用户级 hermetic 前缀 + 包代理;自定义镜像 post-v1。
+
 ---
 
 ## 10. 失败处理
@@ -287,7 +302,7 @@ exec_tool(call_id, tool_name, args, work_subdir) -> stream<tool_progress> + tool
 
 - **信任边界(脑/沙箱拆分)**:LLM Key 与编排逻辑只在 worker;沙箱跑不可信 shell,被攻破/注入也偷不到 Key、连不到后端/他人数据。
 - **沙箱隔离**:**microVM(Firecracker)/ gVisor 强隔离**,非裸容器。
-- **出网策略**:egress allowlist,防注入后数据外泄。
+- **出网策略**:egress allowlist,防注入后数据外泄;装包出网走**内部包代理/镜像缓存**(只放行代理),兼顾安全与加速(见 §9.1)。
 - **资源限制**:cgroups 限 CPU/内存/磁盘,防噪声邻居与 OOM 拖垮宿主。
 - **卷隔离**:每用户卷,沙箱只挂自己用户的子树,由沙箱管理器强制。
 - **密钥**:KMS 加密,worker 运行时解密注入,绝不写入沙箱或日志。
@@ -338,6 +353,7 @@ exec_tool(call_id, tool_name, args, work_subdir) -> stream<tool_progress> + tool
 5. **安全**:断言沙箱够不到 Key/后端/他人卷;egress 生效;注入无法越界偷 Key。
 6. **流式/契约**:SSE 顺序/取消/重连;gRPC 背压。
 7. **Skill**:安装/卸载/启用 API;skill 物化进沙箱 + 缓存失效;渐进式披露(元数据注入 + 按需读 SKILL.md);跑 skill 脚本端到端;上传归档开关与隔离。
+8. **依赖**:项目级 venv/node_modules 跨回合持久;用户级 hermetic 前缀持久;包代理缓存命中;基镜升级后卷上 hermetic 包仍可用。
 
 **原则**:假 LLM 保确定性零成本;DB 与沙箱用真实(其行为正是被验证对象,不 mock);故障注入是一等公民。
 
@@ -351,5 +367,6 @@ exec_tool(call_id, tool_name, args, work_subdir) -> stream<tool_progress> + tool
 - 第②跳改消息队列分发 + pub/sub,提升弹性。
 - 第①跳按需引入 WebSocket(回合进行中实时 steering)。
 - 用户卷多区域 / 跨 AZ 优化。
-- skill 自定义依赖安装(per-user 依赖层) + skill 市场审核/签名 + 语义检索式 skill 发现。
+- skill 市场审核/签名 + 语义检索式 skill 发现。
+- per-user 自定义沙箱镜像(devcontainer 式构建管线 + registry),应对重系统依赖。
 ```
