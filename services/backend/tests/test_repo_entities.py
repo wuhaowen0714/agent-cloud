@@ -59,6 +59,29 @@ async def test_message_seq_autoincrements(session):
     assert [m.seq for m in listed] == [0, 1]
 
 
+async def test_message_seq_ordering_three_rows(session):
+    """I1: appending 3+ messages assigns seq 0,1,2,... and list_by_session
+    returns them in seq order."""
+    user = await _make_user(session)
+    agent = await _make_agent(session, user)
+    s = await SessionRepository(session).create_for(user.id, agent.id, None)
+    await session.flush()
+    repo = MessageRepository(session)
+    appended = []
+    for i in range(3):
+        m = await repo.append(
+            s.id,
+            Message(session_id=s.id, seq=0, role="user", content={"text": f"m{i}"}),
+        )
+        appended.append(m)
+    await session.commit()
+
+    assert [m.seq for m in appended] == [0, 1, 2]
+    listed = await repo.list_by_session(s.id)
+    assert [m.seq for m in listed] == [0, 1, 2]
+    assert [m.content["text"] for m in listed] == ["m0", "m1", "m2"]
+
+
 async def test_context_document_upsert(session):
     user = await _make_user(session)
     repo = ContextDocumentRepository(session)
