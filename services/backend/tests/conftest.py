@@ -16,6 +16,21 @@ def pg_url() -> AsyncIterator[str]:
         yield pg.get_connection_url()
 
 
+@pytest.fixture
+def migration_pg_url() -> AsyncIterator[str]:
+    """A dedicated, isolated database for the Alembic migration test.
+
+    The session-scoped ``pg_url`` container is shared with the ORM ``engine``
+    fixture (which runs ``create_all``) and accumulates ``alembic_version``
+    state, so a migration test running against it depends on test order and
+    needs schema-reset hacks. This fixture spins its own container (the image
+    is cached, so startup is fast) so the migration builds the schema from a
+    truly empty database, independent of any other test.
+    """
+    with PostgresContainer("postgres:16", driver="asyncpg") as pg:
+        yield pg.get_connection_url()
+
+
 @pytest_asyncio.fixture
 async def engine(pg_url: str):
     eng = create_async_engine(pg_url, future=True)
