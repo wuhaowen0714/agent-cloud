@@ -29,5 +29,6 @@ async def test_fake_provider_raises_when_exhausted():
     provider = FakeProvider([_result("only")])
     req = CompletionRequest(system="", messages=[], tools=[])
     await provider.complete(req)
-    with pytest.raises(IndexError):
+    # 仍是 IndexError,但带上清晰的脚本耗尽信息
+    with pytest.raises(IndexError, match="FakeProvider script exhausted after 1 calls"):
         await provider.complete(req)
