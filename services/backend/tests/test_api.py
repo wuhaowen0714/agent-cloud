@@ -1,3 +1,6 @@
+import uuid
+
+
 async def test_user_crud(client):
     r = await client.post("/users", json={"email": "x@example.com"})
     assert r.status_code == 201, r.text
@@ -76,3 +79,116 @@ async def test_context_document_put_update_branch(client):
     assert second["content"] == "v2"
     assert second["updated_at"] is not None
     assert second["updated_at"] >= first["updated_at"]
+
+
+async def test_duplicate_email_returns_409(client):
+    """I2: a unique-constraint violation should be 409, not 500, and must not
+    leak raw SQL. A subsequent request on the same app must still work."""
+    r = await client.post("/users", json={"email": "dup@example.com"})
+    assert r.status_code == 201, r.text
+
+    r = await client.post("/users", json={"email": "dup@example.com"})
+    assert r.status_code == 409, r.text
+    body = r.json()
+    assert "detail" in body
+    # Generic message only -- no leaked DB internals.
+    assert "duplicate key" not in body["detail"].lower()
+    assert "uq_" not in body["detail"]
+
+    # The session/connection must be usable again after rollback.
+    r = await client.post("/users", json={"email": "other@example.com"})
+    assert r.status_code == 201, r.text
+
+
+async def test_session_with_bogus_agent_config_returns_409(client):
+    """I2: FK violation (non-existent agent_config_id) should be 409."""
+    uid = (await client.post("/users", json={"email": "fk@example.com"})).json()["id"]
+    bogus_agent = str(uuid.uuid4())
+    r = await client.post(
+        "/sessions", json={"user_id": uid, "agent_config_id": bogus_agent}
+    )
+    assert r.status_code == 409, r.text
+    assert "detail" in r.json()
+
+
+async def test_message_to_bogus_session_returns_409(client):
+    """I2: FK violation (non-existent session_id) should be 409."""
+    bogus_session = str(uuid.uuid4())
+    r = await client.post(
+        f"/sessions/{bogus_session}/messages",
+        json={"role": "user", "content": {"text": "hi"}},
+    )
+    assert r.status_code == 409, r.text
+    assert "detail" in r.json()
+
+
+async def test_user_not_found_returns_404(client):
+    """I1: GET an unknown user id -> 404."""
+    r = await client.get(f"/users/{uuid.uuid4()}")
+    assert r.status_code == 404, r.text
+
+
+async def test_agent_config_patch_not_found_returns_404(client):
+    """I1: PATCH an unknown agent-config id -> 404."""
+    r = await client.patch(
+        f"/agent-configs/{uuid.uuid4()}", json={"name": "nope"}
+    )
+    assert r.status_code == 404, r.text
+
+
+async def test_agent_config_patch_jsonb_fields(client):
+    """I1: PATCH JSONB columns (enabled_tools, permissions) persists and bumps
+    updated_at -- also guards the existing agent-config session.refresh."""
+    uid = (await client.post("/users", json={"email": "json@example.com"})).json()["id"]
+    created = (
+        await client.post(
+            "/agent-configs",
+            json={"user_id": uid, "name": "c", "model": "m", "provider": "p"},
+        )
+    ).json()
+    aid = created["id"]
+
+    r = await client.patch(
+        f"/agent-configs/{aid}",
+        json={
+            "enabled_tools": ["bash", "read"],
+            "permissions": {"net": True, "fs": "ro"},
+        },
+    )
+    assert r.status_code == 200, r.text
+    patched = r.json()
+    assert patched["enabled_tools"] == ["bash", "read"]
+    assert patched["permissions"] == {"net": True, "fs": "ro"}
+    assert patched["updated_at"] >= created["updated_at"]
+
+    # Confirm persistence via a fresh read.
+    listed = (await client.get(f"/agent-configs?user_id={uid}")).json()
+    assert listed[0]["enabled_tools"] == ["bash", "read"]
+    assert listed[0]["permissions"] == {"net": True, "fs": "ro"}
+
+
+async def test_message_seq_ordering_three_rows(client):
+    """I1: appending 3+ messages yields seq 0,1,2 and list returns them in
+    order."""
+    uid = (await client.post("/users", json={"email": "seq@example.com"})).json()["id"]
+    aid = (
+        await client.post(
+            "/agent-configs",
+            json={"user_id": uid, "name": "c", "model": "m", "provider": "p"},
+        )
+    ).json()["id"]
+    sid = (
+        await client.post("/sessions", json={"user_id": uid, "agent_config_id": aid})
+    ).json()["id"]
+
+    for i in range(3):
+        r = await client.post(
+            f"/sessions/{sid}/messages",
+            json={"role": "user", "content": {"text": f"m{i}"}},
+        )
+        assert r.status_code == 201, r.text
+        assert r.json()["seq"] == i
+
+    listed = (await client.get(f"/sessions/{sid}/messages")).json()
+    assert [m["seq"] for m in listed] == [0, 1, 2]
+    assert [m["content"]["text"] for m in listed] == ["m0", "m1", "m2"]
