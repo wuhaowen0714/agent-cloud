@@ -21,6 +21,7 @@ async def upsert_document(
         body.scope, body.type, body.owner_id, body.content
     )
     await session.commit()
+    await session.refresh(doc)
     return doc
 
 

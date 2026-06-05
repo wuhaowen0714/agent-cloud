@@ -54,3 +54,25 @@ async def test_context_documents_and_memory(client):
     assert r.status_code == 201
     r = await client.get(f"/memory?scope=user&owner_id={uid}")
     assert r.status_code == 200 and r.json()[0]["content"] == "likes tea"
+
+
+async def test_context_document_put_update_branch(client):
+    """C1: PUT update branch must not 500. Insert then update same key, expect
+    200 with refreshed content + updated_at present/advanced."""
+    uid = (await client.post("/users", json={"email": "upd@example.com"})).json()["id"]
+    key = {"scope": "user", "type": "USER", "owner_id": uid}
+
+    r = await client.put("/context-documents", json={**key, "content": "v1"})
+    assert r.status_code == 200, r.text
+    first = r.json()
+    assert first["content"] == "v1"
+    assert first["updated_at"] is not None
+
+    # Update the SAME (scope, type, owner_id) -> exercises the UPDATE branch.
+    r = await client.put("/context-documents", json={**key, "content": "v2"})
+    assert r.status_code == 200, r.text
+    second = r.json()
+    assert second["id"] == first["id"]
+    assert second["content"] == "v2"
+    assert second["updated_at"] is not None
+    assert second["updated_at"] >= first["updated_at"]
