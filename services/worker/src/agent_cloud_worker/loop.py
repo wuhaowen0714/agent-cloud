@@ -32,7 +32,20 @@ async def run_turn(
     """跑一个回合:调 LLM → 有工具调用则执行并回填 → 直到无工具调用或达上限。
 
     用户消息由调用方(后端)单独持久化,因此不计入 new_messages。
+
+    stop_reason 语义:
+      - "end_turn":模型自然收尾(最后一条是不含 tool_call 的 assistant 消息),回合完整。
+      - "max_iterations":达到迭代上限,**回合不完整**。此时 new_messages 可能以一条
+        TOOL 消息结尾(上限恰好卡在执行完一轮工具、尚未拿到收尾 assistant 之时),
+        即存在“悬空”的工具结果而没有对应的最终 assistant 回复。本函数不对这种情况做
+        任何修补;是否丢弃 / 重试 / 截断由调用方(后端)按 best-effort 策略决定
+        (spec §8/§10)。
+
+    max_iterations 必须 >= 1;为 0 会是与“真正达到上限”无法区分的静默 no-op,故拒绝。
     """
+    if max_iterations < 1:
+        raise ValueError("max_iterations must be >= 1")
+
     working: list[Message] = [*history, Message(role=Role.USER, text=user_message)]
     new_messages: list[Message] = []
     usage = Usage()
