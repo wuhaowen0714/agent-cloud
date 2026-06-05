@@ -1,0 +1,49 @@
+from collections.abc import AsyncIterator
+
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from testcontainers.postgres import PostgresContainer
+
+from agent_cloud_backend.api.deps import get_session
+from agent_cloud_backend.main import create_app
+from agent_cloud_backend.models import Base
+
+
+@pytest.fixture(scope="session")
+def pg_url() -> AsyncIterator[str]:
+    with PostgresContainer("postgres:16", driver="asyncpg") as pg:
+        yield pg.get_connection_url()
+
+
+@pytest_asyncio.fixture
+async def engine(pg_url: str):
+    eng = create_async_engine(pg_url, future=True)
+    async with eng.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
+    yield eng
+    await eng.dispose()
+
+
+@pytest_asyncio.fixture
+async def session(engine) -> AsyncIterator[AsyncSession]:
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as s:
+        yield s
+
+
+@pytest_asyncio.fixture
+async def client(engine) -> AsyncIterator[AsyncClient]:
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def _override() -> AsyncIterator[AsyncSession]:
+        async with maker() as s:
+            yield s
+
+    app = create_app()
+    app.dependency_overrides[get_session] = _override
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
