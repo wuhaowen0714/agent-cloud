@@ -47,6 +47,7 @@
 | Memory | 读取+追加;存为 DB 行(非 .md 文件);分用户级 + 每 agent 级;预留向量检索 |
 | Skill | openclaw 式 `SKILL.md`;**用户级安装**(市场/上传 zip/卸载),**每 AgentConfig 选启用**;渐进式披露;文件物化进沙箱执行 |
 | 依赖 | 富基础镜像 + 项目级依赖(卷)+ 用户级 hermetic 包前缀(卷)+ 内部包代理;自定义 per-user 镜像 post-v1 |
+| 项目结构 | monorepo(uv workspace 多包)但**部署独立**:`services/{backend,worker,sandbox}` + `packages/common` + `protos` + `frontend` + `apps` + `deploy` |
 
 ---
 
@@ -79,6 +80,34 @@ Agent Worker 池("脑",无状态·池化,持有 LLM Key)
 
 - **无状态/可弃**:后端服务进程(多副本)、agent worker(池化)、sandbox(每用户但仅挂载持久卷,无独有状态)。
 - **有状态/持久**:Postgres、对象存储、用户持久卷、KMS。
+
+### 3.1 项目结构(monorepo)与部署独立性
+
+一个仓库(monorepo,便于共享历史与跨服务原子改动),但**部署单元彼此独立**(monorepo ≠ monolith):web / 后端 / worker / sandbox 各自构建独立镜像,可部署到**不同集群 / 区域 / 平台**。
+
+```
+agent-cloud/
+├── pyproject.toml            # uv workspace 根(声明 members、统一 dev/lint)
+├── protos/                   # 跨服务契约源(gRPC/protobuf):run_turn、exec_tool、流事件
+├── packages/common/          # 共享 Python 库:契约类型 + proto 生成桩 + 纯 domain 类型
+├── services/
+│   ├── backend/              # FastAPI 后端 + 数据层 + 迁移(唯一访问 Postgres 者)
+│   ├── worker/               # agent "脑"(agent-loop / provider / 工具决策)
+│   └── sandbox/              # 沙箱运行时(exec_tool server)
+├── frontend/                 # Web UI(TS/React,独立工具链)
+├── apps/                     # 未来原生 app(ios/android/desktop)占位
+├── deploy/                   # 各服务 Dockerfile + docker-compose + k8s
+└── docs/                     # specs / plans
+```
+
+保证"各部署各的"的机制:
+
+1. **每服务一个独立镜像**(`deploy/<svc>.Dockerfile`)→ 后端多副本、worker 池化、sandbox microVM 宿主、前端 CDN,各去各处。
+2. **边界是网络契约,非进程内调用**:跨服务只走 `protos/` 的 gRPC(后端↔worker↔sandbox)与后端的 SSE/REST(前端↔后端)。
+3. **`packages/common` 仅契约/纯类型**,构建时 vendor 进各镜像并**按版本钉死** + 契约向后兼容 → 各服务独立升级,不强迫同时重部署。
+4. **跨服务地址 = 配置**(env / 服务发现):不同环境填不同 endpoint,代码不变。
+5. **独立 CI/CD**:每个 `services/*` 独立构建 / 发布 / 回滚。
+6. **DB 归后端独有**:仅 `services/backend` 访问 Postgres;worker 经 `run_turn` 拿数据、结果回传后端落库,memory 也经后端写。
 
 ---
 

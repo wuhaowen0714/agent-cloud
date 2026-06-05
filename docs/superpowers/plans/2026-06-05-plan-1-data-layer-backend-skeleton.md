@@ -1,75 +1,186 @@
-# Plan 1: 数据层 + 后端骨架 Implementation Plan
+# Plan 1: Monorepo 脚手架 + 数据层 + 后端骨架 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 建立无状态 Agent Cloud 后端的持久化地基:6 个核心实体的数据模型、迁移,以及对应的 CRUD API,全部用真实 Postgres 测试。
+**Goal:** 立起整个项目的 monorepo 工作区(可独立部署各服务),并实现后端的持久化地基:6 个核心实体的数据模型、迁移与 CRUD API,全部用真实 Postgres 测试。
 
-**Architecture:** Python + FastAPI 的无状态后端服务,SQLAlchemy 2.0 (async) 访问 Postgres,Alembic 管理迁移。分层:`models`(ORM)→ `repositories`(数据访问)→ `api`(HTTP 路由),`schemas`(Pydantic 出入参)横切。本计划不含 agent/worker/sandbox(见后续 Plan),只产出可独立运行、可测试的后端 + 数据层。
+**Architecture:** monorepo(uv workspace 多包),部署单元彼此独立。本计划只动两块:`packages/common`(占位共享库)与 `services/backend`(FastAPI + SQLAlchemy 2.0 async + Alembic)。后端分层 `models`→`repositories`→`api`,`schemas` 横切。不含 worker/sandbox/frontend(各自后续 Plan),目录先占位。
 
-**Tech Stack:** Python 3.12、uv(包管理)、FastAPI、SQLAlchemy 2.0 async + asyncpg、Alembic、Pydantic v2、pytest + pytest-asyncio + httpx + testcontainers[postgres]、ruff。
+**Tech Stack:** Python 3.12、uv workspace、FastAPI、SQLAlchemy 2.0 async + asyncpg、Alembic、Pydantic v2、pytest + pytest-asyncio + httpx + testcontainers[postgres]、ruff、hatchling。
 
-参考设计 spec:`docs/superpowers/specs/2026-06-05-stateless-agent-cloud-design.md`(§5 数据模型)。
+参考设计 spec:`docs/superpowers/specs/2026-06-05-stateless-agent-cloud-design.md`(§3.1 项目结构、§5 数据模型)。
 
 ---
 
 ## 范围与实体
 
-本计划实现 6 个核心实体(spec §5.1):**User、AgentConfig、Session、Message、context_documents、memory_entries**。
+实现 6 个核心实体(spec §5.1):**User、AgentConfig、Session、Message、context_documents、memory_entries**,以及承载它们的 monorepo 工作区。
 
-明确**不在本计划**(留给后续 Plan,避免 YAGNI):
+明确**不在本计划**(留给后续 Plan,YAGNI):
+- `worker` / `sandbox` / `frontend` 的实现(仅建占位目录);`protos` 内容(Plan 2 起填)。
 - `skills` / `agent_skill_enables`(Plan 5)、`SandboxRegistry`(Plan 4)。
-- `memory_entries.embedding` 向量列:本计划**不加物理列**;读取接口 `list_for_context(scope, owner_id, limit)` 作为未来从"取最近 N 条"切换到"向量 top-k"的接缝(spec §5.1 预留)。
-- 认证鉴权(后续);本计划 API 不加 auth,仅做 CRUD 骨架。
+- `memory_entries.embedding` 物理列:本计划**不加**;读取接口 `list_for_context(scope, owner_id, limit)` 是未来切换到向量 top-k 的接缝(spec §5.1 预留)。
+- 认证鉴权(后续);本计划 API 仅 CRUD 骨架。
 
 ## File Structure
 
 ```
 agent-cloud/
-  pyproject.toml                      # 项目与依赖(uv)
-  alembic.ini                         # Alembic 配置
-  alembic/env.py                      # Alembic 运行环境(读 models metadata)
-  alembic/versions/                   # 迁移脚本
-  src/agent_cloud/
-    __init__.py
-    config.py                         # Settings(DATABASE_URL 等)
-    db.py                             # async engine、session factory、Base
-    main.py                           # FastAPI app、include routers、/health
-    models/{base,user,agent_config,session,message,context_document,memory_entry}.py
-    schemas/{user,agent_config,session,message,context_document,memory_entry}.py
-    repositories/{base,user,agent_config,session,message,context_document,memory_entry}.py
-    api/{deps,users,agent_configs,sessions,context_documents,memory_entries,messages}.py
-  tests/
-    conftest.py                       # testcontainer Postgres + app + async client fixtures
-    test_health.py
-    test_repo_user.py
-    test_repo_entities.py             # 其余实体仓库
-    test_api.py                       # 端到端 API
+├── pyproject.toml                         # uv workspace 根(members + 共享 ruff)
+├── packages/common/
+│   ├── pyproject.toml                     # agent-cloud-common(占位共享库)
+│   └── src/agent_cloud_common/__init__.py
+├── services/backend/
+│   ├── pyproject.toml                     # agent-cloud-backend(依赖 + pytest 配置)
+│   ├── alembic.ini, alembic/env.py, alembic/versions/
+│   ├── src/agent_cloud_backend/
+│   │   ├── __init__.py, config.py, db.py, main.py
+│   │   ├── models/{base,user,agent_config,session,message,context_document,memory_entry}.py
+│   │   ├── schemas/{user,agent_config,session,message,context_document,memory_entry}.py
+│   │   ├── repositories/{base,user,agent_config,session,message,context_document,memory_entry}.py
+│   │   └── api/{deps,users,agent_configs,sessions,context_documents,memory_entries,messages}.py
+│   └── tests/{conftest,test_health,test_models_create,test_migration,test_repo_user,test_repo_entities,test_api}.py
+├── protos/.gitkeep                        # 占位(Plan 2 起填 gRPC 契约)
+├── deploy/.gitkeep                        # 占位(Dockerfile/k8s 后续)
+├── frontend/.gitkeep                      # 占位
+└── apps/.gitkeep                          # 占位
 ```
 
-每个文件单一职责:`models/*` 只定义 ORM 表;`schemas/*` 只定义出入参;`repositories/*` 只做数据访问;`api/*` 只做 HTTP 编排。
+> 后端 Python 包名为 `agent_cloud_backend`,所有 import 用它。后端相关命令在 `services/backend` 目录下执行(`cd services/backend && uv run ...`);git 命令在仓库根执行。
 
 ---
 
-### Task 1: 项目脚手架 + 配置 + /health
+### Task 0: Monorepo 工作区脚手架
 
 **Files:**
-- Create: `pyproject.toml`, `src/agent_cloud/__init__.py`, `src/agent_cloud/config.py`, `src/agent_cloud/main.py`
-- Test: `tests/test_health.py`, `tests/__init__.py`
+- Create: `pyproject.toml`(根)、`packages/common/pyproject.toml`、`packages/common/src/agent_cloud_common/__init__.py`、`services/backend/pyproject.toml`、`services/backend/src/agent_cloud_backend/__init__.py`、`protos/.gitkeep`、`deploy/.gitkeep`、`frontend/.gitkeep`、`apps/.gitkeep`
 
-- [ ] **Step 1: 初始化项目与依赖**
+- [ ] **Step 1: 写 workspace 根 pyproject**
+
+Create `pyproject.toml`:
+```toml
+[project]
+name = "agent-cloud"
+version = "0.0.0"
+requires-python = ">=3.12"
+
+[tool.uv.workspace]
+members = ["packages/*", "services/*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+```
+
+- [ ] **Step 2: 写 packages/common 占位库**
+
+Create `packages/common/pyproject.toml`:
+```toml
+[project]
+name = "agent-cloud-common"
+version = "0.0.0"
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_cloud_common"]
+```
+
+Create `packages/common/src/agent_cloud_common/__init__.py`:
+```python
+__version__ = "0.0.0"
+```
+
+- [ ] **Step 3: 写 services/backend 包(依赖 + pytest 配置)**
+
+Create `services/backend/pyproject.toml`:
+```toml
+[project]
+name = "agent-cloud-backend"
+version = "0.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg",
+    "alembic",
+    "pydantic>=2",
+    "pydantic[email]",
+    "pydantic-settings",
+    "agent-cloud-common",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_cloud_backend"]
+
+[tool.uv.sources]
+agent-cloud-common = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "httpx",
+    "testcontainers[postgres]",
+    "psycopg2-binary",
+    "ruff",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["src"]
+```
+
+Create `services/backend/src/agent_cloud_backend/__init__.py`(空文件)。
+
+- [ ] **Step 4: 建占位目录**
 
 Run:
 ```bash
 cd /Users/wuhaowen/src/llm-agent/agent-cloud
-uv init --bare --python 3.12
-uv add fastapi "uvicorn[standard]" "sqlalchemy[asyncio]>=2.0" asyncpg alembic "pydantic>=2" pydantic-settings
-uv add --dev pytest pytest-asyncio httpx "testcontainers[postgres]" ruff
+mkdir -p protos deploy frontend apps
+touch protos/.gitkeep deploy/.gitkeep frontend/.gitkeep apps/.gitkeep
 ```
-Expected: 生成 `pyproject.toml` 与 `uv.lock`,依赖安装成功。
 
-- [ ] **Step 2: 写配置**
+- [ ] **Step 5: 同步工作区**
 
-Create `src/agent_cloud/config.py`:
+Run:
+```bash
+cd /Users/wuhaowen/src/llm-agent/agent-cloud
+uv sync
+```
+Expected: 解析 workspace,创建共享 venv,`agent-cloud-common` 与 `agent-cloud-backend` 以 editable 安装;生成 `uv.lock`。
+
+- [ ] **Step 6: 提交**
+
+```bash
+git add pyproject.toml uv.lock packages services/backend/pyproject.toml services/backend/src/agent_cloud_backend/__init__.py protos deploy frontend apps
+git commit -m "chore: scaffold monorepo uv workspace (common + backend, service placeholders)"
+```
+
+---
+
+### Task 1: 后端配置 + /health
+
+**Files:**
+- Create: `services/backend/src/agent_cloud_backend/config.py`, `services/backend/src/agent_cloud_backend/main.py`
+- Test: `services/backend/tests/__init__.py`, `services/backend/tests/test_health.py`
+
+- [ ] **Step 1: 写配置**
+
+Create `services/backend/src/agent_cloud_backend/config.py`:
 ```python
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -85,11 +196,9 @@ def get_settings() -> Settings:
     return Settings()
 ```
 
-Create empty `src/agent_cloud/__init__.py` and `tests/__init__.py`.
+- [ ] **Step 2: 写 FastAPI app 骨架 + /health**
 
-- [ ] **Step 3: 写 FastAPI app 骨架 + /health**
-
-Create `src/agent_cloud/main.py`:
+Create `services/backend/src/agent_cloud_backend/main.py`:
 ```python
 from fastapi import FastAPI
 
@@ -107,14 +216,16 @@ def create_app() -> FastAPI:
 app = create_app()
 ```
 
-- [ ] **Step 4: 写 /health 失败测试**
+- [ ] **Step 3: 写 /health 测试**
 
-Create `tests/test_health.py`:
+Create `services/backend/tests/__init__.py`(空文件)。
+
+Create `services/backend/tests/test_health.py`:
 ```python
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from agent_cloud.main import create_app
+from agent_cloud_backend.main import create_app
 
 
 @pytest.mark.asyncio
@@ -126,23 +237,16 @@ async def test_health_ok():
     assert resp.json() == {"status": "ok"}
 ```
 
-Add to `pyproject.toml` (pytest asyncio 自动模式):
-```toml
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-pythonpath = ["src"]
-```
+- [ ] **Step 4: 运行测试**
 
-- [ ] **Step 5: 运行测试**
-
-Run: `uv run pytest tests/test_health.py -v`
+Run: `cd services/backend && uv run pytest tests/test_health.py -v`
 Expected: PASS(1 passed)。
 
-- [ ] **Step 6: 提交**
+- [ ] **Step 5: 提交**
 
 ```bash
-git add pyproject.toml uv.lock src/agent_cloud/__init__.py src/agent_cloud/config.py src/agent_cloud/main.py tests/__init__.py tests/test_health.py
-git commit -m "feat: scaffold FastAPI backend with health endpoint"
+git add services/backend/src/agent_cloud_backend/config.py services/backend/src/agent_cloud_backend/main.py services/backend/tests/__init__.py services/backend/tests/test_health.py
+git commit -m "feat(backend): add config and health endpoint"
 ```
 
 ---
@@ -150,11 +254,11 @@ git commit -m "feat: scaffold FastAPI backend with health endpoint"
 ### Task 2: DB 基础(engine / session / Base)
 
 **Files:**
-- Create: `src/agent_cloud/db.py`, `src/agent_cloud/models/__init__.py`, `src/agent_cloud/models/base.py`
+- Create: `services/backend/src/agent_cloud_backend/db.py`, `services/backend/src/agent_cloud_backend/models/__init__.py`, `services/backend/src/agent_cloud_backend/models/base.py`
 
 - [ ] **Step 1: 写 Base 与公共 mixin**
 
-Create `src/agent_cloud/models/base.py`:
+Create `services/backend/src/agent_cloud_backend/models/base.py`:
 ```python
 import uuid
 from datetime import datetime
@@ -179,7 +283,7 @@ class TimestampMixin:
 
 - [ ] **Step 2: 写 engine / session factory / 依赖**
 
-Create `src/agent_cloud/db.py`:
+Create `services/backend/src/agent_cloud_backend/db.py`:
 ```python
 from collections.abc import AsyncIterator
 
@@ -189,7 +293,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from agent_cloud.config import get_settings
+from agent_cloud_backend.config import get_settings
 
 _engine = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
@@ -214,9 +318,9 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         yield session
 ```
 
-Create `src/agent_cloud/models/__init__.py`:
+Create `services/backend/src/agent_cloud_backend/models/__init__.py`:
 ```python
-from agent_cloud.models.base import Base
+from agent_cloud_backend.models.base import Base
 
 __all__ = ["Base"]
 ```
@@ -224,8 +328,8 @@ __all__ = ["Base"]
 - [ ] **Step 3: 提交**
 
 ```bash
-git add src/agent_cloud/db.py src/agent_cloud/models/__init__.py src/agent_cloud/models/base.py
-git commit -m "feat: add async db engine, session factory, and ORM base"
+git add services/backend/src/agent_cloud_backend/db.py services/backend/src/agent_cloud_backend/models/__init__.py services/backend/src/agent_cloud_backend/models/base.py
+git commit -m "feat(backend): add async db engine, session factory, ORM base"
 ```
 
 ---
@@ -233,19 +337,20 @@ git commit -m "feat: add async db engine, session factory, and ORM base"
 ### Task 3: ORM 模型(6 实体)
 
 **Files:**
-- Create: `src/agent_cloud/models/{user,agent_config,session,message,context_document,memory_entry}.py`
-- Modify: `src/agent_cloud/models/__init__.py`
-- Test: `tests/conftest.py`, `tests/test_models_create.py`
+- Create: `services/backend/src/agent_cloud_backend/models/{user,agent_config,session,message,context_document,memory_entry}.py`
+- Modify: `services/backend/src/agent_cloud_backend/models/__init__.py`
+- Create: `services/backend/src/agent_cloud_backend/api/__init__.py`, `services/backend/src/agent_cloud_backend/api/deps.py`
+- Test: `services/backend/tests/conftest.py`, `services/backend/tests/test_models_create.py`
 
 - [ ] **Step 1: User 模型**
 
-Create `src/agent_cloud/models/user.py`:
+Create `services/backend/src/agent_cloud_backend/models/user.py`:
 ```python
 import uuid
 
 from sqlalchemy.orm import Mapped, mapped_column
 
-from agent_cloud.models.base import Base, TimestampMixin, uuid_pk
+from agent_cloud_backend.models.base import Base, TimestampMixin, uuid_pk
 
 
 class User(Base, TimestampMixin):
@@ -257,7 +362,7 @@ class User(Base, TimestampMixin):
 
 - [ ] **Step 2: AgentConfig 模型**
 
-Create `src/agent_cloud/models/agent_config.py`:
+Create `services/backend/src/agent_cloud_backend/models/agent_config.py`:
 ```python
 import uuid
 from datetime import datetime
@@ -266,7 +371,7 @@ from sqlalchemy import DateTime, ForeignKey, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from agent_cloud.models.base import Base, TimestampMixin, uuid_pk
+from agent_cloud_backend.models.base import Base, TimestampMixin, uuid_pk
 
 
 class AgentConfig(Base, TimestampMixin):
@@ -290,7 +395,7 @@ class AgentConfig(Base, TimestampMixin):
 
 - [ ] **Step 3: Session 模型**
 
-Create `src/agent_cloud/models/session.py`:
+Create `services/backend/src/agent_cloud_backend/models/session.py`:
 ```python
 import uuid
 from datetime import datetime
@@ -298,7 +403,7 @@ from datetime import datetime
 from sqlalchemy import DateTime, ForeignKey, func
 from sqlalchemy.orm import Mapped, mapped_column
 
-from agent_cloud.models.base import Base, TimestampMixin, uuid_pk
+from agent_cloud_backend.models.base import Base, TimestampMixin, uuid_pk
 
 
 class Session(Base, TimestampMixin):
@@ -321,7 +426,7 @@ class Session(Base, TimestampMixin):
 
 - [ ] **Step 4: Message 模型**
 
-Create `src/agent_cloud/models/message.py`:
+Create `services/backend/src/agent_cloud_backend/models/message.py`:
 ```python
 import uuid
 
@@ -329,7 +434,7 @@ from sqlalchemy import ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from agent_cloud.models.base import Base, TimestampMixin, uuid_pk
+from agent_cloud_backend.models.base import Base, TimestampMixin, uuid_pk
 
 
 class Message(Base, TimestampMixin):
@@ -349,7 +454,7 @@ class Message(Base, TimestampMixin):
 
 - [ ] **Step 5: context_documents 模型**
 
-Create `src/agent_cloud/models/context_document.py`:
+Create `services/backend/src/agent_cloud_backend/models/context_document.py`:
 ```python
 import uuid
 from datetime import datetime
@@ -357,7 +462,7 @@ from datetime import datetime
 from sqlalchemy import DateTime, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
-from agent_cloud.models.base import Base, uuid_pk
+from agent_cloud_backend.models.base import Base, uuid_pk
 
 
 class ContextDocument(Base):
@@ -378,13 +483,13 @@ class ContextDocument(Base):
 
 - [ ] **Step 6: memory_entries 模型**
 
-Create `src/agent_cloud/models/memory_entry.py`:
+Create `services/backend/src/agent_cloud_backend/models/memory_entry.py`:
 ```python
 import uuid
 
 from sqlalchemy.orm import Mapped, mapped_column
 
-from agent_cloud.models.base import Base, TimestampMixin, uuid_pk
+from agent_cloud_backend.models.base import Base, TimestampMixin, uuid_pk
 
 # 注:embedding 向量列在引入向量检索的后续 Plan 中添加;此处不加物理列。
 
@@ -399,17 +504,17 @@ class MemoryEntry(Base, TimestampMixin):
     source_session_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
 ```
 
-- [ ] **Step 7: 汇总到 models/__init__.py**
+- [ ] **Step 7: 汇总 models/__init__.py**
 
-Replace `src/agent_cloud/models/__init__.py`:
+Replace `services/backend/src/agent_cloud_backend/models/__init__.py`:
 ```python
-from agent_cloud.models.agent_config import AgentConfig
-from agent_cloud.models.base import Base
-from agent_cloud.models.context_document import ContextDocument
-from agent_cloud.models.memory_entry import MemoryEntry
-from agent_cloud.models.message import Message
-from agent_cloud.models.session import Session
-from agent_cloud.models.user import User
+from agent_cloud_backend.models.agent_config import AgentConfig
+from agent_cloud_backend.models.base import Base
+from agent_cloud_backend.models.context_document import ContextDocument
+from agent_cloud_backend.models.memory_entry import MemoryEntry
+from agent_cloud_backend.models.message import Message
+from agent_cloud_backend.models.session import Session
+from agent_cloud_backend.models.user import User
 
 __all__ = [
     "Base",
@@ -422,9 +527,20 @@ __all__ = [
 ]
 ```
 
-- [ ] **Step 8: 写 testcontainers fixture(真实 Postgres)**
+- [ ] **Step 8: 建 api 包占位 + get_session 转发**
 
-Create `tests/conftest.py`:
+Create `services/backend/src/agent_cloud_backend/api/__init__.py`(空文件)。
+
+Create `services/backend/src/agent_cloud_backend/api/deps.py`:
+```python
+from agent_cloud_backend.db import get_session
+
+__all__ = ["get_session"]
+```
+
+- [ ] **Step 9: 写 testcontainers fixtures**
+
+Create `services/backend/tests/conftest.py`:
 ```python
 from collections.abc import AsyncIterator
 
@@ -434,9 +550,9 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer
 
-from agent_cloud.api.deps import get_session
-from agent_cloud.main import create_app
-from agent_cloud.models import Base
+from agent_cloud_backend.api.deps import get_session
+from agent_cloud_backend.main import create_app
+from agent_cloud_backend.models import Base
 
 
 @pytest.fixture(scope="session")
@@ -477,18 +593,9 @@ async def client(engine) -> AsyncIterator[AsyncClient]:
         yield c
 ```
 
-> 注:`tests/conftest.py` 引用了尚未创建的 `agent_cloud.api.deps`;Step 9 的测试只用 `session`/`engine` fixture,`client` fixture 在 Task 8 才被使用。为避免导入失败,本步同时创建占位 `api/deps.py`(见下)。
+- [ ] **Step 10: 写"建表成功"测试**
 
-Create `src/agent_cloud/api/__init__.py`(空文件)与 `src/agent_cloud/api/deps.py`:
-```python
-from agent_cloud.db import get_session
-
-__all__ = ["get_session"]
-```
-
-- [ ] **Step 9: 写"建表成功"测试**
-
-Create `tests/test_models_create.py`:
+Create `services/backend/tests/test_models_create.py`:
 ```python
 from sqlalchemy import text
 
@@ -510,17 +617,17 @@ async def test_all_tables_created(engine):
     assert expected.issubset(tables)
 ```
 
-- [ ] **Step 10: 运行测试**
+- [ ] **Step 11: 运行测试**
 
-Run: `uv run pytest tests/test_models_create.py -v`
-Expected: PASS(testcontainers 拉起 Postgres,`create_all` 建出 6 张表)。
+Run: `cd services/backend && uv run pytest tests/test_models_create.py -v`
+Expected: PASS(testcontainers 拉起 Postgres 并 `create_all` 建出 6 张表)。
 > 首次运行会拉取 `postgres:16` 镜像,需要 Docker 在运行。
 
-- [ ] **Step 11: 提交**
+- [ ] **Step 12: 提交**
 
 ```bash
-git add src/agent_cloud/models tests/conftest.py tests/test_models_create.py src/agent_cloud/api/__init__.py src/agent_cloud/api/deps.py
-git commit -m "feat: add ORM models for 6 core entities with testcontainer fixtures"
+git add services/backend/src/agent_cloud_backend/models services/backend/src/agent_cloud_backend/api/__init__.py services/backend/src/agent_cloud_backend/api/deps.py services/backend/tests/conftest.py services/backend/tests/test_models_create.py
+git commit -m "feat(backend): add ORM models for 6 core entities with testcontainer fixtures"
 ```
 
 ---
@@ -528,20 +635,17 @@ git commit -m "feat: add ORM models for 6 core entities with testcontainer fixtu
 ### Task 4: Alembic 迁移
 
 **Files:**
-- Create: `alembic.ini`, `alembic/env.py`, `alembic/versions/*` (autogenerated)
-- Test: `tests/test_migration.py`
+- Create: `services/backend/alembic.ini`, `services/backend/alembic/env.py`, `services/backend/alembic/versions/*`
+- Test: `services/backend/tests/test_migration.py`
 
-- [ ] **Step 1: 初始化 Alembic**
+- [ ] **Step 1: 初始化 Alembic(在 backend 目录内)**
 
-Run:
-```bash
-uv run alembic init -t async alembic
-```
-Expected: 生成 `alembic.ini` 与 `alembic/`(async 模板)。
+Run: `cd services/backend && uv run alembic init -t async alembic`
+Expected: 生成 `services/backend/alembic.ini` 与 `services/backend/alembic/`(async 模板)。
 
-- [ ] **Step 2: 接线 env.py 到我们的 metadata 与配置**
+- [ ] **Step 2: 接线 env.py**
 
-Replace `alembic/env.py` 的 config/target 部分为以下完整文件:
+Replace `services/backend/alembic/env.py`:
 ```python
 import asyncio
 from logging.config import fileConfig
@@ -549,8 +653,8 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from agent_cloud.config import get_settings
-from agent_cloud.models import Base
+from agent_cloud_backend.config import get_settings
+from agent_cloud_backend.models import Base
 
 config = context.config
 if config.config_file_name is not None:
@@ -591,55 +695,49 @@ else:
 
 - [ ] **Step 3: 用本地 Postgres 生成初始迁移**
 
-先起一个本地库(开发用):
 ```bash
 docker run -d --name agent-cloud-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=agent_cloud -p 5432:5432 postgres:16
-uv run alembic revision --autogenerate -m "initial schema"
+cd services/backend && uv run alembic revision --autogenerate -m "initial schema"
 ```
-Expected: 在 `alembic/versions/` 生成一个迁移,内含 6 张表的 `create_table`。打开确认无误(6 张表都在)。
+Expected: 在 `services/backend/alembic/versions/` 生成迁移,内含 6 张 `create_table`。打开确认 6 表齐全。
 
-- [ ] **Step 4: 写迁移测试(对干净库 upgrade 后 6 表存在)**
+- [ ] **Step 4: 写迁移测试**
 
-Create `tests/test_migration.py`:
+Create `services/backend/tests/test_migration.py`:
 ```python
+import os
+
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, text
 
 
 def test_alembic_upgrade_creates_schema(pg_url: str):
-    sync_url = pg_url.replace("+asyncpg", "")  # alembic 同步连接
+    sync_url = pg_url.replace("+asyncpg", "")  # alembic 检查用同步连接
+    os.environ["AGENT_CLOUD_DATABASE_URL"] = pg_url  # env.py online 用 async
     cfg = Config("alembic.ini")
-    cfg.set_main_option("sqlalchemy.url", sync_url)
-    # 让 env.py 用同一个库:通过环境变量覆盖
-    import os
-
-    os.environ["AGENT_CLOUD_DATABASE_URL"] = pg_url
     command.upgrade(cfg, "head")
 
     engine = create_engine(sync_url)
     with engine.connect() as conn:
-        rows = conn.execute(
-            text("SELECT tablename FROM pg_tables WHERE schemaname='public'")
-        )
+        rows = conn.execute(text("SELECT tablename FROM pg_tables WHERE schemaname='public'"))
         tables = {r[0] for r in rows}
     assert {"users", "agent_configs", "sessions", "messages",
             "context_documents", "memory_entries"}.issubset(tables)
-    # alembic 版本表也应存在
     assert "alembic_version" in tables
 ```
-> 该测试用独立的 testcontainer(`pg_url` session fixture,无 `engine` fixture 的 create_all),验证迁移自身能建出 schema。需安装同步驱动:`uv add --dev psycopg2-binary`。
+> 该测试在 `services/backend` 目录运行,`Config("alembic.ini")` 取本目录配置;用 `pg_url`(独立 testcontainer)验证迁移自身能建 schema。
 
 - [ ] **Step 5: 运行测试**
 
-Run: `uv add --dev psycopg2-binary && uv run pytest tests/test_migration.py -v`
+Run: `cd services/backend && uv run pytest tests/test_migration.py -v`
 Expected: PASS。
 
 - [ ] **Step 6: 提交**
 
 ```bash
-git add alembic.ini alembic/ tests/test_migration.py pyproject.toml uv.lock
-git commit -m "feat: add alembic async migrations with initial schema"
+git add services/backend/alembic.ini services/backend/alembic services/backend/tests/test_migration.py
+git commit -m "feat(backend): add alembic async migrations with initial schema"
 ```
 
 ---
@@ -647,13 +745,11 @@ git commit -m "feat: add alembic async migrations with initial schema"
 ### Task 5: Pydantic Schemas
 
 **Files:**
-- Create: `src/agent_cloud/schemas/{__init__,user,agent_config,session,message,context_document,memory_entry}.py`
-
-> 模式:每实体一组 `XCreate`(入参)/ `XRead`(出参)/(可选)`XUpdate`。`XRead` 用 `from_attributes=True` 以便从 ORM 转换。
+- Create: `services/backend/src/agent_cloud_backend/schemas/{__init__,user,agent_config,session,message,context_document,memory_entry}.py`
 
 - [ ] **Step 1: User schemas**
 
-Create `src/agent_cloud/schemas/user.py`:
+Create `services/backend/src/agent_cloud_backend/schemas/user.py`:
 ```python
 import uuid
 from datetime import datetime
@@ -671,11 +767,10 @@ class UserRead(BaseModel):
     email: str
     created_at: datetime
 ```
-> 需要 email 校验:`uv add "pydantic[email]"`。
 
 - [ ] **Step 2: AgentConfig schemas**
 
-Create `src/agent_cloud/schemas/agent_config.py`:
+Create `services/backend/src/agent_cloud_backend/schemas/agent_config.py`:
 ```python
 import uuid
 from datetime import datetime
@@ -721,7 +816,7 @@ class AgentConfigRead(BaseModel):
 
 - [ ] **Step 3: Session schemas**
 
-Create `src/agent_cloud/schemas/session.py`:
+Create `services/backend/src/agent_cloud_backend/schemas/session.py`:
 ```python
 import uuid
 from datetime import datetime
@@ -749,7 +844,7 @@ class SessionRead(BaseModel):
 
 - [ ] **Step 4: Message schemas**
 
-Create `src/agent_cloud/schemas/message.py`:
+Create `services/backend/src/agent_cloud_backend/schemas/message.py`:
 ```python
 import uuid
 from datetime import datetime
@@ -778,7 +873,7 @@ class MessageRead(BaseModel):
 
 - [ ] **Step 5: ContextDocument schemas**
 
-Create `src/agent_cloud/schemas/context_document.py`:
+Create `services/backend/src/agent_cloud_backend/schemas/context_document.py`:
 ```python
 import uuid
 from datetime import datetime
@@ -805,7 +900,7 @@ class ContextDocumentRead(BaseModel):
 
 - [ ] **Step 6: MemoryEntry schemas**
 
-Create `src/agent_cloud/schemas/memory_entry.py`:
+Create `services/backend/src/agent_cloud_backend/schemas/memory_entry.py`:
 ```python
 import uuid
 from datetime import datetime
@@ -830,33 +925,31 @@ class MemoryRead(BaseModel):
     created_at: datetime
 ```
 
-Create empty `src/agent_cloud/schemas/__init__.py`.
+Create empty `services/backend/src/agent_cloud_backend/schemas/__init__.py`.
 
 - [ ] **Step 7: 提交**
 
 ```bash
-git add src/agent_cloud/schemas pyproject.toml uv.lock
-git commit -m "feat: add pydantic schemas for core entities"
+git add services/backend/src/agent_cloud_backend/schemas
+git commit -m "feat(backend): add pydantic schemas for core entities"
 ```
 
 ---
 
-### Task 6: BaseRepository + User 仓库(含测试)
+### Task 6: BaseRepository + User 仓库
 
 **Files:**
-- Create: `src/agent_cloud/repositories/{__init__,base,user}.py`
-- Test: `tests/test_repo_user.py`
+- Create: `services/backend/src/agent_cloud_backend/repositories/{__init__,base,user}.py`
+- Test: `services/backend/tests/test_repo_user.py`
 
 - [ ] **Step 1: 写 User 仓库失败测试**
 
-Create `tests/test_repo_user.py`:
+Create `services/backend/tests/test_repo_user.py`:
 ```python
 import uuid
 
-import pytest
-
-from agent_cloud.models.user import User
-from agent_cloud.repositories.user import UserRepository
+from agent_cloud_backend.models.user import User
+from agent_cloud_backend.repositories.user import UserRepository
 
 
 async def test_create_and_get_user(session):
@@ -885,12 +978,12 @@ async def test_list_users(session):
 
 - [ ] **Step 2: 运行,确认失败**
 
-Run: `uv run pytest tests/test_repo_user.py -v`
-Expected: FAIL(`ModuleNotFoundError: agent_cloud.repositories.user`)。
+Run: `cd services/backend && uv run pytest tests/test_repo_user.py -v`
+Expected: FAIL(`ModuleNotFoundError: agent_cloud_backend.repositories.user`)。
 
 - [ ] **Step 3: 写 BaseRepository**
 
-Create `src/agent_cloud/repositories/base.py`:
+Create `services/backend/src/agent_cloud_backend/repositories/base.py`:
 ```python
 import uuid
 from typing import Generic, TypeVar
@@ -898,7 +991,7 @@ from typing import Generic, TypeVar
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent_cloud.models.base import Base
+from agent_cloud_backend.models.base import Base
 
 ModelT = TypeVar("ModelT", bound=Base)
 
@@ -928,12 +1021,12 @@ class BaseRepository(Generic[ModelT]):
 
 - [ ] **Step 4: 写 UserRepository**
 
-Create `src/agent_cloud/repositories/user.py`:
+Create `services/backend/src/agent_cloud_backend/repositories/user.py`:
 ```python
 from sqlalchemy import select
 
-from agent_cloud.models.user import User
-from agent_cloud.repositories.base import BaseRepository
+from agent_cloud_backend.models.user import User
+from agent_cloud_backend.repositories.base import BaseRepository
 
 
 class UserRepository(BaseRepository[User]):
@@ -944,43 +1037,41 @@ class UserRepository(BaseRepository[User]):
         return result.scalar_one_or_none()
 ```
 
-Create empty `src/agent_cloud/repositories/__init__.py`.
+Create empty `services/backend/src/agent_cloud_backend/repositories/__init__.py`.
 
 - [ ] **Step 5: 运行,确认通过**
 
-Run: `uv run pytest tests/test_repo_user.py -v`
+Run: `cd services/backend && uv run pytest tests/test_repo_user.py -v`
 Expected: PASS(3 passed)。
 
 - [ ] **Step 6: 提交**
 
 ```bash
-git add src/agent_cloud/repositories/__init__.py src/agent_cloud/repositories/base.py src/agent_cloud/repositories/user.py tests/test_repo_user.py
-git commit -m "feat: add BaseRepository and UserRepository"
+git add services/backend/src/agent_cloud_backend/repositories/__init__.py services/backend/src/agent_cloud_backend/repositories/base.py services/backend/src/agent_cloud_backend/repositories/user.py services/backend/tests/test_repo_user.py
+git commit -m "feat(backend): add BaseRepository and UserRepository"
 ```
 
 ---
 
-### Task 7: 其余仓库(含特定查询与测试)
+### Task 7: 其余仓库
 
 **Files:**
-- Create: `src/agent_cloud/repositories/{agent_config,session,message,context_document,memory_entry}.py`
-- Test: `tests/test_repo_entities.py`
+- Create: `services/backend/src/agent_cloud_backend/repositories/{agent_config,session,message,context_document,memory_entry}.py`
+- Test: `services/backend/tests/test_repo_entities.py`
 
-- [ ] **Step 1: 写失败测试(覆盖各仓库的关键行为)**
+- [ ] **Step 1: 写失败测试**
 
-Create `tests/test_repo_entities.py`:
+Create `services/backend/tests/test_repo_entities.py`:
 ```python
-from agent_cloud.models.agent_config import AgentConfig
-from agent_cloud.models.context_document import ContextDocument
-from agent_cloud.models.message import Message
-from agent_cloud.models.session import Session
-from agent_cloud.models.user import User
-from agent_cloud.repositories.agent_config import AgentConfigRepository
-from agent_cloud.repositories.context_document import ContextDocumentRepository
-from agent_cloud.repositories.memory_entry import MemoryEntryRepository
-from agent_cloud.repositories.message import MessageRepository
-from agent_cloud.repositories.session import SessionRepository
-from agent_cloud.repositories.user import UserRepository
+from agent_cloud_backend.models.agent_config import AgentConfig
+from agent_cloud_backend.models.message import Message
+from agent_cloud_backend.models.user import User
+from agent_cloud_backend.repositories.agent_config import AgentConfigRepository
+from agent_cloud_backend.repositories.context_document import ContextDocumentRepository
+from agent_cloud_backend.repositories.memory_entry import MemoryEntryRepository
+from agent_cloud_backend.repositories.message import MessageRepository
+from agent_cloud_backend.repositories.session import SessionRepository
+from agent_cloud_backend.repositories.user import UserRepository
 
 
 async def _make_user(session) -> User:
@@ -1036,7 +1127,7 @@ async def test_context_document_upsert(session):
     await session.commit()
     d2 = await repo.upsert(scope="user", type="USER", owner_id=user.id, content="v2")
     await session.commit()
-    assert d1.id == d2.id and d2.content == "v2"  # 同 (scope,type,owner) 覆盖
+    assert d1.id == d2.id and d2.content == "v2"
 
 
 async def test_memory_append_and_list(session):
@@ -1051,19 +1142,19 @@ async def test_memory_append_and_list(session):
 
 - [ ] **Step 2: 运行,确认失败**
 
-Run: `uv run pytest tests/test_repo_entities.py -v`
+Run: `cd services/backend && uv run pytest tests/test_repo_entities.py -v`
 Expected: FAIL(仓库模块不存在)。
 
 - [ ] **Step 3: AgentConfigRepository**
 
-Create `src/agent_cloud/repositories/agent_config.py`:
+Create `services/backend/src/agent_cloud_backend/repositories/agent_config.py`:
 ```python
 import uuid
 
 from sqlalchemy import select
 
-from agent_cloud.models.agent_config import AgentConfig
-from agent_cloud.repositories.base import BaseRepository
+from agent_cloud_backend.models.agent_config import AgentConfig
+from agent_cloud_backend.repositories.base import BaseRepository
 
 
 class AgentConfigRepository(BaseRepository[AgentConfig]):
@@ -1076,16 +1167,16 @@ class AgentConfigRepository(BaseRepository[AgentConfig]):
         return list(result.scalars().all())
 ```
 
-- [ ] **Step 4: SessionRepository(创建时生成 work_subdir)**
+- [ ] **Step 4: SessionRepository**
 
-Create `src/agent_cloud/repositories/session.py`:
+Create `services/backend/src/agent_cloud_backend/repositories/session.py`:
 ```python
 import uuid
 
 from sqlalchemy import select
 
-from agent_cloud.models.session import Session
-from agent_cloud.repositories.base import BaseRepository
+from agent_cloud_backend.models.session import Session
+from agent_cloud_backend.repositories.base import BaseRepository
 
 
 class SessionRepository(BaseRepository[Session]):
@@ -1099,7 +1190,7 @@ class SessionRepository(BaseRepository[Session]):
             user_id=user_id,
             agent_config_id=agent_config_id,
             title=title,
-            work_subdir="",  # 占位,下一行用 id 填充
+            work_subdir="",
         )
         s.work_subdir = f"sessions/{s.id}"
         self.session.add(s)
@@ -1113,16 +1204,16 @@ class SessionRepository(BaseRepository[Session]):
         return list(result.scalars().all())
 ```
 
-- [ ] **Step 5: MessageRepository(append 自增 seq)**
+- [ ] **Step 5: MessageRepository**
 
-Create `src/agent_cloud/repositories/message.py`:
+Create `services/backend/src/agent_cloud_backend/repositories/message.py`:
 ```python
 import uuid
 
 from sqlalchemy import func, select
 
-from agent_cloud.models.message import Message
-from agent_cloud.repositories.base import BaseRepository
+from agent_cloud_backend.models.message import Message
+from agent_cloud_backend.repositories.base import BaseRepository
 
 
 class MessageRepository(BaseRepository[Message]):
@@ -1149,16 +1240,16 @@ class MessageRepository(BaseRepository[Message]):
         return list(result.scalars().all())
 ```
 
-- [ ] **Step 6: ContextDocumentRepository(upsert)**
+- [ ] **Step 6: ContextDocumentRepository**
 
-Create `src/agent_cloud/repositories/context_document.py`:
+Create `services/backend/src/agent_cloud_backend/repositories/context_document.py`:
 ```python
 import uuid
 
 from sqlalchemy import select
 
-from agent_cloud.models.context_document import ContextDocument
-from agent_cloud.repositories.base import BaseRepository
+from agent_cloud_backend.models.context_document import ContextDocument
+from agent_cloud_backend.repositories.base import BaseRepository
 
 
 class ContextDocumentRepository(BaseRepository[ContextDocument]):
@@ -1192,16 +1283,16 @@ class ContextDocumentRepository(BaseRepository[ContextDocument]):
         return list(result.scalars().all())
 ```
 
-- [ ] **Step 7: MemoryEntryRepository(append + list_for_context 接缝)**
+- [ ] **Step 7: MemoryEntryRepository**
 
-Create `src/agent_cloud/repositories/memory_entry.py`:
+Create `services/backend/src/agent_cloud_backend/repositories/memory_entry.py`:
 ```python
 import uuid
 
 from sqlalchemy import select
 
-from agent_cloud.models.memory_entry import MemoryEntry
-from agent_cloud.repositories.base import BaseRepository
+from agent_cloud_backend.models.memory_entry import MemoryEntry
+from agent_cloud_backend.repositories.base import BaseRepository
 
 
 class MemoryEntryRepository(BaseRepository[MemoryEntry]):
@@ -1234,14 +1325,14 @@ class MemoryEntryRepository(BaseRepository[MemoryEntry]):
 
 - [ ] **Step 8: 运行,确认通过**
 
-Run: `uv run pytest tests/test_repo_entities.py -v`
+Run: `cd services/backend && uv run pytest tests/test_repo_entities.py -v`
 Expected: PASS(5 passed)。
 
 - [ ] **Step 9: 提交**
 
 ```bash
-git add src/agent_cloud/repositories tests/test_repo_entities.py
-git commit -m "feat: add repositories for agent configs, sessions, messages, docs, memory"
+git add services/backend/src/agent_cloud_backend/repositories services/backend/tests/test_repo_entities.py
+git commit -m "feat(backend): add repositories for agent configs, sessions, messages, docs, memory"
 ```
 
 ---
@@ -1249,20 +1340,18 @@ git commit -m "feat: add repositories for agent configs, sessions, messages, doc
 ### Task 8: API 路由(CRUD)
 
 **Files:**
-- Modify: `src/agent_cloud/api/deps.py`
-- Create: `src/agent_cloud/api/{users,agent_configs,sessions,context_documents,memory_entries,messages}.py`
-- Test: `tests/test_api.py`
+- Create: `services/backend/src/agent_cloud_backend/api/{users,agent_configs,sessions,context_documents,memory_entries,messages}.py`
+- Modify: `services/backend/src/agent_cloud_backend/main.py`
+- Test: `services/backend/tests/test_api.py`
 
-- [ ] **Step 1: 写 API 失败测试(端到端,经 HTTP + 真库)**
+- [ ] **Step 1: 写 API 失败测试**
 
-Create `tests/test_api.py`:
+Create `services/backend/tests/test_api.py`:
 ```python
 async def test_user_crud(client):
     r = await client.post("/users", json={"email": "x@example.com"})
     assert r.status_code == 201, r.text
-    user = r.json()
-    uid = user["id"]
-
+    uid = r.json()["id"]
     r = await client.get(f"/users/{uid}")
     assert r.status_code == 200 and r.json()["email"] == "x@example.com"
 
@@ -1275,10 +1364,8 @@ async def test_agent_config_crud(client):
     )
     assert r.status_code == 201, r.text
     aid = r.json()["id"]
-
     r = await client.patch(f"/agent-configs/{aid}", json={"name": "coder2"})
     assert r.status_code == 200 and r.json()["name"] == "coder2"
-
     r = await client.get(f"/agent-configs?user_id={uid}")
     assert r.status_code == 200 and len(r.json()) == 1
 
@@ -1297,11 +1384,9 @@ async def test_session_and_messages(client):
     assert r.json()["work_subdir"] == f"sessions/{sid}"
 
     r = await client.post(
-        f"/sessions/{sid}/messages",
-        json={"role": "user", "content": {"text": "hello"}},
+        f"/sessions/{sid}/messages", json={"role": "user", "content": {"text": "hello"}}
     )
     assert r.status_code == 201 and r.json()["seq"] == 0
-
     r = await client.get(f"/sessions/{sid}/messages")
     assert r.status_code == 200 and len(r.json()) == 1
 
@@ -1313,11 +1398,7 @@ async def test_context_documents_and_memory(client):
         json={"scope": "user", "type": "USER", "owner_id": uid, "content": "# me"},
     )
     assert r.status_code == 200, r.text
-
-    r = await client.post(
-        "/memory",
-        json={"scope": "user", "owner_id": uid, "content": "likes tea"},
-    )
+    r = await client.post("/memory", json={"scope": "user", "owner_id": uid, "content": "likes tea"})
     assert r.status_code == 201
     r = await client.get(f"/memory?scope=user&owner_id={uid}")
     assert r.status_code == 200 and r.json()[0]["content"] == "likes tea"
@@ -1325,39 +1406,29 @@ async def test_context_documents_and_memory(client):
 
 - [ ] **Step 2: 运行,确认失败**
 
-Run: `uv run pytest tests/test_api.py -v`
-Expected: FAIL(路由 404 / app 未挂载路由)。
+Run: `cd services/backend && uv run pytest tests/test_api.py -v`
+Expected: FAIL(路由 404)。
 
-- [ ] **Step 3: deps(已存在,确认转发 get_session)**
+- [ ] **Step 3: users 路由**
 
-确认 `src/agent_cloud/api/deps.py` 内容为:
-```python
-from agent_cloud.db import get_session
-
-__all__ = ["get_session"]
-```
-
-- [ ] **Step 4: users 路由**
-
-Create `src/agent_cloud/api/users.py`:
+Create `services/backend/src/agent_cloud_backend/api/users.py`:
 ```python
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent_cloud.api.deps import get_session
-from agent_cloud.models.user import User
-from agent_cloud.repositories.user import UserRepository
-from agent_cloud.schemas.user import UserCreate, UserRead
+from agent_cloud_backend.api.deps import get_session
+from agent_cloud_backend.models.user import User
+from agent_cloud_backend.repositories.user import UserRepository
+from agent_cloud_backend.schemas.user import UserCreate, UserRead
 
 router = APIRouter(prefix="/users", tags=["users"])
 
 
 @router.post("", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 async def create_user(body: UserCreate, session: AsyncSession = Depends(get_session)):
-    repo = UserRepository(session)
-    user = await repo.create(User(email=body.email))
+    user = await UserRepository(session).create(User(email=body.email))
     await session.commit()
     return user
 
@@ -1370,19 +1441,19 @@ async def get_user(user_id: uuid.UUID, session: AsyncSession = Depends(get_sessi
     return user
 ```
 
-- [ ] **Step 5: agent_configs 路由**
+- [ ] **Step 4: agent_configs 路由**
 
-Create `src/agent_cloud/api/agent_configs.py`:
+Create `services/backend/src/agent_cloud_backend/api/agent_configs.py`:
 ```python
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent_cloud.api.deps import get_session
-from agent_cloud.models.agent_config import AgentConfig
-from agent_cloud.repositories.agent_config import AgentConfigRepository
-from agent_cloud.schemas.agent_config import (
+from agent_cloud_backend.api.deps import get_session
+from agent_cloud_backend.models.agent_config import AgentConfig
+from agent_cloud_backend.repositories.agent_config import AgentConfigRepository
+from agent_cloud_backend.schemas.agent_config import (
     AgentConfigCreate,
     AgentConfigRead,
     AgentConfigUpdate,
@@ -1395,24 +1466,19 @@ router = APIRouter(prefix="/agent-configs", tags=["agent-configs"])
 async def create_agent_config(
     body: AgentConfigCreate, session: AsyncSession = Depends(get_session)
 ):
-    repo = AgentConfigRepository(session)
-    agent = await repo.create(AgentConfig(**body.model_dump()))
+    agent = await AgentConfigRepository(session).create(AgentConfig(**body.model_dump()))
     await session.commit()
     return agent
 
 
 @router.get("", response_model=list[AgentConfigRead])
-async def list_agent_configs(
-    user_id: uuid.UUID, session: AsyncSession = Depends(get_session)
-):
+async def list_agent_configs(user_id: uuid.UUID, session: AsyncSession = Depends(get_session)):
     return await AgentConfigRepository(session).list_by_user(user_id)
 
 
 @router.patch("/{agent_id}", response_model=AgentConfigRead)
 async def update_agent_config(
-    agent_id: uuid.UUID,
-    body: AgentConfigUpdate,
-    session: AsyncSession = Depends(get_session),
+    agent_id: uuid.UUID, body: AgentConfigUpdate, session: AsyncSession = Depends(get_session)
 ):
     repo = AgentConfigRepository(session)
     agent = await repo.get(agent_id)
@@ -1424,26 +1490,27 @@ async def update_agent_config(
     return agent
 ```
 
-- [ ] **Step 6: sessions + messages 路由**
+- [ ] **Step 5: sessions + messages 路由**
 
-Create `src/agent_cloud/api/sessions.py`:
+Create `services/backend/src/agent_cloud_backend/api/sessions.py`:
 ```python
 import uuid
 
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent_cloud.api.deps import get_session
-from agent_cloud.repositories.session import SessionRepository
-from agent_cloud.schemas.session import SessionCreate, SessionRead
+from agent_cloud_backend.api.deps import get_session
+from agent_cloud_backend.repositories.session import SessionRepository
+from agent_cloud_backend.schemas.session import SessionCreate, SessionRead
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
 @router.post("", response_model=SessionRead, status_code=status.HTTP_201_CREATED)
 async def create_session(body: SessionCreate, session: AsyncSession = Depends(get_session)):
-    repo = SessionRepository(session)
-    s = await repo.create_for(body.user_id, body.agent_config_id, body.title)
+    s = await SessionRepository(session).create_for(
+        body.user_id, body.agent_config_id, body.title
+    )
     await session.commit()
     return s
 
@@ -1453,29 +1520,26 @@ async def list_sessions(user_id: uuid.UUID, session: AsyncSession = Depends(get_
     return await SessionRepository(session).list_by_user(user_id)
 ```
 
-Create `src/agent_cloud/api/messages.py`:
+Create `services/backend/src/agent_cloud_backend/api/messages.py`:
 ```python
 import uuid
 
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent_cloud.api.deps import get_session
-from agent_cloud.models.message import Message
-from agent_cloud.repositories.message import MessageRepository
-from agent_cloud.schemas.message import MessageCreate, MessageRead
+from agent_cloud_backend.api.deps import get_session
+from agent_cloud_backend.models.message import Message
+from agent_cloud_backend.repositories.message import MessageRepository
+from agent_cloud_backend.schemas.message import MessageCreate, MessageRead
 
 router = APIRouter(prefix="/sessions/{session_id}/messages", tags=["messages"])
 
 
 @router.post("", response_model=MessageRead, status_code=status.HTTP_201_CREATED)
 async def append_message(
-    session_id: uuid.UUID,
-    body: MessageCreate,
-    session: AsyncSession = Depends(get_session),
+    session_id: uuid.UUID, body: MessageCreate, session: AsyncSession = Depends(get_session)
 ):
-    repo = MessageRepository(session)
-    msg = await repo.append(
+    msg = await MessageRepository(session).append(
         session_id,
         Message(session_id=session_id, seq=0, role=body.role,
                 content=body.content, model=body.model, tokens=body.tokens),
@@ -1485,24 +1549,22 @@ async def append_message(
 
 
 @router.get("", response_model=list[MessageRead])
-async def list_messages(
-    session_id: uuid.UUID, session: AsyncSession = Depends(get_session)
-):
+async def list_messages(session_id: uuid.UUID, session: AsyncSession = Depends(get_session)):
     return await MessageRepository(session).list_by_session(session_id)
 ```
 
-- [ ] **Step 7: context_documents + memory 路由**
+- [ ] **Step 6: context_documents + memory 路由**
 
-Create `src/agent_cloud/api/context_documents.py`:
+Create `services/backend/src/agent_cloud_backend/api/context_documents.py`:
 ```python
 import uuid
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent_cloud.api.deps import get_session
-from agent_cloud.repositories.context_document import ContextDocumentRepository
-from agent_cloud.schemas.context_document import (
+from agent_cloud_backend.api.deps import get_session
+from agent_cloud_backend.repositories.context_document import ContextDocumentRepository
+from agent_cloud_backend.schemas.context_document import (
     ContextDocumentRead,
     ContextDocumentUpsert,
 )
@@ -1514,8 +1576,9 @@ router = APIRouter(prefix="/context-documents", tags=["context-documents"])
 async def upsert_document(
     body: ContextDocumentUpsert, session: AsyncSession = Depends(get_session)
 ):
-    repo = ContextDocumentRepository(session)
-    doc = await repo.upsert(body.scope, body.type, body.owner_id, body.content)
+    doc = await ContextDocumentRepository(session).upsert(
+        body.scope, body.type, body.owner_id, body.content
+    )
     await session.commit()
     return doc
 
@@ -1527,24 +1590,25 @@ async def list_documents(
     return await ContextDocumentRepository(session).list_for_owner(scope, owner_id)
 ```
 
-Create `src/agent_cloud/api/memory_entries.py`:
+Create `services/backend/src/agent_cloud_backend/api/memory_entries.py`:
 ```python
 import uuid
 
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent_cloud.api.deps import get_session
-from agent_cloud.repositories.memory_entry import MemoryEntryRepository
-from agent_cloud.schemas.memory_entry import MemoryAppend, MemoryRead
+from agent_cloud_backend.api.deps import get_session
+from agent_cloud_backend.repositories.memory_entry import MemoryEntryRepository
+from agent_cloud_backend.schemas.memory_entry import MemoryAppend, MemoryRead
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 
 
 @router.post("", response_model=MemoryRead, status_code=status.HTTP_201_CREATED)
 async def append_memory(body: MemoryAppend, session: AsyncSession = Depends(get_session)):
-    repo = MemoryEntryRepository(session)
-    entry = await repo.append(body.scope, body.owner_id, body.content, body.source_session_id)
+    entry = await MemoryEntryRepository(session).append(
+        body.scope, body.owner_id, body.content, body.source_session_id
+    )
     await session.commit()
     return entry
 
@@ -1556,13 +1620,13 @@ async def list_memory(
     return await MemoryEntryRepository(session).list_for_context(scope, owner_id)
 ```
 
-- [ ] **Step 8: 在 app 里挂载所有路由**
+- [ ] **Step 7: 挂载路由**
 
-Replace `src/agent_cloud/main.py`:
+Replace `services/backend/src/agent_cloud_backend/main.py`:
 ```python
 from fastapi import FastAPI
 
-from agent_cloud.api import (
+from agent_cloud_backend.api import (
     agent_configs,
     context_documents,
     memory_entries,
@@ -1588,47 +1652,55 @@ def create_app() -> FastAPI:
 app = create_app()
 ```
 
-- [ ] **Step 9: 运行整套测试**
+- [ ] **Step 8: 运行整套测试**
 
-Run: `uv run pytest -v`
-Expected: 全部 PASS(health + models + migration + repos + api)。
+Run: `cd services/backend && uv run pytest -v`
+Expected: 全部 PASS。
 
-- [ ] **Step 10: 提交**
+- [ ] **Step 9: 提交**
 
 ```bash
-git add src/agent_cloud/api src/agent_cloud/main.py tests/test_api.py
-git commit -m "feat: add CRUD API routers for core entities"
+git add services/backend/src/agent_cloud_backend/api services/backend/src/agent_cloud_backend/main.py services/backend/tests/test_api.py
+git commit -m "feat(backend): add CRUD API routers for core entities"
 ```
 
 ---
 
-### Task 9: 收尾(lint + 运行说明 + README 片段)
+### Task 9: 收尾(lint + README)
 
 **Files:**
-- Create: `README.md`(运行/测试说明)
-- Modify: `pyproject.toml`(ruff 配置)
+- Create: `README.md`(根)、`services/backend/README.md`
 
-- [ ] **Step 1: 配置 ruff 并修复**
+- [ ] **Step 1: lint**
 
-Add to `pyproject.toml`:
-```toml
-[tool.ruff]
-line-length = 100
-target-version = "py312"
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
-```
-Run: `uv run ruff check --fix . && uv run ruff format .`
+Run: `uv run ruff check --fix . && uv run ruff format .`(在仓库根)
 Expected: 无剩余错误。
 
-- [ ] **Step 2: 写最简运行说明**
+- [ ] **Step 2: 写根 README**
 
 Create `README.md`:
 ```markdown
-# Agent Cloud Backend
+# Agent Cloud
 
-无状态 Agent Cloud 的后端服务(Plan 1:数据层 + CRUD 骨架)。
+无状态 Agent Cloud(monorepo)。设计见 `docs/superpowers/specs/`。
+
+## 结构
+- `services/backend` — 后端(FastAPI + 数据层),唯一访问 Postgres。
+- `services/worker` — agent worker(后续)。
+- `services/sandbox` — 沙箱运行时(后续)。
+- `packages/common` — 跨服务共享库。
+- `protos` — gRPC 契约(后续)。
+- `frontend` / `apps` — Web / 原生端(后续)。
+
+## 后端开发
+见 `services/backend/README.md`。
+```
+
+- [ ] **Step 3: 写后端 README**
+
+Create `services/backend/README.md`:
+```markdown
+# Agent Cloud Backend
 
 ## 开发
 
@@ -1637,41 +1709,39 @@ Create `README.md`:
 docker run -d --name agent-cloud-pg -e POSTGRES_PASSWORD=postgres \
   -e POSTGRES_DB=agent_cloud -p 5432:5432 postgres:16
 
-# 迁移
-uv run alembic upgrade head
-
-# 起服务
-uv run uvicorn agent_cloud.main:app --reload
-
-# 测试(需 Docker:testcontainers 会拉起临时 Postgres)
-uv run pytest -v
+cd services/backend
+uv run alembic upgrade head            # 迁移
+uv run uvicorn agent_cloud_backend.main:app --reload   # 起服务
+uv run pytest -v                       # 测试(需 Docker:testcontainers)
 ```
 ```
 
-- [ ] **Step 3: 运行整套测试确认绿**
+- [ ] **Step 4: 运行整套测试确认绿**
 
-Run: `uv run pytest -v`
+Run: `cd services/backend && uv run pytest -v`
 Expected: 全部 PASS。
 
-- [ ] **Step 4: 提交**
+- [ ] **Step 5: 提交**
 
 ```bash
-git add README.md pyproject.toml
-git commit -m "chore: add ruff config and dev README"
+git add README.md services/backend/README.md
+git commit -m "chore: add monorepo and backend dev READMEs"
 ```
 
 ---
 
 ## Self-Review(写完后自检结果)
 
-**Spec 覆盖(Plan 1 范围)**:
-- 数据模型 §5.1 的 6 个核心实体 → Task 3 全部建模;迁移 → Task 4。✓
-- 配置文档存为 DB 行(非文件)→ ContextDocument 模型 + upsert(Task 3/7)。✓
-- memory 读取+追加 + 向量检索接缝 → MemoryEntryRepository.append / list_for_context(Task 7)。✓
-- 会话 `work_subdir` 默认每会话子目录、`status` 串行锁字段 → Session 模型 + create_for(Task 3/7)。✓
-- 测试用真实 Postgres(不 mock 数据库,spec §13)→ testcontainers fixtures(Task 3)。✓
-- 明确延后:skills/sandbox 表、embedding 物理列、auth、agent/worker/sandbox(后续 Plan)。
+**Spec 覆盖**:
+- §3.1 monorepo 布局(uv workspace 多包、services/packages/protos/frontend/apps/deploy)→ Task 0 立起;后端落在 `services/backend`。✓
+- §5.1 六个核心实体 → Task 3 全建模;迁移 → Task 4。✓
+- 配置文档存 DB 行 → ContextDocument + upsert。✓ memory 读取+追加 + 向量接缝 → MemoryEntryRepository。✓
+- 会话 `work_subdir` / `status` 串行锁字段 → Session 模型 + create_for。✓
+- 真实 Postgres 测试(spec §13)→ testcontainers。✓
+- DB 归后端独有(§3.1)→ 仅 backend 含 models/migrations,common 暂为占位。✓
+- 明确延后:worker/sandbox/frontend 实现、protos 内容、skills/sandbox 表、embedding 物理列、auth。
 
-**占位符扫描**:无 TBD/TODO;每步含完整代码或确切命令与预期。`work_subdir` 用 id 填充的两步写法是真实代码,非占位。
+**占位符扫描**:无 TBD/TODO;每步含完整代码或确切命令与预期。
 
-**类型/命名一致性**:仓库方法名在测试与实现间一致(`create_for`、`append`、`list_by_session`、`list_by_user`、`upsert`、`list_for_context`、`list_for_owner`、`get_by_email`);schema 字段与 ORM 字段一致;`get_session` 依赖在 `db.py` 定义、`api/deps.py` 转发、`conftest.py` override,三处一致。
+**类型/命名一致性**:包名统一 `agent_cloud_backend`;仓库方法名在测试与实现间一致(`create_for`/`append`/`list_by_session`/`list_by_user`/`upsert`/`list_for_context`/`list_for_owner`/`get_by_email`);`get_session` 在 `db.py` 定义、`api/deps.py` 转发、`conftest.py` override 三处一致;workspace 依赖 `agent-cloud-common` 在 backend 的 `[tool.uv.sources]` 声明为 workspace。
+```
