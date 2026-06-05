@@ -1,11 +1,10 @@
 import asyncio
 from logging.config import fileConfig
 
-from alembic import context
-from sqlalchemy.ext.asyncio import create_async_engine
-
 from agent_cloud_backend.config import get_settings
 from agent_cloud_backend.models import Base
+from alembic import context
+from sqlalchemy.ext.asyncio import create_async_engine
 
 config = context.config
 if config.config_file_name is not None:

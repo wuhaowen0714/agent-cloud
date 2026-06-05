@@ -12,9 +12,7 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 @router.post("", response_model=SessionRead, status_code=status.HTTP_201_CREATED)
 async def create_session(body: SessionCreate, session: AsyncSession = Depends(get_session)):
-    s = await SessionRepository(session).create_for(
-        body.user_id, body.agent_config_id, body.title
-    )
+    s = await SessionRepository(session).create_for(body.user_id, body.agent_config_id, body.title)
     await session.commit()
     return s
 

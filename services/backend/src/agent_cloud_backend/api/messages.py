@@ -17,8 +17,14 @@ async def append_message(
 ):
     msg = await MessageRepository(session).append(
         session_id,
-        Message(session_id=session_id, seq=0, role=body.role,
-                content=body.content, model=body.model, tokens=body.tokens),
+        Message(
+            session_id=session_id,
+            seq=0,
+            role=body.role,
+            content=body.content,
+            model=body.model,
+            tokens=body.tokens,
+        ),
     )
     await session.commit()
     return msg

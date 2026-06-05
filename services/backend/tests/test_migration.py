@@ -23,6 +23,12 @@ def test_alembic_upgrade_creates_schema(pg_url: str):
     with engine.connect() as conn:
         rows = conn.execute(text("SELECT tablename FROM pg_tables WHERE schemaname='public'"))
         tables = {r[0] for r in rows}
-    assert {"users", "agent_configs", "sessions", "messages",
-            "context_documents", "memory_entries"}.issubset(tables)
+    assert {
+        "users",
+        "agent_configs",
+        "sessions",
+        "messages",
+        "context_documents",
+        "memory_entries",
+    }.issubset(tables)
     assert "alembic_version" in tables

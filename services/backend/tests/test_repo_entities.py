@@ -47,8 +47,12 @@ async def test_message_seq_autoincrements(session):
     s = await SessionRepository(session).create_for(user.id, agent.id, None)
     await session.flush()
     repo = MessageRepository(session)
-    m0 = await repo.append(s.id, Message(session_id=s.id, seq=0, role="user", content={"text": "hi"}))
-    m1 = await repo.append(s.id, Message(session_id=s.id, seq=0, role="assistant", content={"text": "yo"}))
+    m0 = await repo.append(
+        s.id, Message(session_id=s.id, seq=0, role="user", content={"text": "hi"})
+    )
+    m1 = await repo.append(
+        s.id, Message(session_id=s.id, seq=0, role="assistant", content={"text": "yo"})
+    )
     await session.commit()
     assert m0.seq == 0 and m1.seq == 1
     listed = await repo.list_by_session(s.id)

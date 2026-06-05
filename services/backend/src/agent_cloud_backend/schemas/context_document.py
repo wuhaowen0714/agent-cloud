@@ -5,8 +5,8 @@ from pydantic import BaseModel, ConfigDict
 
 
 class ContextDocumentUpsert(BaseModel):
-    scope: str   # user | agent
-    type: str    # USER | AGENTS | SOUL | IDENTITY | TOOLS | HEARTBEAT | BOOTSTRAP
+    scope: str  # user | agent
+    type: str  # USER | AGENTS | SOUL | IDENTITY | TOOLS | HEARTBEAT | BOOTSTRAP
     owner_id: uuid.UUID
     content: str
 

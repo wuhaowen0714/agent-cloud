@@ -1,7 +1,6 @@
 import pytest
-from httpx import ASGITransport, AsyncClient
-
 from agent_cloud_backend.main import create_app
+from httpx import ASGITransport, AsyncClient
 
 
 @pytest.mark.asyncio

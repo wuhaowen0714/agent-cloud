@@ -11,9 +11,7 @@ class MessageRepository(BaseRepository[Message]):
 
     async def _next_seq(self, session_id: uuid.UUID) -> int:
         result = await self.session.execute(
-            select(func.coalesce(func.max(Message.seq), -1)).where(
-                Message.session_id == session_id
-            )
+            select(func.coalesce(func.max(Message.seq), -1)).where(Message.session_id == session_id)
         )
         return int(result.scalar_one()) + 1
 

@@ -48,7 +48,9 @@ async def test_context_documents_and_memory(client):
         json={"scope": "user", "type": "USER", "owner_id": uid, "content": "# me"},
     )
     assert r.status_code == 200, r.text
-    r = await client.post("/memory", json={"scope": "user", "owner_id": uid, "content": "likes tea"})
+    r = await client.post(
+        "/memory", json={"scope": "user", "owner_id": uid, "content": "likes tea"}
+    )
     assert r.status_code == 201
     r = await client.get(f"/memory?scope=user&owner_id={uid}")
     assert r.status_code == 200 and r.json()[0]["content"] == "likes tea"

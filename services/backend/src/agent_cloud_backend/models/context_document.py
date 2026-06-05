@@ -15,7 +15,7 @@ class ContextDocument(Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     scope: Mapped[str] = mapped_column(nullable=False)  # user | agent
-    type: Mapped[str] = mapped_column(nullable=False)   # USER | AGENTS | SOUL | ...
+    type: Mapped[str] = mapped_column(nullable=False)  # USER | AGENTS | SOUL | ...
     owner_id: Mapped[uuid.UUID] = mapped_column(index=True, nullable=False)
     content: Mapped[str] = mapped_column(nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

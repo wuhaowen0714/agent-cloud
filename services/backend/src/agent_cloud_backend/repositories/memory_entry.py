@@ -10,11 +10,16 @@ class MemoryEntryRepository(BaseRepository[MemoryEntry]):
     model = MemoryEntry
 
     async def append(
-        self, scope: str, owner_id: uuid.UUID, content: str,
+        self,
+        scope: str,
+        owner_id: uuid.UUID,
+        content: str,
         source_session_id: uuid.UUID | None = None,
     ) -> MemoryEntry:
         entry = MemoryEntry(
-            scope=scope, owner_id=owner_id, content=content,
+            scope=scope,
+            owner_id=owner_id,
+            content=content,
             source_session_id=source_session_id,
         )
         self.session.add(entry)

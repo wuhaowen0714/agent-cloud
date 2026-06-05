@@ -25,7 +25,5 @@ class SessionRepository(BaseRepository[Session]):
         return s
 
     async def list_by_user(self, user_id: uuid.UUID) -> list[Session]:
-        result = await self.session.execute(
-            select(Session).where(Session.user_id == user_id)
-        )
+        result = await self.session.execute(select(Session).where(Session.user_id == user_id))
         return list(result.scalars().all())
