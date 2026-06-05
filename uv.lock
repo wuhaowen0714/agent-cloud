@@ -7,6 +7,7 @@ members = [
     "agent-cloud",
     "agent-cloud-backend",
     "agent-cloud-common",
+    "agent-cloud-worker",
 ]
 
 [[package]]
@@ -66,6 +67,31 @@ dev = [
 name = "agent-cloud-common"
 version = "0.0.0"
 source = { editable = "packages/common" }
+
+[[package]]
+name = "agent-cloud-worker"
+version = "0.0.0"
+source = { editable = "services/worker" }
+dependencies = [
+    { name = "agent-cloud-common" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "agent-cloud-common", editable = "packages/common" }]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+]
 
 [[package]]
 name = "alembic"

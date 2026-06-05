@@ -1,0 +1,29 @@
+[project]
+name = "agent-cloud-worker"
+version = "0.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "agent-cloud-common",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_cloud_worker"]
+
+[tool.uv.sources]
+agent-cloud-common = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+pythonpath = ["src"]
