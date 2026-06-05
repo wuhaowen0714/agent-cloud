@@ -1,5 +1,4 @@
 import pytest
-
 from agent_cloud_common import (
     CompletionRequest,
     CompletionResult,

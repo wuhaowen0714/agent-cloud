@@ -13,8 +13,9 @@ def test_specs_lists_builtin_tools(tmp_path):
 
 async def test_write_then_read(tmp_path):
     ex = _executor(tmp_path)
-    w = await ex.execute(ToolCall(id="1", name="write_file",
-                                  arguments={"path": "a.txt", "content": "hello"}))
+    w = await ex.execute(
+        ToolCall(id="1", name="write_file", arguments={"path": "a.txt", "content": "hello"})
+    )
     assert w.is_error is False
     r = await ex.execute(ToolCall(id="2", name="read_file", arguments={"path": "a.txt"}))
     assert r.is_error is False

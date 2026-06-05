@@ -20,7 +20,9 @@ def test_includes_memory_and_skills():
     out = build_system_prompt(
         documents=[],
         memory=[MemoryItem(scope="user", content="likes tea")],
-        skills=[SkillRef(name="weather", description="get weather", location="/skills/weather/SKILL.md")],
+        skills=[
+            SkillRef(name="weather", description="get weather", location="/skills/weather/SKILL.md")
+        ],
     )
     assert "likes tea" in out
     assert "weather" in out

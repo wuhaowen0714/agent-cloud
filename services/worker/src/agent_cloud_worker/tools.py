@@ -45,8 +45,11 @@ class LocalToolExecutor:
 # ---- 内置工具实现 ----
 def _bash(workdir: Path, args: dict) -> str:
     proc = subprocess.run(
-        args["command"], shell=True, cwd=workdir,
-        capture_output=True, text=True,
+        args["command"],
+        shell=True,
+        cwd=workdir,
+        capture_output=True,
+        text=True,
     )
     output = proc.stdout + proc.stderr
     if proc.returncode != 0:
@@ -71,8 +74,11 @@ def builtin_tools() -> list[Tool]:
             spec=ToolSpec(
                 name="bash",
                 description="Run a shell command in the working directory.",
-                input_schema={"type": "object", "properties": {"command": {"type": "string"}},
-                              "required": ["command"]},
+                input_schema={
+                    "type": "object",
+                    "properties": {"command": {"type": "string"}},
+                    "required": ["command"],
+                },
             ),
             func=_bash,
         ),
@@ -80,9 +86,11 @@ def builtin_tools() -> list[Tool]:
             spec=ToolSpec(
                 name="write_file",
                 description="Write text to a file (relative to the working directory).",
-                input_schema={"type": "object",
-                              "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
-                              "required": ["path", "content"]},
+                input_schema={
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+                    "required": ["path", "content"],
+                },
             ),
             func=_write_file,
         ),
@@ -90,8 +98,11 @@ def builtin_tools() -> list[Tool]:
             spec=ToolSpec(
                 name="read_file",
                 description="Read a file (relative to the working directory).",
-                input_schema={"type": "object", "properties": {"path": {"type": "string"}},
-                              "required": ["path"]},
+                input_schema={
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                },
             ),
             func=_read_file,
         ),

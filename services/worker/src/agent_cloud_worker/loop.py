@@ -15,9 +15,9 @@ from agent_cloud_worker.tools import ToolExecutor
 
 @dataclass
 class TurnResult:
-    new_messages: list[Message]   # 本回合新增的 assistant/tool 消息(不含用户消息)
+    new_messages: list[Message]  # 本回合新增的 assistant/tool 消息(不含用户消息)
     usage: Usage
-    stop_reason: str              # "end_turn" | "max_iterations"
+    stop_reason: str  # "end_turn" | "max_iterations"
 
 
 async def run_turn(

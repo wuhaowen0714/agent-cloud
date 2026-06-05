@@ -29,9 +29,11 @@ def _render_skills(skills: list[SkillRef]) -> list[str]:
         "<available_skills>",
     ]
     for s in skills:
-        lines.append(f"  <skill><name>{s.name}</name>"
-                     f"<description>{s.description}</description>"
-                     f"<location>{s.location}</location></skill>")
+        lines.append(
+            f"  <skill><name>{s.name}</name>"
+            f"<description>{s.description}</description>"
+            f"<location>{s.location}</location></skill>"
+        )
     lines.append("</available_skills>")
     return ["\n".join(lines)]
 

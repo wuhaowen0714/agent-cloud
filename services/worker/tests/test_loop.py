@@ -19,8 +19,11 @@ def _say(text: str) -> CompletionResult:
 
 def _call(tool: str, args: dict, text: str = "") -> CompletionResult:
     return CompletionResult(
-        message=Message(role=Role.ASSISTANT, text=text,
-                        tool_calls=[ToolCall(id="c1", name=tool, arguments=args)]),
+        message=Message(
+            role=Role.ASSISTANT,
+            text=text,
+            tool_calls=[ToolCall(id="c1", name=tool, arguments=args)],
+        ),
         usage=Usage(input_tokens=10, output_tokens=5),
     )
 
@@ -32,8 +35,11 @@ def _executor(tmp_path):
 async def test_single_response_no_tools(tmp_path):
     provider = FakeProvider([_say("final answer")])
     result = await run_turn(
-        provider, _executor(tmp_path),
-        system="", history=[], user_message="hi",
+        provider,
+        _executor(tmp_path),
+        system="",
+        history=[],
+        user_message="hi",
     )
     assert result.stop_reason == "end_turn"
     assert len(result.new_messages) == 1
@@ -45,13 +51,18 @@ async def test_single_response_no_tools(tmp_path):
 
 
 async def test_one_tool_round_then_finish(tmp_path):
-    provider = FakeProvider([
-        _call("write_file", {"path": "out.txt", "content": "data"}),
-        _say("done"),
-    ])
+    provider = FakeProvider(
+        [
+            _call("write_file", {"path": "out.txt", "content": "data"}),
+            _say("done"),
+        ]
+    )
     result = await run_turn(
-        provider, _executor(tmp_path),
-        system="", history=[], user_message="write it",
+        provider,
+        _executor(tmp_path),
+        system="",
+        history=[],
+        user_message="write it",
     )
     assert result.stop_reason == "end_turn"
     # assistant(含 tool_call) -> tool 结果消息 -> assistant(final)
@@ -64,13 +75,18 @@ async def test_one_tool_round_then_finish(tmp_path):
 
 
 async def test_tool_error_feeds_back_and_continues(tmp_path):
-    provider = FakeProvider([
-        _call("nope", {}),     # 未知工具 -> 错误结果回填
-        _say("recovered"),
-    ])
+    provider = FakeProvider(
+        [
+            _call("nope", {}),  # 未知工具 -> 错误结果回填
+            _say("recovered"),
+        ]
+    )
     result = await run_turn(
-        provider, _executor(tmp_path),
-        system="", history=[], user_message="go",
+        provider,
+        _executor(tmp_path),
+        system="",
+        history=[],
+        user_message="go",
     )
     assert result.stop_reason == "end_turn"
     assert result.new_messages[1].tool_results[0].is_error is True
@@ -81,8 +97,11 @@ async def test_max_iterations_guard(tmp_path):
     # provider 永远返回工具调用,永不停止
     provider = FakeProvider([_call("bash", {"command": "echo x"}) for _ in range(10)])
     result = await run_turn(
-        provider, _executor(tmp_path),
-        system="", history=[], user_message="loop",
+        provider,
+        _executor(tmp_path),
+        system="",
+        history=[],
+        user_message="loop",
         max_iterations=3,
     )
     assert result.stop_reason == "max_iterations"
@@ -99,9 +118,9 @@ async def test_history_is_preserved_in_request(tmp_path):
             seen["messages"] = request.messages
             return _say("ok")
 
-    history = [Message(role=Role.USER, text="earlier"),
-               Message(role=Role.ASSISTANT, text="reply")]
-    await run_turn(RecordingProvider(), _executor(tmp_path),
-                   system="SYS", history=history, user_message="now")
+    history = [Message(role=Role.USER, text="earlier"), Message(role=Role.ASSISTANT, text="reply")]
+    await run_turn(
+        RecordingProvider(), _executor(tmp_path), system="SYS", history=history, user_message="now"
+    )
     texts = [m.text for m in seen["messages"]]
     assert texts == ["earlier", "reply", "now"]
