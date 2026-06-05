@@ -45,6 +45,7 @@
 | 安全拆分 | **"脑"(worker)与"沙箱"(执行)分层**:worker 持 LLM Key 可信,沙箱无 Key 不可信 |
 | 配置形态 | openclaw 式 markdown 文档(AGENTS/SOUL/IDENTITY/USER/TOOLS/…),非单个 system_prompt |
 | Memory | 读取+追加;存为 DB 行(非 .md 文件);分用户级 + 每 agent 级;预留向量检索 |
+| Skill | openclaw 式 `SKILL.md`;**用户级安装**(市场/上传 zip/卸载),**每 AgentConfig 选启用**;渐进式披露;文件物化进沙箱执行 |
 
 ---
 
@@ -136,6 +137,11 @@ Agent Worker 池("脑",无状态·池化,持有 LLM Key)
 **memory_entries**(追加型)`(id, scope[user|agent], owner_id, content, source_session_id, created_at, embedding[v1 NULL,预留])`
 - 追加 = INSERT;读取 = SELECT(v1 全量/近期,后续换向量 top-k,结构不变)。
 
+**skills**(用户级安装)`(id, user_id, name, description, source[bundled|registry|uploaded], version, requires, package_ref→对象存储, created_at)`
+- skill 包文件(SKILL.md + 脚本/资源)存对象存储:`s3://.../users/{user_id}/skills/{name}/`。详见 §12。
+
+**agent_skill_enables**(多对多:每 agent 选启用)`(agent_config_id, skill_id, enabled)`
+
 **SandboxRegistry**(运营态,可放 Redis)`(sandbox_id, user_id, status[provisioning|active|paused|dead], endpoint, last_heartbeat, volume_handle)`
 - 丢失即当死、重建。
 
@@ -182,6 +188,7 @@ Agent Worker 池("脑",无状态·池化,持有 LLM Key)
   "context": {
     "documents": [{ "scope": "user|agent", "type": "USER|AGENTS|...", "content": "..." }],
     "memory":    [{ "scope": "user|agent", "content": "..." }],
+    "skills":    [{ "name": "...", "description": "...", "location": "/skills/<name>/SKILL.md" }],
     "messages":  [{ "role": "user|assistant|tool", "content": "..." }]
   },
   "user_message": { "content": "..." },
@@ -219,8 +226,8 @@ exec_tool(call_id, tool_name, args, work_subdir) -> stream<tool_progress> + tool
 
 **准备**
 1. 前端→后端:用户在 session S 发消息。后端**立即持久化这条 user 消息**。
-2. 后端:加会话锁(`status=running`,已运行则拒绝);从 DB 载入 配置文档 + memory + 历史。
-3. 后端:确保用户 sandbox 在线(暂停则恢复 / 无则起),挂载用户卷。
+2. 后端:加会话锁(`status=running`,已运行则拒绝);从 DB 载入 配置文档 + memory + 已启用 skill 元数据 + 历史。
+3. 后端:确保用户 sandbox 在线(暂停则恢复 / 无则起),挂载用户卷,物化已启用 skill 到 `/skills/`。
 4. 后端→worker:从池选空闲 worker,发 `run_turn`。
 
 **agent 循环(流式)**
@@ -259,6 +266,7 @@ exec_tool(call_id, tool_name, args, work_subdir) -> stream<tool_progress> + tool
 - **用户卷载体(实现层)**:
   - 默认推荐:**durable 网络卷 / 每用户子目录**(如 EFS,跨 AZ 友好,仍每用户隔离)。
   - 可选:**块卷 + S3 快照**(本地盘更快,跨 AZ 靠快照恢复)。
+- **skill 物化**:已启用 skill 从对象存储解包到沙箱 `/skills/<name>/`(只读层),缓存;install/uninstall 时失效,下回合重新物化。与用户工作文件分目录,互不混淆。
 
 ---
 
@@ -283,10 +291,45 @@ exec_tool(call_id, tool_name, args, work_subdir) -> stream<tool_progress> + tool
 - **资源限制**:cgroups 限 CPU/内存/磁盘,防噪声邻居与 OOM 拖垮宿主。
 - **卷隔离**:每用户卷,沙箱只挂自己用户的子树,由沙箱管理器强制。
 - **密钥**:KMS 加密,worker 运行时解密注入,绝不写入沙箱或日志。
+- **Skill 供应链**:安装的 skill 会在沙箱里执行代码;沙箱隔离兜底执行风险,市场 skill 审核/签名,上传归档受 `allowUploadedArchives` 开关控制,每用户隔离使 skill 最多触及自身数据(详见 §12.5)。
 
 ---
 
-## 12. 测试策略
+## 12. Skill 系统
+
+参考 openclaw 的 Agent Skills:一个 skill = 一个目录(`SKILL.md` + 脚本/资源),frontmatter 含 `name` / `description` / `requires`。采用**渐进式披露**——平时只注入元数据,用时才读全文。
+
+### 12.1 Scope
+
+- **安装在用户级**(用户的技能池):用户可自由安装 / 卸载。
+- **每套 AgentConfig 选择启用哪些**(类似 `enabled_tools`);不同 agent 不同技能集,不必重复安装。
+
+### 12.2 数据模型(见 §5)
+
+- `skills`(用户级)+ `agent_skill_enables`(每 agent 启用映射);skill 包存对象存储 `s3://.../users/{user_id}/skills/{name}/`。
+
+### 12.3 安装 / 卸载(后端 Skill API)
+
+- `GET /skills`、`POST /skills/install`(市场/registry)、`POST /skills/upload`(zip 归档,受 `allowUploadedArchives` 开关)、`DELETE /skills/{id}`、`PUT /agents/{id}/skills`(启用/停用)。
+- install:校验包 → 存对象存储 + 注册 Postgres → 失效该用户沙箱的 skill 缓存(下回合重新物化)。
+
+### 12.4 回合时加载(渐进式披露,落进无状态模型)
+
+1. 回合开始,后端确保该用户**已启用**的 skill 物化进沙箱:从对象存储解包到 `/skills/<name>/`(只读层;缓存,install/uninstall 时失效)。
+2. worker 把已启用 skill 的 `<available_skills>`(仅 name + description + location)注入 prompt。
+3. agent 判断相关 → 用 **read 工具读取沙箱里的 `SKILL.md`**(走 §7-③ 的 `exec_tool`)。
+4. 按 SKILL.md 的命令在沙箱跑脚本。
+
+> 因为 agent 是"读文件 + 跑脚本"来用 skill,skill 文件必须在沙箱——这与"工具在沙箱执行"完全一致,**不破坏无状态边界**。
+
+### 12.5 依赖与安全
+
+- **依赖**(`requires: bins`):v1 靠较全的沙箱基础镜像满足常见依赖;复杂/自定义依赖安装(brew/npm)作为后续。
+- **供应链**:skill 在沙箱里跑代码 → 沙箱隔离(microVM/gVisor + egress allowlist)兜底执行风险;市场 skill 审核/签名,上传归档受开关控制;每用户隔离 → skill 最多触及该用户自身数据。
+
+---
+
+## 13. 测试策略
 
 1. **单元(纯逻辑,假 LLM provider)**:agent-loop(工具分派/终止/错误分支,test-first)、上下文组装、provider 映射、契约序列化。
 2. **工具**:shell/file/memory_append 对真实(本地)沙箱或临时目录;`exec_tool` RPC 契约。
@@ -294,12 +337,13 @@ exec_tool(call_id, tool_name, args, work_subdir) -> stream<tool_progress> + tool
 4. **失败/韧性(重中之重,故障注入)**:杀 worker / 杀 sandbox 中途 → 标失败+无半成品+重试成功;同用户并发会话隔离;会话内串行锁;后端副本挂 SSE 重连。
 5. **安全**:断言沙箱够不到 Key/后端/他人卷;egress 生效;注入无法越界偷 Key。
 6. **流式/契约**:SSE 顺序/取消/重连;gRPC 背压。
+7. **Skill**:安装/卸载/启用 API;skill 物化进沙箱 + 缓存失效;渐进式披露(元数据注入 + 按需读 SKILL.md);跑 skill 脚本端到端;上传归档开关与隔离。
 
 **原则**:假 LLM 保确定性零成本;DB 与沙箱用真实(其行为正是被验证对象,不 mock);故障注入是一等公民。
 
 ---
 
-## 13. 后续演进(post-v1)
+## 14. 后续演进(post-v1)
 
 - memory 语义/向量检索(给 `memory_entries` 加 embedding 列 + ANN 索引)。
 - 可分支会话树 + 更完善的 compaction。
@@ -307,4 +351,5 @@ exec_tool(call_id, tool_name, args, work_subdir) -> stream<tool_progress> + tool
 - 第②跳改消息队列分发 + pub/sub,提升弹性。
 - 第①跳按需引入 WebSocket(回合进行中实时 steering)。
 - 用户卷多区域 / 跨 AZ 优化。
+- skill 自定义依赖安装(per-user 依赖层) + skill 市场审核/签名 + 语义检索式 skill 发现。
 ```
