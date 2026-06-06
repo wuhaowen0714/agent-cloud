@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 
@@ -114,6 +115,24 @@ async def run_turn_endpoint(
             logger.exception("failed to release session lock for session %s", session_id)
 
 
+async def _release_session_lock(session_id: uuid.UUID) -> None:
+    """Open a fresh DB session, release the session lock, and commit.
+
+    Runs as a standalone coroutine so it can be ``asyncio.shield``-ed by the
+    caller: on a client disconnect the streaming generator is cancelled at its
+    ``yield`` and the surrounding scope is torn down, but the lock release must
+    still complete or the session would stay ``running`` until the lease (600s)
+    expires. Any failure is swallowed-with-log so it never masks the original
+    cancellation/exception and never strands the lock silently.
+    """
+    try:
+        async with get_sessionmaker()() as db:
+            await SessionRepository(db).release(session_id)
+            await db.commit()
+    except Exception:
+        logger.exception("failed to release session lock for session %s", session_id)
+
+
 async def _sse_stream(worker_endpoint: str, request, session_id: uuid.UUID):
     try:
         async for proto_event in stream_turn_via_worker(worker_endpoint, request):
@@ -149,10 +168,20 @@ async def _sse_stream(worker_endpoint: str, request, session_id: uuid.UUID):
                 yield format_sse(turn_event_to_sse(event))
     except grpc.aio.AioRpcError as exc:
         yield format_sse(error_sse(exc.code()))
+    except Exception:
+        # Non-gRPC failures (e.g. a turn_done persist error, event decode, or
+        # SSE mapping) would otherwise truncate the 200 stream silently. Emit a
+        # terminal error event so the client knows the turn failed.
+        # CancelledError is a BaseException, not Exception, so a client
+        # disconnect is NOT swallowed here and still unwinds to the finally.
+        logger.exception("turn stream failed")
+        yield format_sse({"type": "error", "message": "the turn failed", "recoverable": False})
     finally:
-        async with get_sessionmaker()() as db:
-            await SessionRepository(db).release(session_id)
-            await db.commit()
+        # Shield the WHOLE fresh-session + release + commit unit so it completes
+        # even when this generator's scope is being cancelled (client
+        # disconnect). Shielding only the inner SQL would not be enough: the
+        # connection is torn down with the cancelled scope.
+        await asyncio.shield(_release_session_lock(session_id))
 
 
 @router.post("/stream")
