@@ -8,6 +8,8 @@ from agent_cloud_backend.main import create_app
 from agent_cloud_backend.models import Base
 from agent_cloud_backend.sandbox.deps import get_sandbox_manager
 from agent_cloud_backend.sandbox.manager import SandboxManager
+from agent_cloud_backend.skills.deps import get_object_store
+from agent_cloud_backend.skills.store import LocalObjectStore
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer
@@ -27,6 +29,13 @@ def override_sandbox_manager_fake(app, engine):
     manager = SandboxManager(provisioner=_FakeProvisioner(), sessionmaker=maker)
     app.dependency_overrides[get_sandbox_manager] = lambda: manager
     return manager
+
+
+def override_object_store(app, root):
+    """让 skill 端点写到隔离的临时对象存储目录。"""
+    store = LocalObjectStore(root)
+    app.dependency_overrides[get_object_store] = lambda: store
+    return store
 
 
 @pytest.fixture(scope="session")
@@ -68,7 +77,7 @@ async def session(engine) -> AsyncIterator[AsyncSession]:
 
 
 @pytest_asyncio.fixture
-async def client(engine) -> AsyncIterator[AsyncClient]:
+async def client(engine, tmp_path) -> AsyncIterator[AsyncClient]:
     maker = async_sessionmaker(engine, expire_on_commit=False)
 
     async def _override() -> AsyncIterator[AsyncSession]:
@@ -78,13 +87,14 @@ async def client(engine) -> AsyncIterator[AsyncClient]:
     app = create_app()
     app.dependency_overrides[get_session] = _override
     override_sandbox_manager_fake(app, engine)
+    override_object_store(app, tmp_path / "objstore")
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
 
 
 @pytest_asyncio.fixture
-async def client_noraise(engine) -> AsyncIterator[AsyncClient]:
+async def client_noraise(engine, tmp_path) -> AsyncIterator[AsyncClient]:
     """Like ``client`` but does NOT re-raise app exceptions: unhandled errors
     surface as real 500 responses (as a production HTTP client would see them),
     instead of propagating into the test. Needed to assert 5xx behavior."""
@@ -97,6 +107,7 @@ async def client_noraise(engine) -> AsyncIterator[AsyncClient]:
     app = create_app()
     app.dependency_overrides[get_session] = _override
     override_sandbox_manager_fake(app, engine)
+    override_object_store(app, tmp_path / "objstore")
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c

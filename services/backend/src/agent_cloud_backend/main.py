@@ -8,6 +8,7 @@ from agent_cloud_backend.api import (
     memory_entries,
     messages,
     sessions,
+    skills,
     turn,
     users,
 )
@@ -39,6 +40,7 @@ def create_app() -> FastAPI:
         context_documents,
         memory_entries,
         turn,
+        skills,
     ):
         app.include_router(module.router)
 
