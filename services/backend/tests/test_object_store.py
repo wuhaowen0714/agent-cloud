@@ -1,5 +1,4 @@
 import pytest
-
 from agent_cloud_backend.skills.store import LocalObjectStore
 
 

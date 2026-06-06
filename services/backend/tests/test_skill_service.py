@@ -1,7 +1,6 @@
 import uuid
 
 import pytest
-
 from agent_cloud_backend.models.user import User
 from agent_cloud_backend.repositories.skill import SkillRepository
 from agent_cloud_backend.skills.service import install_skill_from_dir, skill_package_ref
