@@ -12,4 +12,7 @@ build-backend = "hatchling.build"
 packages = ["src/agent_cloud_common", "src/agent_cloud"]
 
 [dependency-groups]
-dev = ["grpcio-tools"]
+dev = ["grpcio-tools", "pytest"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
