@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package agent_cloud.v1;
+
+// 沙箱:在工作目录里执行一次工具调用(worker→sandbox,信任边界)。
+service Sandbox {
+  rpc ExecTool(ExecToolRequest) returns (ExecToolResponse);
+}
+
+message ExecToolRequest {
+  string call_id = 1;
+  string tool_name = 2;
+  string arguments_json = 3;  // JSON 编码的参数字典
+  string work_subdir = 4;     // 相对沙箱基目录的会话工作子目录
+}
+
+message ExecToolResponse {
+  string content = 1;
+  bool is_error = 2;
+}

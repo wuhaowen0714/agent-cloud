@@ -2,11 +2,14 @@
 name = "agent-cloud-common"
 version = "0.0.0"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["grpcio"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agent_cloud_common"]
+packages = ["src/agent_cloud_common", "src/agent_cloud"]
+
+[dependency-groups]
+dev = ["grpcio-tools"]
