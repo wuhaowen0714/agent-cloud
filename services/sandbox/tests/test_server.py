@@ -41,3 +41,24 @@ async def test_exec_tool_error_over_grpc(sandbox):
         )
     assert resp.is_error is True
     assert "unknown tool" in resp.content.lower()
+
+
+async def test_bash_output_clean_of_fork_noise_over_grpc(sandbox):
+    # When bash forks a subprocess inside the aio server, gRPC emits fork/poll/Ixxxx
+    # lines to the child's stderr. Run `echo hi` THROUGH the running server and assert
+    # the payload is clean stdout, not contaminated by that noise. #3
+    addr, _ = sandbox
+    async with grpc.aio.insecure_channel(addr) as channel:
+        stub = sandbox_pb2_grpc.SandboxStub(channel)
+        resp = await stub.ExecTool(
+            sandbox_pb2.ExecToolRequest(
+                call_id="c1",
+                tool_name="bash",
+                arguments_json='{"command": "echo hi"}',
+                work_subdir="s1",
+            )
+        )
+    assert resp.is_error is False
+    assert resp.content == "hi\n"
+    for noise in ("fork", "poll", "FD from fork"):
+        assert noise not in resp.content
