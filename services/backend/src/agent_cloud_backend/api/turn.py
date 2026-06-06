@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 
 import grpc
@@ -16,6 +17,8 @@ from agent_cloud_backend.schemas.turn import TurnRequest, TurnResponse, TurnUsag
 from agent_cloud_backend.turn.assemble import build_run_turn_request
 from agent_cloud_backend.turn.messages import common_to_content
 from agent_cloud_backend.turn.worker_client import run_turn_via_worker
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sessions/{session_id}/turn", tags=["turn"])
 
@@ -92,6 +95,13 @@ async def run_turn_endpoint(
             ),
         )
     finally:
-        # 5. 释放锁
-        await session_repo.release(session_id)
-        await db.commit()
+        # 5. 释放锁(对中途 DB 出错具有韧性)
+        # 若加锁与最终 commit 之间任何 DB 操作中止了事务,先 rollback 清理,
+        # 再 release,最后 commit。整段加 try/except,避免释放锁的失败掩盖原始异常,
+        # 同时保证锁不会永远卡在 running。成功路径上 rollback 是无害的 no-op。
+        try:
+            await db.rollback()
+            await session_repo.release(session_id)
+            await db.commit()
+        except Exception:
+            logger.exception("failed to release session lock for session %s", session_id)
