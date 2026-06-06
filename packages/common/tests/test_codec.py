@@ -1,3 +1,5 @@
+import pytest
+from agent_cloud.v1 import worker_pb2
 from agent_cloud_common.codec import msg_from_proto, msg_to_proto
 from agent_cloud_common.types import Message, Role, ToolCall, ToolResult
 
@@ -29,3 +31,13 @@ def test_round_trip_plain_user():
     back = msg_from_proto(msg_to_proto(m))
     assert back.role == Role.USER and back.text == "hello"
     assert back.tool_calls == [] and back.tool_results == []
+
+
+def test_from_proto_rejects_non_dict_arguments():
+    # 防御:arguments_json 解析出来必须是 JSON object,否则 ToolCall.arguments 的类型契约被破坏。
+    proto = worker_pb2.Msg(
+        role="assistant",
+        tool_calls=[worker_pb2.ToolCall(id="c1", name="bash", arguments_json="[]")],
+    )
+    with pytest.raises(ValueError, match="must be a JSON object"):
+        msg_from_proto(proto)

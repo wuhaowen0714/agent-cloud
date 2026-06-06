@@ -22,12 +22,21 @@ def msg_to_proto(message: Message) -> worker_pb2.Msg:
     )
 
 
+def _parse_tool_arguments(arguments_json: str) -> dict:
+    parsed = json.loads(arguments_json or "{}")
+    if not isinstance(parsed, dict):
+        raise ValueError(
+            f"tool call arguments must be a JSON object, got {type(parsed).__name__}"
+        )
+    return parsed
+
+
 def msg_from_proto(proto: worker_pb2.Msg) -> Message:
     return Message(
         role=Role(proto.role),
         text=proto.text,
         tool_calls=[
-            ToolCall(id=c.id, name=c.name, arguments=json.loads(c.arguments_json or "{}"))
+            ToolCall(id=c.id, name=c.name, arguments=_parse_tool_arguments(c.arguments_json))
             for c in proto.tool_calls
         ],
         tool_results=[
