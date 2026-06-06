@@ -4,6 +4,7 @@ import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from agent_cloud_backend.repositories.sandbox_registry import SandboxRegistryRepository
@@ -28,6 +29,10 @@ class SandboxManager:
             repo = SandboxRegistryRepository(db)
             existing = await repo.get_active_for_user(user_id)
             if existing is not None:
+                # NOTE(4b): this trusts the row as live. A stale/dead endpoint
+                # (worker gone) is not detected here -- liveness/health check +
+                # mark-dead-on-RPC-failure needs the worker-failure feedback
+                # loop wired in Plan 4b, so it is intentionally out of scope.
                 await repo.touch(existing.id)
                 await db.commit()
                 return existing.endpoint
@@ -36,8 +41,18 @@ class SandboxManager:
         sandbox_id, endpoint = await self._provisioner.spawn(user_id)
         async with self._sessionmaker() as db:
             repo = SandboxRegistryRepository(db)
-            await repo.register(sandbox_id, user_id, endpoint)
-            await db.commit()
+            try:
+                await repo.register(sandbox_id, user_id, endpoint)
+                await db.commit()
+            except IntegrityError:
+                # Lost the spawn race: a concurrent caller already inserted the
+                # active row (partial unique index). Discard our throwaway
+                # sandbox and route to the winner so the user isn't split across
+                # two sandboxes.
+                await db.rollback()
+                winner = await repo.get_active_for_user(user_id)
+                await self._provisioner.stop(sandbox_id)
+                return winner.endpoint
         return endpoint
 
     async def reap_idle(self) -> int:

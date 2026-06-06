@@ -22,7 +22,9 @@ class SandboxRegistryRepository(BaseRepository[SandboxRegistry]):
         result = await self.session.execute(
             select(SandboxRegistry)
             .where(SandboxRegistry.user_id == user_id, SandboxRegistry.status == "active")
-            .order_by(SandboxRegistry.created_at.desc())
+            # id.desc() is a defensive tiebreaker for rows sharing a created_at
+            # (mirrors the memory_entry convention) so ordering is deterministic.
+            .order_by(SandboxRegistry.created_at.desc(), SandboxRegistry.id.desc())
             .limit(1)
         )
         return result.scalar_one_or_none()
