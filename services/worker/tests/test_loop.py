@@ -4,6 +4,7 @@ from agent_cloud_common import (
     Message,
     Role,
     TextDelta,
+    ThinkingDelta,
     ToolCall,
     ToolCallStarted,
     ToolResultEvent,
@@ -11,7 +12,12 @@ from agent_cloud_common import (
     Usage,
 )
 from agent_cloud_worker.loop import run_turn, run_turn_stream
-from agent_cloud_worker.provider import FakeProvider
+from agent_cloud_worker.provider import (
+    FakeProvider,
+    ProviderCompleted,
+    ProviderTextDelta,
+    ProviderThinkingDelta,
+)
 from agent_cloud_worker.tools import LocalToolExecutor, builtin_tools
 
 
@@ -315,3 +321,27 @@ async def test_stream_rejects_zero_iterations(tmp_path):
             max_iterations=0,
         ):
             pass
+
+
+# ---- M4 覆盖:provider 的 thinking 增量被转成 ThinkingDelta 事件 ----
+async def test_stream_thinking_delta_forwarded(tmp_path):
+    class ThinkingProvider:
+        async def stream(self, request):
+            yield ProviderThinkingDelta(text="hmm")
+            yield ProviderTextDelta(text="ok")
+            yield ProviderCompleted(
+                message=Message(role=Role.ASSISTANT, text="ok"), usage=Usage()
+            )
+
+    events = [
+        e
+        async for e in run_turn_stream(
+            ThinkingProvider(), _executor(tmp_path), system="", history=[], user_message="go"
+        )
+    ]
+    # ThinkingDelta 先于 TextDelta 与 TurnDone
+    assert isinstance(events[0], ThinkingDelta) and events[0].text == "hmm"
+    kinds = [type(e).__name__ for e in events]
+    assert kinds.index("ThinkingDelta") < kinds.index("TextDelta")
+    assert kinds.index("TextDelta") < kinds.index("TurnDone")
+    assert isinstance(events[-1], TurnDone) and events[-1].stop_reason == "end_turn"

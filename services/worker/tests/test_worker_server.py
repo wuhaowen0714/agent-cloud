@@ -347,6 +347,36 @@ async def test_run_turn_stream_over_grpc(sandbox):
     assert (base / "s1" / "hello.txt").read_text() == "from-agent"
 
 
+# ---- M3: 流式大 TurnDone(>4MB 默认上限)在共享上限 + 正确配置的 client 下成功 ----
+
+
+async def test_run_turn_stream_large_turn_done_under_shared_limit(sandbox):
+    sandbox_addr, _ = sandbox
+    big = "x" * 5_000_000  # > 4MB 默认接收上限
+    provider = FakeProvider([_final(big)])
+    worker_server, wport = await create_worker_server(provider_factory=lambda *a: provider, port=0)
+    events = []
+    try:
+        async with grpc.aio.insecure_channel(
+            f"localhost:{wport}", options=_GRPC_OPTIONS
+        ) as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            async for proto_ev in stub.RunTurnStream(
+                worker_pb2.RunTurnRequest(
+                    agent=worker_pb2.Agent(model="m", provider="fake"),
+                    messages=[],
+                    user_message="now",
+                    sandbox_endpoint=sandbox_addr,
+                    work_subdir="s1",
+                )
+            ):
+                events.append(turn_event_from_proto(proto_ev))
+    finally:
+        await worker_server.stop(None)
+    assert isinstance(events[-1], TurnDone) and events[-1].stop_reason == "end_turn"
+    assert len(events[-1].new_messages[-1].text) >= 5_000_000
+
+
 async def test_run_turn_stream_invalid_role_aborts(sandbox):
     sandbox_addr, _ = sandbox
     provider = FakeProvider([_final("x")])
