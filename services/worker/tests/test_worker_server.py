@@ -8,8 +8,10 @@ from agent_cloud_common import (
     Message,
     Role,
     ToolCall,
+    TurnDone,
     Usage,
 )
+from agent_cloud_common.codec import turn_event_from_proto
 from agent_cloud_sandbox.server import create_server as create_sandbox_server
 from agent_cloud_worker.provider import FakeProvider
 from agent_cloud_worker.server import create_server as create_worker_server
@@ -163,9 +165,7 @@ async def test_run_turn_malformed_arguments_json_returns_invalid_argument(sandbo
                             worker_pb2.Msg(
                                 role="assistant",
                                 tool_calls=[
-                                    worker_pb2.ToolCall(
-                                        id="c1", name="bash", arguments_json="{bad"
-                                    )
+                                    worker_pb2.ToolCall(id="c1", name="bash", arguments_json="{bad")
                                 ],
                             )
                         ],
@@ -314,27 +314,28 @@ async def test_run_turn_multiple_tool_calls_single_round(sandbox):
 # ---- Plan 3b: 流式 RunTurnStream over gRPC ----
 
 
-from agent_cloud_common import TextDelta, ToolCallStarted, ToolResultEvent, TurnDone
-from agent_cloud_common.codec import turn_event_from_proto
-
-
 async def test_run_turn_stream_over_grpc(sandbox):
     sandbox_addr, base = sandbox
-    provider = FakeProvider([
-        _call("write_file", {"path": "hello.txt", "content": "from-agent"}),
-        _final("done"),
-    ])
-    worker_server, wport = await create_worker_server(
-        provider_factory=lambda *a: provider, port=0)
+    provider = FakeProvider(
+        [
+            _call("write_file", {"path": "hello.txt", "content": "from-agent"}),
+            _final("done"),
+        ]
+    )
+    worker_server, wport = await create_worker_server(provider_factory=lambda *a: provider, port=0)
     events = []
     try:
         async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
             stub = worker_pb2_grpc.WorkerStub(channel)
-            async for proto_ev in stub.RunTurnStream(worker_pb2.RunTurnRequest(
-                agent=worker_pb2.Agent(model="m", provider="fake"),
-                messages=[], user_message="write it",
-                sandbox_endpoint=sandbox_addr, work_subdir="s1",
-            )):
+            async for proto_ev in stub.RunTurnStream(
+                worker_pb2.RunTurnRequest(
+                    agent=worker_pb2.Agent(model="m", provider="fake"),
+                    messages=[],
+                    user_message="write it",
+                    sandbox_endpoint=sandbox_addr,
+                    work_subdir="s1",
+                )
+            ):
                 events.append(turn_event_from_proto(proto_ev))
     finally:
         await worker_server.stop(None)
@@ -349,17 +350,20 @@ async def test_run_turn_stream_over_grpc(sandbox):
 async def test_run_turn_stream_invalid_role_aborts(sandbox):
     sandbox_addr, _ = sandbox
     provider = FakeProvider([_final("x")])
-    worker_server, wport = await create_worker_server(
-        provider_factory=lambda *a: provider, port=0)
+    worker_server, wport = await create_worker_server(provider_factory=lambda *a: provider, port=0)
     try:
         async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
             stub = worker_pb2_grpc.WorkerStub(channel)
             with pytest.raises(grpc.aio.AioRpcError) as ei:
-                async for _ in stub.RunTurnStream(worker_pb2.RunTurnRequest(
-                    agent=worker_pb2.Agent(model="m", provider="fake"),
-                    messages=[worker_pb2.Msg(role="system", text="bad")],
-                    user_message="x", sandbox_endpoint=sandbox_addr, work_subdir="s1",
-                )):
+                async for _ in stub.RunTurnStream(
+                    worker_pb2.RunTurnRequest(
+                        agent=worker_pb2.Agent(model="m", provider="fake"),
+                        messages=[worker_pb2.Msg(role="system", text="bad")],
+                        user_message="x",
+                        sandbox_endpoint=sandbox_addr,
+                        work_subdir="s1",
+                    )
+                ):
                     pass
     finally:
         await worker_server.stop(None)

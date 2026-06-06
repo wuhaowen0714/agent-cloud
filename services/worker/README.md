@@ -36,3 +36,4 @@ cd services/worker && uv run pytest -v   # 纯单元测试,无需 Docker
 - `run_turn_stream(provider, executor, *, system, history, user_message)` — 异步生成器,yield 回合事件(`TextDelta`/`ToolCallStarted`/`ToolResultEvent`/`TurnDone` 等,定义于 `agent_cloud_common.events`)。
 - `StreamingProvider.stream(request)` — 产生 provider 级事件(deltas + 最终 `ProviderCompleted`);`FakeProvider` 同时支持 `complete` 与 `stream`。
 - 流式 gRPC(`RunTurnStream`)与后端 SSE 见 Plan 3b/3c。
+- gRPC:`RunTurnStream(RunTurnRequest) returns (stream TurnEvent)`(`worker.proto`)。事件↔proto 由 `agent_cloud_common.codec.turn_event_to_proto/from_proto` 转换。后端 SSE 代理见 Plan 3c。

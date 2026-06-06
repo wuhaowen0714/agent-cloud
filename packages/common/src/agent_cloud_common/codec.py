@@ -4,7 +4,15 @@ import json
 
 from agent_cloud.v1 import worker_pb2
 
-from agent_cloud_common.types import Message, Role, ToolCall, ToolResult
+from agent_cloud_common.events import (
+    TextDelta,
+    ThinkingDelta,
+    ToolCallStarted,
+    ToolResultEvent,
+    TurnDone,
+    TurnEvent,
+)
+from agent_cloud_common.types import Message, Role, ToolCall, ToolResult, Usage
 
 
 def msg_to_proto(message: Message) -> worker_pb2.Msg:
@@ -44,17 +52,6 @@ def msg_from_proto(proto: worker_pb2.Msg) -> Message:
             for r in proto.tool_results
         ],
     )
-
-
-from agent_cloud_common.events import (
-    TextDelta,
-    ThinkingDelta,
-    ToolCallStarted,
-    ToolResultEvent,
-    TurnDone,
-    TurnEvent,
-)
-from agent_cloud_common.types import Usage
 
 
 def turn_event_to_proto(event: TurnEvent) -> worker_pb2.TurnEvent:

@@ -52,9 +52,7 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                 request.agent.model, request.agent.provider, request.agent.key_ref
             )
         except Exception as exc:  # noqa: BLE001 — 故意把工厂的任意失败收敛为明确状态码
-            await context.abort(
-                grpc.StatusCode.FAILED_PRECONDITION, f"provider unavailable: {exc}"
-            )
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, f"provider unavailable: {exc}")
 
         async with grpc.aio.insecure_channel(
             request.sandbox_endpoint,
@@ -88,9 +86,7 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                 request.agent.model, request.agent.provider, request.agent.key_ref
             )
         except Exception as exc:  # noqa: BLE001 — 故意把工厂的任意失败收敛为明确状态码
-            await context.abort(
-                grpc.StatusCode.FAILED_PRECONDITION, f"provider unavailable: {exc}"
-            )
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, f"provider unavailable: {exc}")
 
         options = [
             ("grpc.max_send_message_length", MAX_GRPC_MESSAGE_BYTES),
@@ -99,8 +95,11 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
         async with grpc.aio.insecure_channel(request.sandbox_endpoint, options=options) as channel:
             executor = SandboxToolExecutor(channel, request.work_subdir)
             async for event in run_turn_stream(
-                provider, executor,
-                system=system, history=history, user_message=request.user_message,
+                provider,
+                executor,
+                system=system,
+                history=history,
+                user_message=request.user_message,
             ):
                 yield turn_event_to_proto(event)
 
