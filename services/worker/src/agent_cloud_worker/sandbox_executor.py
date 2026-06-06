@@ -22,12 +22,21 @@ class SandboxToolExecutor:
         return builtin_tool_specs()
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        resp = await self._stub.ExecTool(
-            sandbox_pb2.ExecToolRequest(
-                call_id=call.id,
-                tool_name=call.name,
-                arguments_json=json.dumps(call.arguments),
-                work_subdir=self._work_subdir,
+        try:
+            resp = await self._stub.ExecTool(
+                sandbox_pb2.ExecToolRequest(
+                    call_id=call.id,
+                    tool_name=call.name,
+                    arguments_json=json.dumps(call.arguments),
+                    work_subdir=self._work_subdir,
+                )
             )
-        )
+        except grpc.aio.AioRpcError as exc:
+            # 沙箱不可达/RPC 失败时,转成错误结果交回模型,而不是让异常冒泡冲掉整个回合
+            # (与 LocalToolExecutor 一致,best-effort,spec §10)。
+            return ToolResult(
+                call_id=call.id,
+                content=f"sandbox RPC failed: {exc.code().name}",
+                is_error=True,
+            )
         return ToolResult(call_id=call.id, content=resp.content, is_error=resp.is_error)
