@@ -1,3 +1,4 @@
+import uuid as _uuid
 from collections.abc import AsyncIterator
 
 import pytest
@@ -5,9 +6,27 @@ import pytest_asyncio
 from agent_cloud_backend.api.deps import get_session
 from agent_cloud_backend.main import create_app
 from agent_cloud_backend.models import Base
+from agent_cloud_backend.sandbox.deps import get_sandbox_manager
+from agent_cloud_backend.sandbox.manager import SandboxManager
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer
+
+
+class _FakeProvisioner:
+    async def spawn(self, user_id):
+        return _uuid.uuid4(), f"fake-sandbox:{user_id}"
+
+    async def stop(self, sandbox_id):
+        return None
+
+
+def override_sandbox_manager_fake(app, engine):
+    """让端点用一个 FakeProvisioner 的 manager(不起真沙箱)。"""
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    manager = SandboxManager(provisioner=_FakeProvisioner(), sessionmaker=maker)
+    app.dependency_overrides[get_sandbox_manager] = lambda: manager
+    return manager
 
 
 @pytest.fixture(scope="session")
@@ -58,6 +77,7 @@ async def client(engine) -> AsyncIterator[AsyncClient]:
 
     app = create_app()
     app.dependency_overrides[get_session] = _override
+    override_sandbox_manager_fake(app, engine)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
@@ -76,6 +96,7 @@ async def client_noraise(engine) -> AsyncIterator[AsyncClient]:
 
     app = create_app()
     app.dependency_overrides[get_session] = _override
+    override_sandbox_manager_fake(app, engine)
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
