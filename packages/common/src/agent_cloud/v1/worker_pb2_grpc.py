@@ -26,7 +26,7 @@ if _version_not_supported:
 
 
 class WorkerStub:
-    """worker:跑一个回合(后端→worker)。本计划为一元(非流式);流式见后续 Plan。
+    """worker:跑一个回合(后端→worker)。一元 RunTurn + 流式 RunTurnStream。
     """
 
     def __init__(self, channel):
@@ -40,13 +40,24 @@ class WorkerStub:
                 request_serializer=agent__cloud_dot_v1_dot_worker__pb2.RunTurnRequest.SerializeToString,
                 response_deserializer=agent__cloud_dot_v1_dot_worker__pb2.RunTurnResponse.FromString,
                 _registered_method=True)
+        self.RunTurnStream = channel.unary_stream(
+                '/agent_cloud.v1.Worker/RunTurnStream',
+                request_serializer=agent__cloud_dot_v1_dot_worker__pb2.RunTurnRequest.SerializeToString,
+                response_deserializer=agent__cloud_dot_v1_dot_worker__pb2.TurnEvent.FromString,
+                _registered_method=True)
 
 
 class WorkerServicer:
-    """worker:跑一个回合(后端→worker)。本计划为一元(非流式);流式见后续 Plan。
+    """worker:跑一个回合(后端→worker)。一元 RunTurn + 流式 RunTurnStream。
     """
 
     def RunTurn(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RunTurnStream(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -60,6 +71,11 @@ def add_WorkerServicer_to_server(servicer, server):
                     request_deserializer=agent__cloud_dot_v1_dot_worker__pb2.RunTurnRequest.FromString,
                     response_serializer=agent__cloud_dot_v1_dot_worker__pb2.RunTurnResponse.SerializeToString,
             ),
+            'RunTurnStream': grpc.unary_stream_rpc_method_handler(
+                    servicer.RunTurnStream,
+                    request_deserializer=agent__cloud_dot_v1_dot_worker__pb2.RunTurnRequest.FromString,
+                    response_serializer=agent__cloud_dot_v1_dot_worker__pb2.TurnEvent.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'agent_cloud.v1.Worker', rpc_method_handlers)
@@ -69,7 +85,7 @@ def add_WorkerServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class Worker:
-    """worker:跑一个回合(后端→worker)。本计划为一元(非流式);流式见后续 Plan。
+    """worker:跑一个回合(后端→worker)。一元 RunTurn + 流式 RunTurnStream。
     """
 
     @staticmethod
@@ -89,6 +105,33 @@ class Worker:
             '/agent_cloud.v1.Worker/RunTurn',
             agent__cloud_dot_v1_dot_worker__pb2.RunTurnRequest.SerializeToString,
             agent__cloud_dot_v1_dot_worker__pb2.RunTurnResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RunTurnStream(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/agent_cloud.v1.Worker/RunTurnStream',
+            agent__cloud_dot_v1_dot_worker__pb2.RunTurnRequest.SerializeToString,
+            agent__cloud_dot_v1_dot_worker__pb2.TurnEvent.FromString,
             options,
             channel_credentials,
             insecure,

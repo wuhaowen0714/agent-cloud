@@ -2,9 +2,10 @@ syntax = "proto3";
 
 package agent_cloud.v1;
 
-// worker:跑一个回合(后端→worker)。本计划为一元(非流式);流式见后续 Plan。
+// worker:跑一个回合(后端→worker)。一元 RunTurn + 流式 RunTurnStream。
 service Worker {
   rpc RunTurn(RunTurnRequest) returns (RunTurnResponse);
+  rpc RunTurnStream(RunTurnRequest) returns (stream TurnEvent);
 }
 
 message ToolCall {
@@ -69,4 +70,32 @@ message RunTurnResponse {
   int64 input_tokens = 2;
   int64 output_tokens = 3;
   string stop_reason = 4;
+}
+
+message TextDelta { string text = 1; }
+message ThinkingDelta { string text = 1; }
+message ToolCallStarted {
+  string call_id = 1;
+  string name = 2;
+  string arguments_json = 3;
+}
+message ToolResultEvent {
+  string call_id = 1;
+  string content = 2;
+  bool is_error = 3;
+}
+message TurnDone {
+  repeated Msg new_messages = 1;
+  int64 input_tokens = 2;
+  int64 output_tokens = 3;
+  string stop_reason = 4;
+}
+message TurnEvent {
+  oneof event {
+    TextDelta text_delta = 1;
+    ThinkingDelta thinking_delta = 2;
+    ToolCallStarted tool_call_started = 3;
+    ToolResultEvent tool_result = 4;
+    TurnDone turn_done = 5;
+  }
 }
