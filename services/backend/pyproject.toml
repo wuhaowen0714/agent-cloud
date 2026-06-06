@@ -24,6 +24,8 @@ packages = ["src/agent_cloud_backend"]
 
 [tool.uv.sources]
 agent-cloud-common = { workspace = true }
+agent-cloud-worker = { workspace = true }
+agent-cloud-sandbox = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -33,6 +35,8 @@ dev = [
     "testcontainers[postgres]",
     "psycopg2-binary",
     "ruff",
+    "agent-cloud-worker",
+    "agent-cloud-sandbox",
 ]
 
 [tool.pytest.ini_options]

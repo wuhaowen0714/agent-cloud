@@ -34,6 +34,8 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "agent-cloud-sandbox" },
+    { name = "agent-cloud-worker" },
     { name = "httpx" },
     { name = "psycopg2-binary" },
     { name = "pytest" },
@@ -58,6 +60,8 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "agent-cloud-sandbox", editable = "services/sandbox" },
+    { name = "agent-cloud-worker", editable = "services/worker" },
     { name = "httpx" },
     { name = "psycopg2-binary" },
     { name = "pytest" },
