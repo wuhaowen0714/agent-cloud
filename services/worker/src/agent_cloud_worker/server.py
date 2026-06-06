@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 
 import grpc
 from agent_cloud.v1 import worker_pb2, worker_pb2_grpc
-from agent_cloud_common import ContextDocument, MemoryItem, SkillRef
+from agent_cloud_common import (
+    MAX_GRPC_MESSAGE_BYTES,
+    ContextDocument,
+    MemoryItem,
+    SkillRef,
+)
 from agent_cloud_common.codec import msg_from_proto, msg_to_proto
 
 from agent_cloud_worker.context import build_system_prompt
@@ -23,16 +29,37 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
     async def RunTurn(
         self, request: worker_pb2.RunTurnRequest, context: grpc.aio.ServicerContext
     ) -> worker_pb2.RunTurnResponse:
-        system = build_system_prompt(
-            documents=[ContextDocument(d.scope, d.type, d.content) for d in request.documents],
-            memory=[MemoryItem(m.scope, m.content) for m in request.memory],
-            skills=[SkillRef(s.name, s.description, s.location) for s in request.skills],
-        )
-        history = [msg_from_proto(m) for m in request.messages]
-        provider = self._provider_factory(
-            request.agent.model, request.agent.provider, request.agent.key_ref
-        )
-        async with grpc.aio.insecure_channel(request.sandbox_endpoint) as channel:
+        # 解码客户端输入。畸形输入(非法 role / 坏 arguments_json)是 client-fault,
+        # 必须映射成 INVALID_ARGUMENT,而不是冒泡成无法与真实 worker bug 区分的 UNKNOWN。
+        try:
+            system = build_system_prompt(
+                documents=[
+                    ContextDocument(d.scope, d.type, d.content) for d in request.documents
+                ],
+                memory=[MemoryItem(m.scope, m.content) for m in request.memory],
+                skills=[SkillRef(s.name, s.description, s.location) for s in request.skills],
+            )
+            history = [msg_from_proto(m) for m in request.messages]
+        except (ValueError, json.JSONDecodeError) as exc:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+
+        # provider_factory 失败(如未知 provider)也是 client/config-fault,而非 worker bug。
+        try:
+            provider = self._provider_factory(
+                request.agent.model, request.agent.provider, request.agent.key_ref
+            )
+        except Exception as exc:  # noqa: BLE001 — 故意把工厂的任意失败收敛为明确状态码
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION, f"provider unavailable: {exc}"
+            )
+
+        async with grpc.aio.insecure_channel(
+            request.sandbox_endpoint,
+            options=[
+                ("grpc.max_send_message_length", MAX_GRPC_MESSAGE_BYTES),
+                ("grpc.max_receive_message_length", MAX_GRPC_MESSAGE_BYTES),
+            ],
+        ) as channel:
             executor = SandboxToolExecutor(channel, request.work_subdir)
             result = await run_turn(
                 provider,
@@ -52,7 +79,12 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
 async def create_server(
     provider_factory: ProviderFactory, host: str = "localhost", port: int = 0
 ) -> tuple[grpc.aio.Server, int]:
-    server = grpc.aio.server()
+    server = grpc.aio.server(
+        options=[
+            ("grpc.max_send_message_length", MAX_GRPC_MESSAGE_BYTES),
+            ("grpc.max_receive_message_length", MAX_GRPC_MESSAGE_BYTES),
+        ]
+    )
     worker_pb2_grpc.add_WorkerServicer_to_server(WorkerServicer(provider_factory), server)
     bound_port = server.add_insecure_port(f"{host}:{port}")
     await server.start()
