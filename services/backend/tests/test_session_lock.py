@@ -21,11 +21,7 @@ async def _force_running(session, session_id, last_active_at):
 
 async def _read(session, session_id) -> Session:
     """Read a fresh row, bypassing the identity-map cache."""
-    stmt = (
-        select(Session)
-        .where(Session.id == session_id)
-        .execution_options(populate_existing=True)
-    )
+    stmt = select(Session).where(Session.id == session_id).execution_options(populate_existing=True)
     return (await session.execute(stmt)).scalar_one()
 
 

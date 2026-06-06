@@ -19,20 +19,26 @@ def turn_event_to_sse(event) -> dict:
     if isinstance(event, ThinkingDelta):
         return {"type": "thinking_delta", "text": event.text}
     if isinstance(event, ToolCallStarted):
-        return {"type": "tool_call_start", "call_id": event.call_id,
-                "tool": event.name, "args": event.arguments}
+        return {
+            "type": "tool_call_start",
+            "call_id": event.call_id,
+            "tool": event.name,
+            "args": event.arguments,
+        }
     if isinstance(event, ToolResultEvent):
-        return {"type": "tool_result", "call_id": event.call_id,
-                "result": event.content, "is_error": event.is_error}
+        return {
+            "type": "tool_result",
+            "call_id": event.call_id,
+            "result": event.content,
+            "is_error": event.is_error,
+        }
     raise ValueError(f"unmapped streaming event: {type(event).__name__}")
 
 
 def error_sse(code: grpc.StatusCode) -> dict:
     recoverable = code in _RECOVERABLE
     message = (
-        "the turn was interrupted, please retry"
-        if recoverable
-        else "the request was rejected"
+        "the turn was interrupted, please retry" if recoverable else "the request was rejected"
     )
     return {"type": "error", "message": message, "recoverable": recoverable}
 

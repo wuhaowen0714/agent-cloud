@@ -30,7 +30,7 @@ def _parse_sse(text: str) -> list[dict]:
     for block in text.strip().split("\n\n"):
         line = block.strip()
         if line.startswith("data:"):
-            events.append(json.loads(line[len("data:"):].strip()))
+            events.append(json.loads(line[len("data:") :].strip()))
     return events
 
 
@@ -42,9 +42,9 @@ async def _make_session(client):
             json={"user_id": uid, "name": "c", "model": "m", "provider": "p"},
         )
     ).json()["id"]
-    return (
-        await client.post("/sessions", json={"user_id": uid, "agent_config_id": aid})
-    ).json()["id"]
+    return (await client.post("/sessions", json={"user_id": uid, "agent_config_id": aid})).json()[
+        "id"
+    ]
 
 
 def _fake_stream(monkeypatch):

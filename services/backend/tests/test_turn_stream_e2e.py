@@ -1,9 +1,6 @@
 import json
 
 import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import async_sessionmaker
-
 from agent_cloud_backend.api.deps import get_session
 from agent_cloud_backend.config import Settings, get_settings
 from agent_cloud_backend.main import create_app
@@ -11,6 +8,8 @@ from agent_cloud_common import CompletionResult, Message, Role, ToolCall, Usage
 from agent_cloud_sandbox.server import create_server as create_sandbox_server
 from agent_cloud_worker.provider import FakeProvider
 from agent_cloud_worker.server import create_server as create_worker_server
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 
 def _parse_sse(text: str) -> list[dict]:
@@ -18,7 +17,7 @@ def _parse_sse(text: str) -> list[dict]:
     for block in text.strip().split("\n\n"):
         line = block.strip()
         if line.startswith("data:"):
-            out.append(json.loads(line[len("data:"):].strip()))
+            out.append(json.loads(line[len("data:") :].strip()))
     return out
 
 
@@ -37,14 +36,27 @@ async def stack(engine, tmp_path):
     db_module._sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
 
     sandbox_server, sport = await create_sandbox_server(base_workdir=tmp_path, port=0)
-    provider = FakeProvider([
-        CompletionResult(message=Message(role=Role.ASSISTANT, tool_calls=[
-            ToolCall(id="c1", name="write_file",
-                     arguments={"path": "hi.txt", "content": "yo"})]),
-            usage=Usage(input_tokens=2, output_tokens=3)),
-        CompletionResult(message=Message(role=Role.ASSISTANT, text="all done"),
-                         usage=Usage(input_tokens=2, output_tokens=3)),
-    ])
+    provider = FakeProvider(
+        [
+            CompletionResult(
+                message=Message(
+                    role=Role.ASSISTANT,
+                    tool_calls=[
+                        ToolCall(
+                            id="c1",
+                            name="write_file",
+                            arguments={"path": "hi.txt", "content": "yo"},
+                        )
+                    ],
+                ),
+                usage=Usage(input_tokens=2, output_tokens=3),
+            ),
+            CompletionResult(
+                message=Message(role=Role.ASSISTANT, text="all done"),
+                usage=Usage(input_tokens=2, output_tokens=3),
+            ),
+        ]
+    )
     worker_server, wport = await create_worker_server(provider_factory=lambda *a: provider, port=0)
     maker = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -55,7 +67,8 @@ async def stack(engine, tmp_path):
     app = create_app()
     app.dependency_overrides[get_session] = _override_session
     app.dependency_overrides[get_settings] = lambda: Settings(
-        worker_endpoint=f"localhost:{wport}", sandbox_endpoint=f"localhost:{sport}")
+        worker_endpoint=f"localhost:{wport}", sandbox_endpoint=f"localhost:{sport}"
+    )
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c, tmp_path
@@ -67,16 +80,21 @@ async def stack(engine, tmp_path):
 async def test_full_streaming_turn(stack):
     client, base = stack
     uid = (await client.post("/users", json={"email": "e2e@example.com"})).json()["id"]
-    aid = (await client.post("/agent-configs",
-           json={"user_id": uid, "name": "c", "model": "m", "provider": "fake"})).json()["id"]
-    sid = (await client.post("/sessions", json={"user_id": uid, "agent_config_id": aid})).json()["id"]
+    aid = (
+        await client.post(
+            "/agent-configs", json={"user_id": uid, "name": "c", "model": "m", "provider": "fake"}
+        )
+    ).json()["id"]
+    sid = (await client.post("/sessions", json={"user_id": uid, "agent_config_id": aid})).json()[
+        "id"
+    ]
 
     resp = await client.post(f"/sessions/{sid}/turn/stream", json={"content": "write it"})
     assert resp.status_code == 200
     events = _parse_sse(resp.text)
     kinds = [e["type"] for e in events]
     assert "tool_call_start" in kinds and "tool_result" in kinds
-    assert "text_delta" in kinds            # the "all done" delta
+    assert "text_delta" in kinds  # the "all done" delta
     assert kinds[-1] == "turn_done"
     assert events[-1]["stop_reason"] == "end_turn" and len(events[-1]["message_ids"]) == 3
 
