@@ -1,3 +1,4 @@
+from agent_cloud_common.tools import builtin_tool_specs
 from agent_cloud_common.types import (
     CompletionRequest,
     CompletionResult,
@@ -24,4 +25,5 @@ __all__ = [
     "ContextDocument",
     "MemoryItem",
     "SkillRef",
+    "builtin_tool_specs",
 ]
