@@ -4,6 +4,7 @@ from sqlalchemy.exc import IntegrityError
 
 from agent_cloud_backend.api import (
     agent_configs,
+    agent_skills,
     context_documents,
     memory_entries,
     messages,
@@ -41,6 +42,7 @@ def create_app() -> FastAPI:
         memory_entries,
         turn,
         skills,
+        agent_skills,
     ):
         app.include_router(module.router)
 
