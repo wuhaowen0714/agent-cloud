@@ -13,7 +13,7 @@ from agent_cloud_common import (
 )
 from agent_cloud_common.codec import turn_event_from_proto
 from agent_cloud_sandbox.server import create_server as create_sandbox_server
-from agent_cloud_worker.provider import FakeProvider
+from agent_cloud_worker.provider import FakeProvider, ProviderTextDelta
 from agent_cloud_worker.server import create_server as create_worker_server
 
 _GRPC_OPTIONS = [
@@ -368,3 +368,47 @@ async def test_run_turn_stream_invalid_role_aborts(sandbox):
     finally:
         await worker_server.stop(None)
     assert ei.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+
+# ---- I1: 流中途失败 → 干净的 INTERNAL,不泄漏原始异常文本 ----
+
+
+class _PartialThenNoCompletedProvider:
+    """流式 provider:吐一个 TextDelta 后直接结束,**不**发 ProviderCompleted。
+
+    这会触发 run_turn_stream 里的守卫 RuntimeError(provider stream ended without a
+    ProviderCompleted event),用于验证 server 把流中途异常收敛为 INTERNAL。
+    """
+
+    async def stream(self, request):
+        yield ProviderTextDelta(text="partial")
+
+
+async def test_run_turn_stream_midstream_failure_returns_internal(sandbox):
+    sandbox_addr, _ = sandbox
+    worker_server, wport = await create_worker_server(
+        provider_factory=lambda *a: _PartialThenNoCompletedProvider(), port=0
+    )
+    events = []
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            with pytest.raises(grpc.aio.AioRpcError) as ei:
+                async for proto_ev in stub.RunTurnStream(
+                    worker_pb2.RunTurnRequest(
+                        agent=worker_pb2.Agent(model="m", provider="fake"),
+                        messages=[],
+                        user_message="go",
+                        sandbox_endpoint=sandbox_addr,
+                        work_subdir="s1",
+                    )
+                ):
+                    events.append(turn_event_from_proto(proto_ev))
+    finally:
+        await worker_server.stop(None)
+    # 客户端先收到了部分 TextDelta
+    assert [type(e).__name__ for e in events] == ["TextDelta"]
+    assert events[0].text == "partial"
+    # 然后流以 INTERNAL 结束,且不泄漏原始异常文本
+    assert ei.value.code() == grpc.StatusCode.INTERNAL
+    assert "ProviderCompleted" not in (ei.value.details() or "")

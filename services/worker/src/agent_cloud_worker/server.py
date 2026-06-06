@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable
 
 import grpc
@@ -17,6 +18,8 @@ from agent_cloud_worker.context import build_system_prompt
 from agent_cloud_worker.loop import run_turn, run_turn_stream
 from agent_cloud_worker.provider import Provider
 from agent_cloud_worker.sandbox_executor import SandboxToolExecutor
+
+logger = logging.getLogger(__name__)
 
 # 由 agent 的 (model, provider, key_ref) 造一个 Provider。真实实现(Anthropic 等)在后续 Plan。
 ProviderFactory = Callable[[str, str, str], Provider]
@@ -45,6 +48,7 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
             system, history = _build_context_and_history(request)
         except (ValueError, json.JSONDecodeError) as exc:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+            return
 
         # provider_factory 失败(如未知 provider)也是 client/config-fault,而非 worker bug。
         try:
@@ -53,6 +57,7 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
             )
         except Exception as exc:  # noqa: BLE001 — 故意把工厂的任意失败收敛为明确状态码
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, f"provider unavailable: {exc}")
+            return
 
         async with grpc.aio.insecure_channel(
             request.sandbox_endpoint,
@@ -76,17 +81,22 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
             stop_reason=result.stop_reason,
         )
 
-    async def RunTurnStream(self, request, context):
+    async def RunTurnStream(
+        self, request: worker_pb2.RunTurnRequest, context: grpc.aio.ServicerContext
+    ):
+        # 解码 / 工厂失败在第一个 yield 之前 abort(client/config-fault),映射成明确状态码。
         try:
             system, history = _build_context_and_history(request)
         except (ValueError, json.JSONDecodeError) as exc:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+            return
         try:
             provider = self._provider_factory(
                 request.agent.model, request.agent.provider, request.agent.key_ref
             )
         except Exception as exc:  # noqa: BLE001 — 故意把工厂的任意失败收敛为明确状态码
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, f"provider unavailable: {exc}")
+            return
 
         options = [
             ("grpc.max_send_message_length", MAX_GRPC_MESSAGE_BYTES),
@@ -94,14 +104,22 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
         ]
         async with grpc.aio.insecure_channel(request.sandbox_endpoint, options=options) as channel:
             executor = SandboxToolExecutor(channel, request.work_subdir)
-            async for event in run_turn_stream(
-                provider,
-                executor,
-                system=system,
-                history=history,
-                user_message=request.user_message,
-            ):
-                yield turn_event_to_proto(event)
+            # 流中途失败(provider 抛错 / loop 守卫)是 worker-fault:收敛为通用 INTERNAL,
+            # 不把原始异常文本泄漏给客户端(会暴露内部细节且与 UNKNOWN 无法区分)。
+            # context.abort 不在 run_turn_stream 内调用,故此处的宽 except 是安全的。
+            try:
+                async for event in run_turn_stream(
+                    provider,
+                    executor,
+                    system=system,
+                    history=history,
+                    user_message=request.user_message,
+                ):
+                    yield turn_event_to_proto(event)
+            except Exception:
+                logger.exception("RunTurnStream failed mid-stream")
+                await context.abort(grpc.StatusCode.INTERNAL, "turn failed")
+                return
 
 
 async def create_server(
