@@ -9,6 +9,8 @@ async def test_all_tables_created(engine):
         "messages",
         "context_documents",
         "memory_entries",
+        "skills",
+        "agent_skill_enables",
     }
     async with engine.connect() as conn:
         rows = await conn.execute(

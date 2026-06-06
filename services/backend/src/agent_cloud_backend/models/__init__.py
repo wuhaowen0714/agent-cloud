@@ -5,6 +5,7 @@ from agent_cloud_backend.models.memory_entry import MemoryEntry
 from agent_cloud_backend.models.message import Message
 from agent_cloud_backend.models.sandbox_registry import SandboxRegistry
 from agent_cloud_backend.models.session import Session
+from agent_cloud_backend.models.skill import AgentSkillEnable, Skill
 from agent_cloud_backend.models.user import User
 
 __all__ = [
@@ -16,4 +17,6 @@ __all__ = [
     "ContextDocument",
     "MemoryEntry",
     "SandboxRegistry",
+    "Skill",
+    "AgentSkillEnable",
 ]
