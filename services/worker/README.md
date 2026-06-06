@@ -31,3 +31,8 @@ cd services/worker && uv run pytest -v   # 纯单元测试,无需 Docker
 - `provider_factory` 失败(如未知 provider)→ `FAILED_PRECONDITION`。
 - 其余非预期错误(如 `run_turn` 内部)仍按 `UNKNOWN` 冒泡,供 2d 后端区分
   永久性 client-fault 与瞬时 worker bug。
+
+## 流式(Plan 3a)
+- `run_turn_stream(provider, executor, *, system, history, user_message)` — 异步生成器,yield 回合事件(`TextDelta`/`ToolCallStarted`/`ToolResultEvent`/`TurnDone` 等,定义于 `agent_cloud_common.events`)。
+- `StreamingProvider.stream(request)` — 产生 provider 级事件(deltas + 最终 `ProviderCompleted`);`FakeProvider` 同时支持 `complete` 与 `stream`。
+- 流式 gRPC(`RunTurnStream`)与后端 SSE 见 Plan 3b/3c。

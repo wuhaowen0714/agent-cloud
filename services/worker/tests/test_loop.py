@@ -250,8 +250,10 @@ async def test_empty_user_message_runs(tmp_path):
 async def test_stream_single_response_no_tools(tmp_path):
     provider = FakeProvider([_say("hello")])
     events = [
-        e async for e in run_turn_stream(
-            provider, _executor(tmp_path), system="", history=[], user_message="hi")
+        e
+        async for e in run_turn_stream(
+            provider, _executor(tmp_path), system="", history=[], user_message="hi"
+        )
     ]
     assert isinstance(events[0], TextDelta) and events[0].text == "hello"
     assert isinstance(events[-1], TurnDone)
@@ -261,13 +263,17 @@ async def test_stream_single_response_no_tools(tmp_path):
 
 
 async def test_stream_one_tool_round(tmp_path):
-    provider = FakeProvider([
-        _call("write_file", {"path": "o.txt", "content": "data"}),
-        _say("done"),
-    ])
+    provider = FakeProvider(
+        [
+            _call("write_file", {"path": "o.txt", "content": "data"}),
+            _say("done"),
+        ]
+    )
     events = [
-        e async for e in run_turn_stream(
-            provider, _executor(tmp_path), system="", history=[], user_message="go")
+        e
+        async for e in run_turn_stream(
+            provider, _executor(tmp_path), system="", history=[], user_message="go"
+        )
     ]
     kinds = [type(e).__name__ for e in events]
     assert "ToolCallStarted" in kinds and "ToolResultEvent" in kinds
@@ -284,9 +290,15 @@ async def test_stream_one_tool_round(tmp_path):
 async def test_stream_max_iterations(tmp_path):
     provider = FakeProvider([_call("bash", {"command": "echo x"}) for _ in range(5)])
     events = [
-        e async for e in run_turn_stream(
-            provider, _executor(tmp_path), system="", history=[], user_message="loop",
-            max_iterations=2)
+        e
+        async for e in run_turn_stream(
+            provider,
+            _executor(tmp_path),
+            system="",
+            history=[],
+            user_message="loop",
+            max_iterations=2,
+        )
     ]
     assert isinstance(events[-1], TurnDone) and events[-1].stop_reason == "max_iterations"
     assert sum(isinstance(e, ToolResultEvent) for e in events) == 2
@@ -295,6 +307,11 @@ async def test_stream_max_iterations(tmp_path):
 async def test_stream_rejects_zero_iterations(tmp_path):
     with pytest.raises(ValueError):
         async for _ in run_turn_stream(
-            FakeProvider([]), _executor(tmp_path), system="", history=[],
-            user_message="x", max_iterations=0):
+            FakeProvider([]),
+            _executor(tmp_path),
+            system="",
+            history=[],
+            user_message="x",
+            max_iterations=0,
+        ):
             pass

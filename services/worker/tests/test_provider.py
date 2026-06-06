@@ -56,10 +56,16 @@ async def test_stream_yields_text_delta_then_completed():
 
 
 async def test_stream_tool_call_message_only_completed():
-    provider = FakeProvider([CompletionResult(
-        message=Message(role=Role.ASSISTANT,
-                        tool_calls=[ToolCall(id="c1", name="bash", arguments={})]),
-        usage=Usage())])
+    provider = FakeProvider(
+        [
+            CompletionResult(
+                message=Message(
+                    role=Role.ASSISTANT, tool_calls=[ToolCall(id="c1", name="bash", arguments={})]
+                ),
+                usage=Usage(),
+            )
+        ]
+    )
     events = [e async for e in provider.stream(CompletionRequest(system="", messages=[], tools=[]))]
     assert len(events) == 1 and isinstance(events[0], ProviderCompleted)
     assert events[0].message.tool_calls[0].name == "bash"
