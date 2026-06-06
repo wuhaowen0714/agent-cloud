@@ -4,6 +4,7 @@ version = "0.0.0"
 requires-python = ">=3.12"
 dependencies = [
     "agent-cloud-common",
+    "grpcio",
 ]
 
 [build-system]
@@ -15,12 +16,14 @@ packages = ["src/agent_cloud_worker"]
 
 [tool.uv.sources]
 agent-cloud-common = { workspace = true }
+agent-cloud-sandbox = { workspace = true }
 
 [dependency-groups]
 dev = [
     "pytest",
     "pytest-asyncio",
     "ruff",
+    "agent-cloud-sandbox",
 ]
 
 [tool.pytest.ini_options]

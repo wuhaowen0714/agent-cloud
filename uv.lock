@@ -118,20 +118,26 @@ version = "0.0.0"
 source = { editable = "services/worker" }
 dependencies = [
     { name = "agent-cloud-common" },
+    { name = "grpcio" },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "agent-cloud-sandbox" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "agent-cloud-common", editable = "packages/common" }]
+requires-dist = [
+    { name = "agent-cloud-common", editable = "packages/common" },
+    { name = "grpcio" },
+]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "agent-cloud-sandbox", editable = "services/sandbox" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
