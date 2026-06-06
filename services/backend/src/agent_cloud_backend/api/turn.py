@@ -17,6 +17,8 @@ from agent_cloud_backend.db import get_sessionmaker
 from agent_cloud_backend.models.message import Message
 from agent_cloud_backend.repositories.message import MessageRepository
 from agent_cloud_backend.repositories.session import SessionRepository
+from agent_cloud_backend.sandbox.deps import get_sandbox_manager
+from agent_cloud_backend.sandbox.manager import SandboxManager
 from agent_cloud_backend.schemas.turn import TurnRequest, TurnResponse, TurnUsage
 from agent_cloud_backend.turn.assemble import build_run_turn_request
 from agent_cloud_backend.turn.messages import common_to_content
@@ -37,6 +39,7 @@ async def run_turn_endpoint(
     body: TurnRequest,
     db: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
+    manager: SandboxManager = Depends(get_sandbox_manager),
 ):
     session_repo = SessionRepository(db)
     msg_repo = MessageRepository(db)
@@ -65,10 +68,11 @@ async def run_turn_endpoint(
         await db.commit()
 
         # 3. 组装 + 调 worker
+        sandbox_endpoint = await manager.get_endpoint_for_user(s.user_id)
         request = await build_run_turn_request(
             db,
             s,
-            sandbox_endpoint=settings.sandbox_endpoint,
+            sandbox_endpoint=sandbox_endpoint,
             user_message=body.content,
             exclude_message_id=user_msg.id,
         )
@@ -190,6 +194,7 @@ async def stream_turn_endpoint(
     body: TurnRequest,
     db: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
+    manager: SandboxManager = Depends(get_sandbox_manager),
 ):
     session_repo = SessionRepository(db)
     s = await session_repo.get(session_id)
@@ -210,10 +215,11 @@ async def stream_turn_endpoint(
             ),
         )
         await db.commit()
+        sandbox_endpoint = await manager.get_endpoint_for_user(s.user_id)
         request = await build_run_turn_request(
             db,
             s,
-            sandbox_endpoint=settings.sandbox_endpoint,
+            sandbox_endpoint=sandbox_endpoint,
             user_message=body.content,
             exclude_message_id=user_msg.id,
         )

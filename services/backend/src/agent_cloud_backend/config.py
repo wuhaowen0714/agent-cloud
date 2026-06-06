@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/agent_cloud"
 
     worker_endpoint: str = "localhost:50052"
-    sandbox_endpoint: str = "localhost:50051"
+    sandbox_base_root: str = "/tmp/agent-cloud-sandboxes"
 
 
 def get_settings() -> Settings:
