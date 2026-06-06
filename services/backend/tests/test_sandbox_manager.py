@@ -1,14 +1,12 @@
 import uuid
-from datetime import datetime, timedelta, timezone
-
-from sqlalchemy import update
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from datetime import UTC, datetime, timedelta
 
 from agent_cloud_backend.models.sandbox_registry import SandboxRegistry
 from agent_cloud_backend.models.user import User
-from agent_cloud_backend.repositories.sandbox_registry import SandboxRegistryRepository
 from agent_cloud_backend.repositories.user import UserRepository
 from agent_cloud_backend.sandbox.manager import SandboxManager
+from sqlalchemy import update
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 
 class FakeProvisioner:
@@ -54,8 +52,9 @@ async def test_reap_idle_marks_dead_and_stops(engine):
 
     # force last_used_at far in the past
     async with maker() as s:
-        await s.execute(update(SandboxRegistry).values(
-            last_used_at=datetime.now(timezone.utc) - timedelta(hours=1)))
+        await s.execute(
+            update(SandboxRegistry).values(last_used_at=datetime.now(UTC) - timedelta(hours=1))
+        )
         await s.commit()
 
     reaped = await mgr.reap_idle()

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -39,7 +39,7 @@ class SandboxManager:
 
     async def reap_idle(self) -> int:
         """标记并停掉空闲超 TTL 的 sandbox。返回回收数量。"""
-        cutoff = datetime.now(timezone.utc) - timedelta(seconds=self._idle_ttl_seconds)
+        cutoff = datetime.now(UTC) - timedelta(seconds=self._idle_ttl_seconds)
         async with self._sessionmaker() as db:
             repo = SandboxRegistryRepository(db)
             stale = await repo.list_active_idle_since(cutoff)

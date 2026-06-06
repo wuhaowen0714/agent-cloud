@@ -36,9 +36,7 @@ class SandboxRegistryRepository(BaseRepository[SandboxRegistry]):
 
     async def mark_dead(self, sandbox_id: uuid.UUID) -> None:
         await self.session.execute(
-            update(SandboxRegistry)
-            .where(SandboxRegistry.id == sandbox_id)
-            .values(status="dead")
+            update(SandboxRegistry).where(SandboxRegistry.id == sandbox_id).values(status="dead")
         )
 
     async def list_active_idle_since(self, cutoff: datetime) -> list[SandboxRegistry]:

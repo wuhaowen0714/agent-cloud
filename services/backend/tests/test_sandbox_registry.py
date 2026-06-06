@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from agent_cloud_backend.models.user import User
 from agent_cloud_backend.repositories.sandbox_registry import SandboxRegistryRepository
@@ -52,8 +52,8 @@ async def test_list_active_idle_since(session):
     sid = uuid.uuid4()
     await repo.register(sid, u.id, "x")
     await session.commit()
-    future = datetime.now(timezone.utc) + timedelta(hours=1)
+    future = datetime.now(UTC) + timedelta(hours=1)
     stale = await repo.list_active_idle_since(future)  # everything is "idle since" a future cutoff
     assert sid in {s.id for s in stale}
-    past = datetime.now(timezone.utc) - timedelta(hours=1)
+    past = datetime.now(UTC) - timedelta(hours=1)
     assert await repo.list_active_idle_since(past) == []
