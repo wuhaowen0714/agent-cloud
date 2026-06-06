@@ -61,3 +61,21 @@ async def client(engine) -> AsyncIterator[AsyncClient]:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
+
+
+@pytest_asyncio.fixture
+async def client_noraise(engine) -> AsyncIterator[AsyncClient]:
+    """Like ``client`` but does NOT re-raise app exceptions: unhandled errors
+    surface as real 500 responses (as a production HTTP client would see them),
+    instead of propagating into the test. Needed to assert 5xx behavior."""
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def _override() -> AsyncIterator[AsyncSession]:
+        async with maker() as s:
+            yield s
+
+    app = create_app()
+    app.dependency_overrides[get_session] = _override
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
