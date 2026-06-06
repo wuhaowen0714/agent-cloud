@@ -11,3 +11,9 @@ agent 的"脑":回合循环 + provider 抽象 + 工具接口。纯库,无网络/
 ```bash
 cd services/worker && uv run pytest -v   # 纯单元测试,无需 Docker
 ```
+
+## gRPC 服务器(Plan 2c)
+- `agent_cloud_worker.server.create_server(provider_factory, host, port)` — 启动 `Worker` aio gRPC 服务,实现 `RunTurn`。
+- 契约:`protos/agent_cloud/v1/worker.proto`(`RunTurnRequest/Response`)。
+- `provider_factory(model, provider, key_ref) -> Provider`:由 agent 配置造 provider(真实 LLM provider 后续接入)。
+- 后端编排(会话锁/上下文组装/落库)见 Plan 2d。

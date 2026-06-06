@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import grpc
-
 from agent_cloud.v1 import worker_pb2, worker_pb2_grpc
 from agent_cloud_common import ContextDocument, MemoryItem, SkillRef
 from agent_cloud_common.codec import msg_from_proto, msg_to_proto
@@ -36,8 +35,11 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
         async with grpc.aio.insecure_channel(request.sandbox_endpoint) as channel:
             executor = SandboxToolExecutor(channel, request.work_subdir)
             result = await run_turn(
-                provider, executor,
-                system=system, history=history, user_message=request.user_message,
+                provider,
+                executor,
+                system=system,
+                history=history,
+                user_message=request.user_message,
             )
         return worker_pb2.RunTurnResponse(
             new_messages=[msg_to_proto(m) for m in result.new_messages],
