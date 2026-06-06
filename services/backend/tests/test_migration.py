@@ -28,6 +28,13 @@ def test_alembic_upgrade_creates_schema(migration_pg_url: str):
             )
         )
         indexes = {r[0] for r in idx_rows}
+        skill_idx_rows = conn.execute(
+            text(
+                "SELECT indexname FROM pg_indexes "
+                "WHERE schemaname='public' AND tablename='skills'"
+            )
+        )
+        skill_indexes = {r[0] for r in skill_idx_rows}
     assert {
         "users",
         "agent_configs",
@@ -36,6 +43,9 @@ def test_alembic_upgrade_creates_schema(migration_pg_url: str):
         "context_documents",
         "memory_entries",
         "sandbox_registry",
+        "skills",
+        "agent_skill_enables",
     }.issubset(tables)
     assert "alembic_version" in tables
     assert "uq_active_sandbox_per_user" in indexes
+    assert "uq_skill_user_name" in skill_indexes
