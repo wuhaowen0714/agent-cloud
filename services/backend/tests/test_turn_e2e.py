@@ -1,8 +1,4 @@
-import pytest
 import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import async_sessionmaker
-
 from agent_cloud_backend.api.deps import get_session
 from agent_cloud_backend.config import Settings, get_settings
 from agent_cloud_backend.main import create_app
@@ -10,6 +6,8 @@ from agent_cloud_common import CompletionResult, Message, Role, ToolCall, Usage
 from agent_cloud_sandbox.server import create_server as create_sandbox_server
 from agent_cloud_worker.provider import FakeProvider
 from agent_cloud_worker.server import create_server as create_worker_server
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 
 @pytest_asyncio.fixture
@@ -17,16 +15,28 @@ async def stack(engine, tmp_path):
     # 真沙箱
     sandbox_server, sport = await create_sandbox_server(base_workdir=tmp_path, port=0)
     # 真 worker(FakeProvider:写文件再收尾)
-    provider = FakeProvider([
-        CompletionResult(message=Message(role=Role.ASSISTANT, tool_calls=[
-            ToolCall(id="c1", name="write_file",
-                     arguments={"path": "hello.txt", "content": "from-agent"})]),
-            usage=Usage(input_tokens=2, output_tokens=3)),
-        CompletionResult(message=Message(role=Role.ASSISTANT, text="done"),
-                         usage=Usage(input_tokens=2, output_tokens=3)),
-    ])
-    worker_server, wport = await create_worker_server(
-        provider_factory=lambda *a: provider, port=0)
+    provider = FakeProvider(
+        [
+            CompletionResult(
+                message=Message(
+                    role=Role.ASSISTANT,
+                    tool_calls=[
+                        ToolCall(
+                            id="c1",
+                            name="write_file",
+                            arguments={"path": "hello.txt", "content": "from-agent"},
+                        )
+                    ],
+                ),
+                usage=Usage(input_tokens=2, output_tokens=3),
+            ),
+            CompletionResult(
+                message=Message(role=Role.ASSISTANT, text="done"),
+                usage=Usage(input_tokens=2, output_tokens=3),
+            ),
+        ]
+    )
+    worker_server, wport = await create_worker_server(provider_factory=lambda *a: provider, port=0)
 
     maker = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -35,8 +45,7 @@ async def stack(engine, tmp_path):
             yield sdb
 
     def _override_settings():
-        return Settings(worker_endpoint=f"localhost:{wport}",
-                        sandbox_endpoint=f"localhost:{sport}")
+        return Settings(worker_endpoint=f"localhost:{wport}", sandbox_endpoint=f"localhost:{sport}")
 
     app = create_app()
     app.dependency_overrides[get_session] = _override_session
@@ -51,10 +60,15 @@ async def stack(engine, tmp_path):
 async def test_full_turn_through_all_layers(stack):
     client, base = stack
     uid = (await client.post("/users", json={"email": "e2e@example.com"})).json()["id"]
-    aid = (await client.post("/agent-configs",
-           json={"user_id": uid, "name": "coder", "model": "m", "provider": "fake"})).json()["id"]
-    sid = (await client.post("/sessions",
-           json={"user_id": uid, "agent_config_id": aid})).json()["id"]
+    aid = (
+        await client.post(
+            "/agent-configs",
+            json={"user_id": uid, "name": "coder", "model": "m", "provider": "fake"},
+        )
+    ).json()["id"]
+    sid = (await client.post("/sessions", json={"user_id": uid, "agent_config_id": aid})).json()[
+        "id"
+    ]
 
     r = await client.post(f"/sessions/{sid}/turn", json={"content": "write the file"})
     assert r.status_code == 200, r.text

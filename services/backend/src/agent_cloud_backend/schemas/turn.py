@@ -13,6 +13,6 @@ class TurnUsage(BaseModel):
 
 
 class TurnResponse(BaseModel):
-    messages: list[MessageRead]   # 本回合新增的 assistant/tool 消息
+    messages: list[MessageRead]  # 本回合新增的 assistant/tool 消息
     stop_reason: str
     usage: TurnUsage

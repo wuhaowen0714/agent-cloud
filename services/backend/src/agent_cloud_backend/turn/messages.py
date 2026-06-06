@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from agent_cloud_backend.models.message import Message as OrmMessage
 from agent_cloud_common import Message as CommonMessage
 from agent_cloud_common import Role, ToolCall, ToolResult
+
+from agent_cloud_backend.models.message import Message as OrmMessage
 
 
 def orm_to_common(message: OrmMessage) -> CommonMessage:

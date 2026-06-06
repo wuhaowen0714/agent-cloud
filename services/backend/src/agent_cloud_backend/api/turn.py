@@ -3,7 +3,8 @@ from __future__ import annotations
 import uuid
 
 import grpc
-from fastapi import APIRouter, Depends, HTTPException, status
+from agent_cloud_common.codec import msg_from_proto
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_cloud_backend.api.deps import get_session
@@ -15,7 +16,6 @@ from agent_cloud_backend.schemas.turn import TurnRequest, TurnResponse, TurnUsag
 from agent_cloud_backend.turn.assemble import build_run_turn_request
 from agent_cloud_backend.turn.messages import common_to_content
 from agent_cloud_backend.turn.worker_client import run_turn_via_worker
-from agent_cloud_common.codec import msg_from_proto
 
 router = APIRouter(prefix="/sessions/{session_id}/turn", tags=["turn"])
 
@@ -44,20 +44,29 @@ async def run_turn_endpoint(
         # 2. 持久化 user 消息
         user_msg = await msg_repo.append(
             session_id,
-            Message(session_id=session_id, seq=0, role="user",
-                    content={"text": body.content, "tool_calls": [], "tool_results": []}),
+            Message(
+                session_id=session_id,
+                seq=0,
+                role="user",
+                content={"text": body.content, "tool_calls": [], "tool_results": []},
+            ),
         )
         await db.commit()
 
         # 3. 组装 + 调 worker
         request = await build_run_turn_request(
-            db, s, sandbox_endpoint=settings.sandbox_endpoint,
-            user_message=body.content, exclude_message_id=user_msg.id,
+            db,
+            s,
+            sandbox_endpoint=settings.sandbox_endpoint,
+            user_message=body.content,
+            exclude_message_id=user_msg.id,
         )
         try:
             response = await run_turn_via_worker(settings.worker_endpoint, request)
         except grpc.aio.AioRpcError as exc:
-            raise HTTPException(status_code=502, detail=f"worker unavailable: {exc.code().name}")
+            raise HTTPException(
+                status_code=502, detail=f"worker unavailable: {exc.code().name}"
+            ) from exc
 
         # 4. 落库新消息
         persisted = []
@@ -65,8 +74,12 @@ async def run_turn_endpoint(
             common = msg_from_proto(proto_msg)
             row = await msg_repo.append(
                 session_id,
-                Message(session_id=session_id, seq=0, role=common.role.value,
-                        content=common_to_content(common)),
+                Message(
+                    session_id=session_id,
+                    seq=0,
+                    role=common.role.value,
+                    content=common_to_content(common),
+                ),
             )
             persisted.append(row)
         await db.commit()
@@ -74,8 +87,9 @@ async def run_turn_endpoint(
         return TurnResponse(
             messages=persisted,
             stop_reason=response.stop_reason,
-            usage=TurnUsage(input_tokens=response.input_tokens,
-                            output_tokens=response.output_tokens),
+            usage=TurnUsage(
+                input_tokens=response.input_tokens, output_tokens=response.output_tokens
+            ),
         )
     finally:
         # 5. 释放锁

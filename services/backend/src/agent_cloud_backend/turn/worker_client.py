@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import grpc
-
 from agent_cloud.v1 import worker_pb2, worker_pb2_grpc
 from agent_cloud_common import MAX_GRPC_MESSAGE_BYTES
 

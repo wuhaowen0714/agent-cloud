@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from agent_cloud.v1 import worker_pb2
 from agent_cloud_common.codec import msg_to_proto
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_cloud_backend.models.session import Session
 from agent_cloud_backend.repositories.agent_config import AgentConfigRepository

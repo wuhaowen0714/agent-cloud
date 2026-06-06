@@ -104,9 +104,7 @@ async def test_session_with_bogus_agent_config_returns_409(client):
     """I2: FK violation (non-existent agent_config_id) should be 409."""
     uid = (await client.post("/users", json={"email": "fk@example.com"})).json()["id"]
     bogus_agent = str(uuid.uuid4())
-    r = await client.post(
-        "/sessions", json={"user_id": uid, "agent_config_id": bogus_agent}
-    )
+    r = await client.post("/sessions", json={"user_id": uid, "agent_config_id": bogus_agent})
     assert r.status_code == 409, r.text
     assert "detail" in r.json()
 
@@ -130,9 +128,7 @@ async def test_user_not_found_returns_404(client):
 
 async def test_agent_config_patch_not_found_returns_404(client):
     """I1: PATCH an unknown agent-config id -> 404."""
-    r = await client.patch(
-        f"/agent-configs/{uuid.uuid4()}", json={"name": "nope"}
-    )
+    r = await client.patch(f"/agent-configs/{uuid.uuid4()}", json={"name": "nope"})
     assert r.status_code == 404, r.text
 
 
@@ -177,9 +173,9 @@ async def test_message_seq_ordering_three_rows(client):
             json={"user_id": uid, "name": "c", "model": "m", "provider": "p"},
         )
     ).json()["id"]
-    sid = (
-        await client.post("/sessions", json={"user_id": uid, "agent_config_id": aid})
-    ).json()["id"]
+    sid = (await client.post("/sessions", json={"user_id": uid, "agent_config_id": aid})).json()[
+        "id"
+    ]
 
     for i in range(3):
         r = await client.post(

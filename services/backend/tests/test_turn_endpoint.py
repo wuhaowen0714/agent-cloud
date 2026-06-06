@@ -1,7 +1,6 @@
 import uuid
 
 import pytest
-
 from agent_cloud.v1 import worker_pb2
 
 
@@ -14,25 +13,44 @@ def fake_worker(monkeypatch):
         captured["request"] = request
         return worker_pb2.RunTurnResponse(
             new_messages=[
-                worker_pb2.Msg(role="assistant", text="", tool_calls=[
-                    worker_pb2.ToolCall(id="c1", name="bash", arguments_json='{"command": "echo hi"}')]),
-                worker_pb2.Msg(role="tool", tool_results=[
-                    worker_pb2.ToolResult(call_id="c1", content="hi\n", is_error=False)]),
+                worker_pb2.Msg(
+                    role="assistant",
+                    text="",
+                    tool_calls=[
+                        worker_pb2.ToolCall(
+                            id="c1", name="bash", arguments_json='{"command": "echo hi"}'
+                        )
+                    ],
+                ),
+                worker_pb2.Msg(
+                    role="tool",
+                    tool_results=[
+                        worker_pb2.ToolResult(call_id="c1", content="hi\n", is_error=False)
+                    ],
+                ),
                 worker_pb2.Msg(role="assistant", text="done"),
             ],
-            input_tokens=5, output_tokens=7, stop_reason="end_turn",
+            input_tokens=5,
+            output_tokens=7,
+            stop_reason="end_turn",
         )
 
     from agent_cloud_backend.api import turn as turn_module
+
     monkeypatch.setattr(turn_module, "run_turn_via_worker", _fake)
     return captured
 
 
 async def _make_session(client):
     uid = (await client.post("/users", json={"email": "t@example.com"})).json()["id"]
-    aid = (await client.post("/agent-configs",
-           json={"user_id": uid, "name": "c", "model": "m", "provider": "p"})).json()["id"]
-    sid = (await client.post("/sessions", json={"user_id": uid, "agent_config_id": aid})).json()["id"]
+    aid = (
+        await client.post(
+            "/agent-configs", json={"user_id": uid, "name": "c", "model": "m", "provider": "p"}
+        )
+    ).json()["id"]
+    sid = (await client.post("/sessions", json={"user_id": uid, "agent_config_id": aid})).json()[
+        "id"
+    ]
     return sid
 
 
