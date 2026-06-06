@@ -9,6 +9,8 @@ class Settings(BaseSettings):
 
     worker_endpoint: str = "localhost:50052"
     sandbox_base_root: str = "/tmp/agent-cloud-sandboxes"
+    object_store_root: str = "/tmp/agent-cloud-object-store"
+    allow_uploaded_archives: bool = False
 
 
 def get_settings() -> Settings:

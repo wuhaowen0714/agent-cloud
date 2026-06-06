@@ -11,6 +11,8 @@ dependencies = [
     "pydantic>=2",
     "pydantic[email]",
     "pydantic-settings",
+    "pyyaml",
+    "python-multipart",
     "grpcio",
     "agent-cloud-common",
 ]
