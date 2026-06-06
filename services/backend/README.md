@@ -23,3 +23,4 @@ uv run pytest -v                       # 测试(需 Docker:testcontainers)
 - `SandboxManager.get_endpoint_for_user(user_id)` — 查 `SandboxRegistry`,命中则复用,否则经 `SandboxProvisioner` 起新 sandbox 并登记。`reap_idle()` 按 TTL 回收空闲 sandbox。
 - `SandboxProvisioner` 是接口;`InProcessProvisioner`(每用户持久工作目录的进程内实现)仅单副本/开发用,生产用 Docker/k8s impl。
 - 后端 turn 端点按用户路由(用 manager 取 endpoint)见 Plan 4b。
+- turn 端点(一元 + SSE)现按用户路由:`sandbox_endpoint = await SandboxManager.get_endpoint_for_user(user_id)`;不同用户进各自 sandbox(各自持久工作目录)。配置 `AGENT_CLOUD_SANDBOX_BASE_ROOT`(InProcessProvisioner 根目录)。死端点存活检测/健康检查为后续。
