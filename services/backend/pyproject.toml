@@ -37,6 +37,7 @@ dev = [
     "ruff",
     "agent-cloud-worker",
     "agent-cloud-sandbox",
+    "pytest-timeout>=2.4.0",
 ]
 
 [tool.pytest.ini_options]
