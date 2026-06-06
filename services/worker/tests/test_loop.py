@@ -3,10 +3,14 @@ from agent_cloud_common import (
     CompletionResult,
     Message,
     Role,
+    TextDelta,
     ToolCall,
+    ToolCallStarted,
+    ToolResultEvent,
+    TurnDone,
     Usage,
 )
-from agent_cloud_worker.loop import run_turn
+from agent_cloud_worker.loop import run_turn, run_turn_stream
 from agent_cloud_worker.provider import FakeProvider
 from agent_cloud_worker.tools import LocalToolExecutor, builtin_tools
 
@@ -241,3 +245,56 @@ async def test_empty_user_message_runs(tmp_path):
     # provider 仍收到一条(空文本)USER 消息
     assert seen["messages"][-1].role == Role.USER
     assert seen["messages"][-1].text == ""
+
+
+async def test_stream_single_response_no_tools(tmp_path):
+    provider = FakeProvider([_say("hello")])
+    events = [
+        e async for e in run_turn_stream(
+            provider, _executor(tmp_path), system="", history=[], user_message="hi")
+    ]
+    assert isinstance(events[0], TextDelta) and events[0].text == "hello"
+    assert isinstance(events[-1], TurnDone)
+    assert events[-1].stop_reason == "end_turn"
+    assert [m.role for m in events[-1].new_messages] == [Role.ASSISTANT]
+    assert events[-1].usage.output_tokens == 5
+
+
+async def test_stream_one_tool_round(tmp_path):
+    provider = FakeProvider([
+        _call("write_file", {"path": "o.txt", "content": "data"}),
+        _say("done"),
+    ])
+    events = [
+        e async for e in run_turn_stream(
+            provider, _executor(tmp_path), system="", history=[], user_message="go")
+    ]
+    kinds = [type(e).__name__ for e in events]
+    assert "ToolCallStarted" in kinds and "ToolResultEvent" in kinds
+    started = next(e for e in events if isinstance(e, ToolCallStarted))
+    assert started.name == "write_file"
+    tool_res = next(e for e in events if isinstance(e, ToolResultEvent))
+    assert tool_res.is_error is False
+    assert isinstance(events[-1], TurnDone) and events[-1].stop_reason == "end_turn"
+    assert (tmp_path / "o.txt").read_text() == "data"
+    assert [m.role for m in events[-1].new_messages] == [Role.ASSISTANT, Role.TOOL, Role.ASSISTANT]
+    assert events[-1].usage.output_tokens == 10  # 两轮累加
+
+
+async def test_stream_max_iterations(tmp_path):
+    provider = FakeProvider([_call("bash", {"command": "echo x"}) for _ in range(5)])
+    events = [
+        e async for e in run_turn_stream(
+            provider, _executor(tmp_path), system="", history=[], user_message="loop",
+            max_iterations=2)
+    ]
+    assert isinstance(events[-1], TurnDone) and events[-1].stop_reason == "max_iterations"
+    assert sum(isinstance(e, ToolResultEvent) for e in events) == 2
+
+
+async def test_stream_rejects_zero_iterations(tmp_path):
+    with pytest.raises(ValueError):
+        async for _ in run_turn_stream(
+            FakeProvider([]), _executor(tmp_path), system="", history=[],
+            user_message="x", max_iterations=0):
+            pass

@@ -1,15 +1,28 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 from agent_cloud_common import (
     CompletionRequest,
     Message,
     Role,
+    TextDelta,
+    ThinkingDelta,
+    ToolCallStarted,
+    ToolResultEvent,
+    TurnDone,
+    TurnEvent,
     Usage,
 )
 
-from agent_cloud_worker.provider import Provider
+from agent_cloud_worker.provider import (
+    Provider,
+    ProviderCompleted,
+    ProviderTextDelta,
+    ProviderThinkingDelta,
+    StreamingProvider,
+)
 from agent_cloud_worker.tools import ToolExecutor
 
 
@@ -70,3 +83,63 @@ async def run_turn(
         new_messages.append(tool_message)
 
     return TurnResult(new_messages=new_messages, usage=usage, stop_reason="max_iterations")
+
+
+async def run_turn_stream(
+    provider: StreamingProvider,
+    executor: ToolExecutor,
+    *,
+    system: str,
+    history: list[Message],
+    user_message: str,
+    max_iterations: int = 10,
+) -> AsyncIterator[TurnEvent]:
+    """流式版回合:消费 provider.stream 转发增量、执行工具并 yield 事件,最后 yield TurnDone。
+
+    TurnDone 携带本回合新增的 assistant/tool 消息(供后端持久化);用户消息不计入。
+    stop_reason="max_iterations" 表示回合未完成(可能止于 tool 消息),由调用方决定丢弃/重试。
+    """
+    if max_iterations < 1:
+        raise ValueError("max_iterations must be >= 1")
+
+    working: list[Message] = [*history, Message(role=Role.USER, text=user_message)]
+    new_messages: list[Message] = []
+    usage = Usage()
+
+    for _ in range(max_iterations):
+        completed: ProviderCompleted | None = None
+        async for event in provider.stream(
+            CompletionRequest(system=system, messages=list(working), tools=executor.specs())
+        ):
+            if isinstance(event, ProviderTextDelta):
+                yield TextDelta(text=event.text)
+            elif isinstance(event, ProviderThinkingDelta):
+                yield ThinkingDelta(text=event.text)
+            elif isinstance(event, ProviderCompleted):
+                completed = event
+        if completed is None:
+            raise RuntimeError("provider stream ended without a ProviderCompleted event")
+
+        usage.input_tokens += completed.usage.input_tokens
+        usage.output_tokens += completed.usage.output_tokens
+        assistant = completed.message
+        working.append(assistant)
+        new_messages.append(assistant)
+
+        if not assistant.tool_calls:
+            yield TurnDone(new_messages=new_messages, usage=usage, stop_reason="end_turn")
+            return
+
+        tool_results = []
+        for call in assistant.tool_calls:
+            yield ToolCallStarted(call_id=call.id, name=call.name, arguments=call.arguments)
+            result = await executor.execute(call)
+            yield ToolResultEvent(
+                call_id=result.call_id, content=result.content, is_error=result.is_error
+            )
+            tool_results.append(result)
+        tool_message = Message(role=Role.TOOL, tool_results=tool_results)
+        working.append(tool_message)
+        new_messages.append(tool_message)
+
+    yield TurnDone(new_messages=new_messages, usage=usage, stop_reason="max_iterations")
