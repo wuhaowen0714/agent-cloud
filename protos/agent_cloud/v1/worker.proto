@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package agent_cloud.v1;
+
+// worker:跑一个回合(后端→worker)。本计划为一元(非流式);流式见后续 Plan。
+service Worker {
+  rpc RunTurn(RunTurnRequest) returns (RunTurnResponse);
+}
+
+message ToolCall {
+  string id = 1;
+  string name = 2;
+  string arguments_json = 3;
+}
+
+message ToolResult {
+  string call_id = 1;
+  string content = 2;
+  bool is_error = 3;
+}
+
+message Msg {
+  string role = 1;  // user | assistant | tool
+  string text = 2;
+  repeated ToolCall tool_calls = 3;
+  repeated ToolResult tool_results = 4;
+}
+
+message Agent {
+  string model = 1;
+  string provider = 2;
+  string thinking_level = 3;
+  repeated string enabled_tools = 4;
+  string key_ref = 5;
+}
+
+message Doc {
+  string scope = 1;
+  string type = 2;
+  string content = 3;
+}
+
+message Mem {
+  string scope = 1;
+  string content = 2;
+}
+
+message Skill {
+  string name = 1;
+  string description = 2;
+  string location = 3;
+}
+
+message RunTurnRequest {
+  string session_id = 1;
+  string user_id = 2;
+  Agent agent = 3;
+  repeated Doc documents = 4;
+  repeated Mem memory = 5;
+  repeated Skill skills = 6;
+  repeated Msg messages = 7;   // 历史
+  string user_message = 8;
+  string sandbox_endpoint = 9;
+  string work_subdir = 10;
+}
+
+message RunTurnResponse {
+  repeated Msg new_messages = 1;
+  int64 input_tokens = 2;
+  int64 output_tokens = 3;
+  string stop_reason = 4;
+}
