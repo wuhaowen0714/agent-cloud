@@ -76,6 +76,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "grpcio-tools" },
+    { name = "pytest" },
 ]
 
 [package.metadata]
@@ -85,7 +86,10 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "grpcio-tools" }]
+dev = [
+    { name = "grpcio-tools" },
+    { name = "pytest" },
+]
 
 [[package]]
 name = "agent-cloud-sandbox"
