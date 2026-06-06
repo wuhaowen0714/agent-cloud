@@ -21,7 +21,10 @@ async def install_skill_from_dir(
     repo: SkillRepository,
     store: ObjectStore,
 ) -> Skill:
-    """解析 SKILL.md → 存对象存储 → 注册 DB。name 重复抛 ValueError;缺 SKILL.md 抛 FileNotFoundError。"""
+    """解析 SKILL.md → 存对象存储 → 注册 DB。
+
+    name 重复抛 ValueError;缺 SKILL.md 抛 FileNotFoundError。
+    """
     skill_md = Path(src_dir) / "SKILL.md"
     if not skill_md.is_file():
         raise FileNotFoundError("package missing SKILL.md")

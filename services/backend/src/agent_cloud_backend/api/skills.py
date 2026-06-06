@@ -61,9 +61,9 @@ async def install_skill(
             store=store,
         )
     except SkillManifestError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+        raise HTTPException(status_code=422, detail=str(e)) from e
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise HTTPException(status_code=409, detail=str(e)) from e
     await session.commit()
     return skill
 
@@ -83,7 +83,7 @@ async def upload_skill(
         try:
             _safe_extract_zip(file.file, extract_dir)
         except (zipfile.BadZipFile, ValueError) as e:
-            raise HTTPException(status_code=422, detail=f"invalid archive: {e}")
+            raise HTTPException(status_code=422, detail=f"invalid archive: {e}") from e
         root = _locate_skill_root(extract_dir)
         if root is None:
             raise HTTPException(status_code=422, detail="archive missing SKILL.md")
@@ -96,9 +96,9 @@ async def upload_skill(
                 store=store,
             )
         except SkillManifestError as e:
-            raise HTTPException(status_code=422, detail=str(e))
+            raise HTTPException(status_code=422, detail=str(e)) from e
         except ValueError as e:
-            raise HTTPException(status_code=409, detail=str(e))
+            raise HTTPException(status_code=409, detail=str(e)) from e
     await session.commit()
     return skill
 
