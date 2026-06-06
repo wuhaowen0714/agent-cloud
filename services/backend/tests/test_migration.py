@@ -19,6 +19,15 @@ def test_alembic_upgrade_creates_schema(migration_pg_url: str):
     with engine.connect() as conn:
         rows = conn.execute(text("SELECT tablename FROM pg_tables WHERE schemaname='public'"))
         tables = {r[0] for r in rows}
+        # the hand-written partial unique index must be created by the migration
+        # (autogenerate misses partial indexes, so this guards that migration)
+        idx_rows = conn.execute(
+            text(
+                "SELECT indexname FROM pg_indexes "
+                "WHERE schemaname='public' AND tablename='sandbox_registry'"
+            )
+        )
+        indexes = {r[0] for r in idx_rows}
     assert {
         "users",
         "agent_configs",
@@ -26,5 +35,7 @@ def test_alembic_upgrade_creates_schema(migration_pg_url: str):
         "messages",
         "context_documents",
         "memory_entries",
+        "sandbox_registry",
     }.issubset(tables)
     assert "alembic_version" in tables
+    assert "uq_active_sandbox_per_user" in indexes
