@@ -1,3 +1,4 @@
+from agent_cloud_common.grpc_limits import MAX_GRPC_MESSAGE_BYTES
 from agent_cloud_common.tools import builtin_tool_specs
 from agent_cloud_common.types import (
     CompletionRequest,
@@ -26,4 +27,5 @@ __all__ = [
     "MemoryItem",
     "SkillRef",
     "builtin_tool_specs",
+    "MAX_GRPC_MESSAGE_BYTES",
 ]
