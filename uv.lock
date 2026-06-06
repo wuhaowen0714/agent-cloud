@@ -70,6 +70,7 @@ version = "0.0.0"
 source = { editable = "packages/common" }
 dependencies = [
     { name = "grpcio" },
+    { name = "protobuf" },
 ]
 
 [package.dev-dependencies]
@@ -78,7 +79,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "grpcio" }]
+requires-dist = [
+    { name = "grpcio" },
+    { name = "protobuf" },
+]
 
 [package.metadata.requires-dev]
 dev = [{ name = "grpcio-tools" }]
