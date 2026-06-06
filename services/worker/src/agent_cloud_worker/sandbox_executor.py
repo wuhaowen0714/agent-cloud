@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 
 import grpc
-
 from agent_cloud.v1 import sandbox_pb2, sandbox_pb2_grpc
 from agent_cloud_common import ToolCall, ToolResult, ToolSpec, builtin_tool_specs
 

@@ -18,9 +18,7 @@ class FakeProvider:
 
     async def complete(self, request: CompletionRequest) -> CompletionResult:
         if self._index >= len(self._scripted):
-            raise IndexError(
-                f"FakeProvider script exhausted after {len(self._scripted)} calls"
-            )
+            raise IndexError(f"FakeProvider script exhausted after {len(self._scripted)} calls")
         result = self._scripted[self._index]
         self._index += 1
         return result

@@ -60,4 +60,4 @@ def test_skill_metadata_is_xml_escaped():
     assert "&lt;" in out
     # 原始未转义片段不应出现
     assert "<tag>" not in out
-    assert ' & ' not in out
+    assert " & " not in out

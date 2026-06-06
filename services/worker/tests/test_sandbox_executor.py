@@ -1,6 +1,5 @@
 import grpc
 import pytest_asyncio
-
 from agent_cloud_common import CompletionResult, Message, Role, ToolCall, Usage
 from agent_cloud_sandbox.server import create_server
 from agent_cloud_worker.loop import run_turn
@@ -17,15 +16,18 @@ async def sandbox(tmp_path):
 
 def _call(tool, args):
     return CompletionResult(
-        message=Message(role=Role.ASSISTANT,
-                        tool_calls=[ToolCall(id="c1", name=tool, arguments=args)]),
+        message=Message(
+            role=Role.ASSISTANT, tool_calls=[ToolCall(id="c1", name=tool, arguments=args)]
+        ),
         usage=Usage(input_tokens=1, output_tokens=1),
     )
 
 
 def _final(text):
-    return CompletionResult(message=Message(role=Role.ASSISTANT, text=text),
-                            usage=Usage(input_tokens=1, output_tokens=1))
+    return CompletionResult(
+        message=Message(role=Role.ASSISTANT, text=text),
+        usage=Usage(input_tokens=1, output_tokens=1),
+    )
 
 
 async def test_specs_match_catalog(sandbox):
@@ -37,10 +39,12 @@ async def test_specs_match_catalog(sandbox):
 
 async def test_run_turn_executes_tool_across_grpc(sandbox):
     addr, base = sandbox
-    provider = FakeProvider([
-        _call("write_file", {"path": "hello.txt", "content": "from-agent"}),
-        _final("done"),
-    ])
+    provider = FakeProvider(
+        [
+            _call("write_file", {"path": "hello.txt", "content": "from-agent"}),
+            _final("done"),
+        ]
+    )
     async with grpc.aio.insecure_channel(addr) as channel:
         ex = SandboxToolExecutor(channel, work_subdir="s1")
         result = await run_turn(provider, ex, system="", history=[], user_message="write it")

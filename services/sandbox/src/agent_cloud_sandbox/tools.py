@@ -16,9 +16,7 @@ def _resolve_within(workdir: Path, path: str) -> Path:
 # bash 执行任意命令;进程/文件系统隔离由真实部署的沙箱(microVM/gVisor + cgroups,
 # spec §11)负责,不是这段本地实现的职责。
 def _bash(workdir: Path, args: dict) -> str:
-    proc = subprocess.run(
-        args["command"], shell=True, cwd=workdir, capture_output=True, text=True
-    )
+    proc = subprocess.run(args["command"], shell=True, cwd=workdir, capture_output=True, text=True)
     output = proc.stdout + proc.stderr
     if proc.returncode != 0:
         raise RuntimeError(f"exit {proc.returncode}: {output}")

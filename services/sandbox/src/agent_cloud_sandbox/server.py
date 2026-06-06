@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import grpc
-
 from agent_cloud.v1 import sandbox_pb2, sandbox_pb2_grpc
+
 from agent_cloud_sandbox.tools import run_tool
 
 

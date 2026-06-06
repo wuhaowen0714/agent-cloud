@@ -2,8 +2,7 @@ from agent_cloud_sandbox.tools import run_tool
 
 
 def test_write_then_read(tmp_path):
-    content, err = run_tool(tmp_path, "s1", "write_file",
-                            '{"path": "a.txt", "content": "hello"}')
+    content, err = run_tool(tmp_path, "s1", "write_file", '{"path": "a.txt", "content": "hello"}')
     assert err is False
     content, err = run_tool(tmp_path, "s1", "read_file", '{"path": "a.txt"}')
     assert err is False and content == "hello"
@@ -37,8 +36,9 @@ def test_invalid_json(tmp_path):
 
 
 def test_path_traversal_rejected(tmp_path):
-    content, err = run_tool(tmp_path, "s1", "write_file",
-                            '{"path": "../escape.txt", "content": "x"}')
+    content, err = run_tool(
+        tmp_path, "s1", "write_file", '{"path": "../escape.txt", "content": "x"}'
+    )
     assert err is True and "escapes working directory" in content
     assert not (tmp_path / "escape.txt").exists()
 
