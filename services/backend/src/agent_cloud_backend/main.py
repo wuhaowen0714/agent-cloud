@@ -8,6 +8,7 @@ from agent_cloud_backend.api import (
     memory_entries,
     messages,
     sessions,
+    turn,
     users,
 )
 
@@ -30,7 +31,15 @@ def create_app() -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    for module in (users, agent_configs, sessions, messages, context_documents, memory_entries):
+    for module in (
+        users,
+        agent_configs,
+        sessions,
+        messages,
+        context_documents,
+        memory_entries,
+        turn,
+    ):
         app.include_router(module.router)
 
     return app
