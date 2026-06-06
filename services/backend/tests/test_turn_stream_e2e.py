@@ -4,8 +4,10 @@ import pytest_asyncio
 from agent_cloud_backend.api.deps import get_session
 from agent_cloud_backend.config import Settings, get_settings
 from agent_cloud_backend.main import create_app
+from agent_cloud_backend.sandbox.deps import get_sandbox_manager
+from agent_cloud_backend.sandbox.inprocess import InProcessProvisioner
+from agent_cloud_backend.sandbox.manager import SandboxManager
 from agent_cloud_common import CompletionResult, Message, Role, ToolCall, Usage
-from agent_cloud_sandbox.server import create_server as create_sandbox_server
 from agent_cloud_worker.provider import FakeProvider
 from agent_cloud_worker.server import create_server as create_worker_server
 from httpx import ASGITransport, AsyncClient
@@ -35,7 +37,6 @@ async def stack(engine, tmp_path):
     _saved = db_module._sessionmaker
     db_module._sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
 
-    sandbox_server, sport = await create_sandbox_server(base_workdir=tmp_path, port=0)
     provider = FakeProvider(
         [
             CompletionResult(
@@ -64,16 +65,18 @@ async def stack(engine, tmp_path):
         async with maker() as s:
             yield s
 
+    manager = SandboxManager(
+        provisioner=InProcessProvisioner(base_root=tmp_path), sessionmaker=maker
+    )
+
     app = create_app()
     app.dependency_overrides[get_session] = _override_session
-    app.dependency_overrides[get_settings] = lambda: Settings(
-        worker_endpoint=f"localhost:{wport}", sandbox_endpoint=f"localhost:{sport}"
-    )
+    app.dependency_overrides[get_settings] = lambda: Settings(worker_endpoint=f"localhost:{wport}")
+    app.dependency_overrides[get_sandbox_manager] = lambda: manager
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c, tmp_path
     await worker_server.stop(None)
-    await sandbox_server.stop(None)
     db_module._sessionmaker = _saved
 
 
@@ -98,8 +101,8 @@ async def test_full_streaming_turn(stack):
     assert kinds[-1] == "turn_done"
     assert events[-1]["stop_reason"] == "end_turn" and len(events[-1]["message_ids"]) == 3
 
-    # tool executed in the sandbox
-    assert (base / f"sessions/{sid}" / "hi.txt").read_text() == "yo"
+    # tool executed in the per-user sandbox dir ({uid}/sessions/{sid})
+    assert (base / str(uid) / f"sessions/{sid}" / "hi.txt").read_text() == "yo"
     # DB persisted user + assistant + tool + assistant
     listed = (await client.get(f"/sessions/{sid}/messages")).json()
     assert [m["role"] for m in listed] == ["user", "assistant", "tool", "assistant"]
