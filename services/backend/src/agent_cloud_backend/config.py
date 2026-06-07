@@ -15,6 +15,23 @@ class Settings(BaseSettings):
     # 回合进行中每隔这么多秒续租会话锁(必须远小于 try_acquire 的 600s lease)
     session_heartbeat_seconds: int = 200
 
+    # ── 沙箱 provisioner(spec: docker-sandbox-provisioner-design)──
+    sandbox_provisioner: str = "inprocess"  # inprocess | docker
+    sandbox_host_root: str = ""  # DooD 下宿主 workspace 根;空=回退 sandbox_base_root
+    sandbox_image: str = "agent-cloud-sandbox:latest"
+    sandbox_docker_network_mode: str = "publish"  # publish(dev) | network(prod)
+    sandbox_docker_network: str = "agent-cloud-net"
+    sandbox_mem_limit: str = "512m"
+    sandbox_nano_cpus: int = 1_000_000_000  # 1 vCPU
+    sandbox_pids_limit: int = 256
+    sandbox_allow_net: bool = True
+    sandbox_idle_ttl_seconds: int = 1800
+    sandbox_reap_interval_seconds: int = 120
+
+    @property
+    def effective_sandbox_host_root(self) -> str:
+        return self.sandbox_host_root or self.sandbox_base_root
+
 
 def get_settings() -> Settings:
     return Settings()
