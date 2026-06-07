@@ -1,6 +1,19 @@
 import pytest
 from agent_cloud.v1 import worker_pb2
-from agent_cloud_common.codec import msg_from_proto, msg_to_proto
+from agent_cloud_common import (
+    TextDelta,
+    ThinkingDelta,
+    ToolCallStarted,
+    ToolResultEvent,
+    TurnDone,
+    Usage,
+)
+from agent_cloud_common.codec import (
+    msg_from_proto,
+    msg_to_proto,
+    turn_event_from_proto,
+    turn_event_to_proto,
+)
 from agent_cloud_common.types import Message, Role, ToolCall, ToolResult
 
 
@@ -41,12 +54,6 @@ def test_from_proto_rejects_non_dict_arguments():
     )
     with pytest.raises(ValueError, match="must be a JSON object"):
         msg_from_proto(proto)
-
-
-from agent_cloud_common import (
-    TextDelta, ThinkingDelta, ToolCallStarted, ToolResultEvent, TurnDone, Usage,
-)
-from agent_cloud_common.codec import turn_event_from_proto, turn_event_to_proto
 
 
 def test_round_trip_text_delta():
