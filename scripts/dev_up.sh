@@ -18,6 +18,12 @@ else
   echo "⚠ 未找到 $ROOT/.env —— worker 将缺少 OpenAI 凭据,回合会失败。请先按 .env.example 建 .env。"
 fi
 
+# gRPC C-core 会读 http_proxy/https_proxy,把【本机】gRPC 连接(backend→worker、worker→沙箱,
+# 全是 localhost)也塞进代理 → 代理 CONNECT 不到本机端口 → 回合报 "the turn was interrupted"。
+# 让 gRPC 对 localhost 绕过代理(httpx 调 LLM 仍走代理、不受影响)。proxy shell 里跑必须设。
+export no_grpc_proxy="localhost,127.0.0.1" NO_GRPC_PROXY="localhost,127.0.0.1"
+export no_proxy="localhost,127.0.0.1${no_proxy:+,$no_proxy}" NO_PROXY="localhost,127.0.0.1${NO_PROXY:+,$NO_PROXY}"
+
 # 尽早装好清理钩子:即便 Postgres 启动/迁移失败,也停掉容器、不留半截状态。
 pids=()
 cleanup() {
