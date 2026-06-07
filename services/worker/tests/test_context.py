@@ -40,6 +40,16 @@ def test_empty_inputs_still_include_base_environment_prompt():
     assert "/workspace" in out  # 明确告知不要假设 /workspace
 
 
+def test_base_prompt_states_sandbox_capabilities():
+    # 让模型知道环境能力,避免白试 apt、也避免误判"无网络"(实测:容器 cap_drop=ALL → apt
+    # 失败;但出网正常,pip --user / npm -g 可用且持久)。
+    out = build_system_prompt(documents=[], memory=[], skills=[])
+    assert "pip install --user" in out
+    assert "npm install -g" in out
+    assert "apt" in out  # 明确告知系统包管理器不可用
+    assert "internet" in out.lower()
+
+
 def test_skill_metadata_is_xml_escaped():
     # 恶意/含特殊字符的 description 不得破坏 <available_skills> 结构(prompt-injection 防护)
     out = build_system_prompt(

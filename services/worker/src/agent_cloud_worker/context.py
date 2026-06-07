@@ -64,7 +64,19 @@ absolute paths and do not assume any specific location such as `/workspace`, `/h
 — they may not exist.
 - Each bash call runs in a fresh shell that starts in the working directory. A `cd` affects only \
 that single command and does not carry over to the next call, so run files directly (e.g. \
-`python3 script.py`) rather than `cd`-ing first."""
+`python3 script.py`) rather than `cd`-ing first.
+
+Installing software and network:
+- To add libraries or tools, install them with `pip install --user` (Python) or `npm \
+install -g` (Node). These land in your persistent working directory, so they stay available \
+in later sessions.
+- Outbound internet works: you can fetch URLs and install from PyPI/npm. `curl` and `wget` \
+are NOT preinstalled — make HTTP requests from Python (the stdlib `urllib`, or install \
+`requests` with pip).
+- There is NO system package manager: `apt`, `apt-get`, and `sudo` will fail because the \
+sandbox runs with Linux capabilities dropped, and system packages would not persist anyway. \
+Do not try to install OS packages — use a pip or npm package, or a Python stdlib equivalent, \
+instead."""
 
 
 def build_system_prompt(
