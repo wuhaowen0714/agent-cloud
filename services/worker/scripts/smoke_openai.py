@@ -111,7 +111,40 @@ async def main() -> None:
                 f"tool_calls={[tc.name for tc in ev.message.tool_calls]}"
             )
 
-    print("\n✅ 联调通过:provider 能与该端点正常 complete + 工具调用 + 流式。")
+    # 4) 流式 + 工具(全栈 /turn/stream 走的就是这个组合;最易出问题的一步)
+    print("\n[4] stream + tools (流式下的工具调用)")
+    try:
+        print("  ", end="")
+        async for ev in provider.stream(
+            CompletionRequest(
+                system="Use the get_weather tool when asked about weather.",
+                messages=[
+                    Message(role=Role.USER, text="What's the weather in Paris? Use the tool.")
+                ],
+                tools=[WEATHER],
+            )
+        ):
+            if isinstance(ev, ProviderTextDelta):
+                print(ev.text, end="", flush=True)
+            elif isinstance(ev, ProviderThinkingDelta):
+                print(f"[think:{ev.text}]", end="", flush=True)
+            elif isinstance(ev, ProviderCompleted):
+                print(
+                    f"\n  done. usage={ev.usage} "
+                    f"tool_calls={[(tc.name, tc.arguments) for tc in ev.message.tool_calls]}"
+                )
+    except Exception as exc:  # noqa: BLE001 — 诊断:把真实异常和端点返回体打出来
+        print(f"\n  ❌ [4] 失败: {type(exc).__name__}: {exc}")
+        detail = getattr(exc, "body", None)
+        if detail is None:
+            resp = getattr(exc, "response", None)
+            detail = getattr(resp, "text", None)
+        if detail:
+            print(f"  端点返回: {detail}")
+        print("  → 这一步的报错就是全栈 /turn/stream 失败的根因。把它贴回来。")
+        return
+
+    print("\n✅ 联调通过:provider 能与该端点正常 complete + 工具调用 + 流式 + 流式工具调用。")
 
 
 if __name__ == "__main__":
