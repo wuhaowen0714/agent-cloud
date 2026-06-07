@@ -18,3 +18,5 @@ export type TurnEvent =
   | { type: "tool_result"; call_id: string; result: string; is_error: boolean }
   | { type: "turn_done"; usage: { input_tokens: number; output_tokens: number }; message_ids: string[]; stop_reason: string }
   | { type: "error"; message: string; recoverable: boolean }
+
+export interface FileEntry { name: string; path: string; is_dir: boolean; size: number; mtime: number }

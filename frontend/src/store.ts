@@ -14,12 +14,14 @@ interface AppState {
   agentId: string | null
   sessionId: string | null
   live: LiveTurn | null
+  fileDrawerOpen: boolean
   setUser: (id: string | null) => void
   setAgent: (id: string | null) => void
   setSession: (id: string | null) => void
   startLive: (userText: string) => void
   setLive: (fn: (t: LiveTurn) => LiveTurn) => void
   clearLive: () => void
+  toggleFileDrawer: () => void
 }
 
 const EMPTY: LiveTurn = { userText: "", blocks: [], status: "streaming" }
@@ -29,6 +31,7 @@ export const useStore = create<AppState>((set) => ({
   agentId: null,
   sessionId: null,
   live: null,
+  fileDrawerOpen: false,
   setUser: (id) => {
     if (id) localStorage.setItem("ac.userId", id)
     else localStorage.removeItem("ac.userId")
@@ -39,4 +42,5 @@ export const useStore = create<AppState>((set) => ({
   startLive: (userText) => set({ live: { ...EMPTY, userText, blocks: [] } }),
   setLive: (fn) => set((s) => (s.live ? { live: fn(s.live) } : {})),
   clearLive: () => set({ live: null }),
+  toggleFileDrawer: () => set((s) => ({ fileDrawerOpen: !s.fileDrawerOpen })),
 }))
