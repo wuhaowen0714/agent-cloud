@@ -22,7 +22,7 @@ import asyncio
 import sys
 from pathlib import Path
 
-from agent_cloud_common import CompletionRequest, Message, Role, ToolSpec
+from agent_cloud_common import CompletionRequest, Message, Role, ToolSpec, builtin_tool_specs
 from dotenv import load_dotenv
 
 # 从仓库根的 .env 读凭据(已被 gitignore);override=False 让显式 export 的优先。
@@ -144,7 +144,45 @@ async def main() -> None:
         print("  → 这一步的报错就是全栈 /turn/stream 失败的根因。把它贴回来。")
         return
 
-    print("\n✅ 联调通过:provider 能与该端点正常 complete + 工具调用 + 流式 + 流式工具调用。")
+    # 5) 复刻全栈 e2e 的请求:空 system + 3 个内置工具(bash/write_file/read_file)+ 文件任务
+    print("\n[5] stream + 内置工具(复刻 e2e 的请求)")
+    try:
+        async for ev in provider.stream(
+            CompletionRequest(
+                system="",
+                messages=[
+                    Message(
+                        role=Role.USER,
+                        text=(
+                            "Use the write_file tool to create notes.txt containing 'hi', "
+                            "then use read_file to read it back."
+                        ),
+                    )
+                ],
+                tools=builtin_tool_specs(),
+            )
+        ):
+            if isinstance(ev, ProviderTextDelta):
+                print(ev.text, end="", flush=True)
+            elif isinstance(ev, ProviderThinkingDelta):
+                print(f"[think:{ev.text}]", end="", flush=True)
+            elif isinstance(ev, ProviderCompleted):
+                print(
+                    f"\n  done. usage={ev.usage} "
+                    f"tool_calls={[(tc.name, tc.arguments) for tc in ev.message.tool_calls]}"
+                )
+    except Exception as exc:  # noqa: BLE001 — 诊断:打印真实异常 + 端点返回体
+        print(f"\n  ❌ [5] 失败: {type(exc).__name__}: {exc}")
+        detail = getattr(exc, "body", None)
+        if detail is None:
+            resp = getattr(exc, "response", None)
+            detail = getattr(resp, "text", None)
+        if detail:
+            print(f"  端点返回: {detail}")
+        print("  → 这就是全栈 /turn/stream 失败的根因。把它贴回来。")
+        return
+
+    print("\n✅ 联调通过:含「空 system + 内置工具」流式也正常。")
 
 
 if __name__ == "__main__":
