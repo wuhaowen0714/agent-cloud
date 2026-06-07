@@ -24,6 +24,8 @@ cleanup() {
   echo; echo "stopping…"
   # set -m 下 $! 是 job 的进程组 id;kill 负号 = 终止整组(含 uv/python/uvicorn/npm/vite)。
   for p in "${pids[@]:-}"; do [[ -n "$p" ]] && kill -- -"$p" 2>/dev/null || true; done
+  # 清掉本次起的沙箱容器(backend 进程退出后它们仍 detached 在跑);xargs -r 在 macOS 不可用,故手动判空。
+  sbx=$(docker ps -aq -f "label=managed-by=agent-cloud" 2>/dev/null); [ -n "$sbx" ] && docker rm -f $sbx >/dev/null 2>&1 || true
   docker stop "$PG_NAME" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM

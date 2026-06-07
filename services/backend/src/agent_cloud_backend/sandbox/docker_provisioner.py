@@ -32,6 +32,14 @@ class DockerProvisioner:
         allow_net: bool = True,
         client=None,
     ) -> None:
+        if not allow_net:
+            # 出网限制是网络层的事(internal network / 出网代理 / 域名 allowlist),
+            # 单靠 docker run 标志在 publish/network 两模式下都做不到(network_disabled
+            # 会同时断掉 worker→沙箱)。不静默假装支持 → fail-loud,避免虚假安全(spec §9)。
+            raise ValueError(
+                "sandbox_allow_net=False 暂未在 provisioner 层强制;请保持 ALLOW_NET=true,"
+                "并在部署网络层收紧出网(internal network / 出网代理 / allowlist)。"
+            )
         self._host_root = str(host_root)
         self._image = image
         self._network_mode = network_mode
@@ -39,12 +47,15 @@ class DockerProvisioner:
         self._mem_limit = mem_limit
         self._nano_cpus = nano_cpus
         self._pids_limit = pids_limit
-        self._allow_net = allow_net
-        if client is None:
+        # 懒连:None 时首次 spawn 才 docker.from_env(),daemon 不可达不致 backend 启动即崩。
+        self._client = client
+
+    def _docker(self):
+        if self._client is None:
             import docker
 
-            client = docker.from_env()
-        self._client = client
+            self._client = docker.from_env()
+        return self._client
 
     async def spawn(self, user_id: uuid.UUID) -> tuple[uuid.UUID, str]:
         sandbox_id = uuid.uuid4()
@@ -58,8 +69,10 @@ class DockerProvisioner:
             volumes={host_ws: {"bind": "/workspace", "mode": "rw"}},
             labels={"managed-by": _LABEL, "user_id": str(user_id)},
             mem_limit=self._mem_limit,
+            memswap_limit=self._mem_limit,  # 禁 swap(否则默认 memswap=2×mem,上限被悄悄翻倍)
             nano_cpus=self._nano_cpus,
             pids_limit=self._pids_limit,
+            tmpfs={"/tmp": "rw,size=128m"},  # /tmp 走 tmpfs,不落容器可写层、限大小
             cap_drop=["ALL"],
             security_opt=["no-new-privileges:true"],
         )
@@ -69,22 +82,34 @@ class DockerProvisioner:
         else:  # publish:发布随机宿主端口,worker 在宿主连 localhost
             kwargs["ports"] = {f"{_SANDBOX_PORT}/tcp": None}
             endpoint = ""
-        container = await asyncio.to_thread(self._client.containers.run, **kwargs)
-        if self._network_mode != "network":
-            await asyncio.to_thread(container.reload)
-            host_port = container.ports[f"{_SANDBOX_PORT}/tcp"][0]["HostPort"]
-            endpoint = f"127.0.0.1:{host_port}"
+        client = self._docker()
+        container = await asyncio.to_thread(client.containers.run, **kwargs)
+        # run 之后任何失败都把容器清掉,避免「在跑却没登记」的孤儿(reaper 只看 DB registry)。
+        try:
+            if self._network_mode != "network":
+                await asyncio.to_thread(container.reload)
+                mappings = container.ports.get(f"{_SANDBOX_PORT}/tcp") or []
+                if not mappings:
+                    raise RuntimeError(f"sandbox {name} did not publish a host port")
+                endpoint = f"127.0.0.1:{mappings[0]['HostPort']}"
+        except Exception:
+            try:
+                await asyncio.to_thread(container.remove, force=True)
+            except Exception:
+                logger.exception("failed to remove half-spawned sandbox %s", name)
+            raise
         logger.info("spawned sandbox %s for user %s at %s", sandbox_id, user_id, endpoint)
         return sandbox_id, endpoint
 
     async def stop(self, sandbox_id: uuid.UUID) -> None:
         name = f"acsbx-{sandbox_id}"
+        client = self._docker()
 
         def _stop() -> None:
             from docker.errors import NotFound
 
             try:
-                c = self._client.containers.get(name)
+                c = client.containers.get(name)
             except NotFound:
                 return  # 已不在 → no-op(Protocol 要求未知 id 视为 no-op)
             try:
@@ -96,11 +121,10 @@ class DockerProvisioner:
 
     async def stop_all(self) -> None:
         """停掉本系统起的所有沙箱容器(测试 teardown / 运维清理)。按 label 找。"""
+        client = self._docker()
 
         def _all() -> None:
-            for c in self._client.containers.list(
-                all=True, filters={"label": f"managed-by={_LABEL}"}
-            ):
+            for c in client.containers.list(all=True, filters={"label": f"managed-by={_LABEL}"}):
                 try:
                     c.stop(timeout=5)
                     c.remove(force=True)

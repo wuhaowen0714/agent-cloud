@@ -24,11 +24,12 @@ logger = logging.getLogger(__name__)
 async def _reaper_loop(interval_seconds: float, manager) -> None:
     """周期性回收空闲沙箱。单次失败不退出循环(spec §4.1:接上原本无调用方的 reap_idle)。"""
     while True:
-        await asyncio.sleep(interval_seconds)
+        # 先 reap 再 sleep:backend 重启后立刻回收上一进程遗留的空闲沙箱,不等满一个 interval。
         try:
             await manager.reap_idle()
         except Exception:
             logger.exception("sandbox reaper pass failed")
+        await asyncio.sleep(interval_seconds)
 
 
 @asynccontextmanager
