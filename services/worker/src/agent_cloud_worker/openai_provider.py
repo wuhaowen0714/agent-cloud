@@ -64,7 +64,11 @@ def to_openai_messages(request: CompletionRequest) -> list[dict]:
 def message_from_openai(om) -> Message:
     """OpenAI 响应 message → 领域 Message(assistant)。tool_call 参数始终 json.loads。"""
     tool_calls = [
-        ToolCall(id=tc.id, name=tc.function.name, arguments=json.loads(tc.function.arguments or "{}"))
+        ToolCall(
+            id=tc.id,
+            name=tc.function.name,
+            arguments=json.loads(tc.function.arguments or "{}"),
+        )
         for tc in (om.tool_calls or [])
     ]
     return Message(role=Role.ASSISTANT, text=om.content or "", tool_calls=tool_calls)

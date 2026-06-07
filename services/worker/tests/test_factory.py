@@ -1,5 +1,4 @@
 import pytest
-
 from agent_cloud_worker.config import WorkerSettings
 from agent_cloud_worker.factory import build_provider_factory
 from agent_cloud_worker.openai_provider import OpenAIProvider

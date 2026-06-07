@@ -113,7 +113,9 @@ def _delta(content=None, tool_calls=None, reasoning=None):
 
 
 def _usage_chunk(pt, ct):
-    return SimpleNamespace(choices=[], usage=SimpleNamespace(prompt_tokens=pt, completion_tokens=ct))
+    return SimpleNamespace(
+        choices=[], usage=SimpleNamespace(prompt_tokens=pt, completion_tokens=ct)
+    )
 
 
 async def test_stream_text_then_completed():
@@ -129,8 +131,12 @@ async def test_stream_text_then_completed():
 
 
 async def test_stream_accumulates_tool_call_arguments():
-    tc0 = SimpleNamespace(index=0, id="c1", function=SimpleNamespace(name="bash", arguments='{"comm'))
-    tc1 = SimpleNamespace(index=0, id=None, function=SimpleNamespace(name=None, arguments='and": "ls"}'))
+    tc0 = SimpleNamespace(
+        index=0, id="c1", function=SimpleNamespace(name="bash", arguments='{"comm')
+    )
+    tc1 = SimpleNamespace(
+        index=0, id=None, function=SimpleNamespace(name=None, arguments='and": "ls"}')
+    )
     chunks = [
         _delta(tool_calls=[tc0]),
         _delta(tool_calls=[tc1]),
