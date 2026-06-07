@@ -69,3 +69,20 @@ def test_materialize_empty_clears_skills_dir(tmp_path):
         store=LocalObjectStore(tmp_path / "obj"),
     )
     assert not root.exists()
+
+
+def test_materialize_replaces_file_at_skills_path(tmp_path):
+    # agent 可在 work_subdir 内用 write_file 把 .skills 写成一个文件;下回合物化必须
+    # 能处理(否则 rmtree 抛 NotADirectoryError → 持久 500)。
+    uid = uuid.uuid4()
+    store, ref = _store_with_skill(tmp_path, uid, "keep")
+    wd = "sessions/s1"
+    skills_root = tmp_path / "boxes" / str(uid) / wd / SKILLS_SUBDIR
+    skills_root.parent.mkdir(parents=True)
+    skills_root.write_text("agent clobbered this")  # .skills 是个文件,不是目录
+    materialize_enabled_skills(
+        base_root=tmp_path / "boxes", user_id=uid, work_subdir=wd,
+        skills=[_skill(uid, "keep", ref)], store=store,
+    )
+    assert skills_root.is_dir()
+    assert (skills_root / "keep" / "SKILL.md").read_text() == "# keep"

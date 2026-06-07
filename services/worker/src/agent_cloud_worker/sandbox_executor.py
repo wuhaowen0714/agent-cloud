@@ -35,6 +35,14 @@ class SandboxToolExecutor:
         return filtered_tool_specs(self._enabled_tools)
 
     async def execute(self, call: ToolCall) -> ToolResult:
+        # 在 worker(可信侧)强制 enabled_tools:不只是从 prompt 隐藏。否则 skill 的
+        # SKILL.md(不可信内容)可诱导模型调用被禁用的工具(如 bash)。空集=全部放行。
+        if self._enabled_tools and call.name not in self._enabled_tools:
+            return ToolResult(
+                call_id=call.id,
+                content=f"tool not enabled for this agent: {call.name}",
+                is_error=True,
+            )
         try:
             resp = await self._stub.ExecTool(
                 sandbox_pb2.ExecToolRequest(
