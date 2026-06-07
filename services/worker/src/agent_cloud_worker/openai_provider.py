@@ -4,10 +4,12 @@ import json
 
 from agent_cloud_common import (
     CompletionRequest,
+    CompletionResult,
     Message,
     Role,
     ToolCall,
     ToolSpec,
+    Usage,
 )
 
 
@@ -58,3 +60,35 @@ def message_from_openai(om) -> Message:
         for tc in (om.tool_calls or [])
     ]
     return Message(role=Role.ASSISTANT, text=om.content or "", tool_calls=tool_calls)
+
+
+class OpenAIProvider:
+    """OpenAI 兼容 chat completions 的 provider(注入 AsyncOpenAI 或兼容 client)。
+
+    实现既有 Provider/StreamingProvider 协议(complete + stream)。client 由 factory
+    用 base_url 覆盖构造,因此可对接任意 OpenAI 兼容端点。
+    """
+
+    def __init__(self, client, model: str, max_tokens: int) -> None:
+        self._client = client
+        self._model = model
+        self._max_tokens = max_tokens
+
+    def _create_kwargs(self, request: CompletionRequest) -> dict:
+        kwargs: dict = {
+            "model": self._model,
+            "messages": to_openai_messages(request),
+            "max_tokens": self._max_tokens,
+        }
+        if request.tools:
+            kwargs["tools"] = to_openai_tools(request.tools)
+        return kwargs
+
+    async def complete(self, request: CompletionRequest) -> CompletionResult:
+        resp = await self._client.chat.completions.create(**self._create_kwargs(request))
+        message = message_from_openai(resp.choices[0].message)
+        usage = Usage(
+            input_tokens=resp.usage.prompt_tokens,
+            output_tokens=resp.usage.completion_tokens,
+        )
+        return CompletionResult(message=message, usage=usage)
