@@ -38,12 +38,17 @@ until docker exec "$PG_NAME" pg_isready -U postgres >/dev/null 2>&1; do sleep 0.
 echo "[2/5] migrate…"
 ( cd "$ROOT/services/backend" && AGENT_CLOUD_DATABASE_URL="$PG_URL" uv run alembic upgrade head )
 
+echo "[2.5/5] build sandbox image…"
+docker build -f "$ROOT/deploy/sandbox.Dockerfile" -t agent-cloud-sandbox:latest "$ROOT" >/dev/null
+
 echo "[3/5] worker…"
 ( cd "$ROOT/services/worker" && uv run python -m agent_cloud_worker ) & pids+=($!)
 
 echo "[4/5] backend (uvicorn :8000)…"
 ( cd "$ROOT/services/backend" && AGENT_CLOUD_DATABASE_URL="$PG_URL" AGENT_CLOUD_WORKER_ENDPOINT="localhost:50052" \
   AGENT_CLOUD_SANDBOX_BASE_ROOT="/tmp/agent-cloud-sandboxes" AGENT_CLOUD_OBJECT_STORE_ROOT="/tmp/agent-cloud-objstore" \
+  AGENT_CLOUD_SANDBOX_PROVISIONER=docker AGENT_CLOUD_SANDBOX_HOST_ROOT="/tmp/agent-cloud-sandboxes" \
+  AGENT_CLOUD_SANDBOX_DOCKER_NETWORK_MODE=publish \
   uv run uvicorn agent_cloud_backend.main:app --port 8000 ) & pids+=($!)
 
 echo "[5/5] frontend (vite :5173)…"
