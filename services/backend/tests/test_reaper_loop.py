@@ -1,7 +1,6 @@
 import asyncio
 
 import pytest
-
 from agent_cloud_backend.main import _reaper_loop
 
 
