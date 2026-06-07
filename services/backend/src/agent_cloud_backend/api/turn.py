@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from pathlib import Path
 
 import grpc
 from agent_cloud_common import TurnDone
@@ -17,9 +18,13 @@ from agent_cloud_backend.db import get_sessionmaker
 from agent_cloud_backend.models.message import Message
 from agent_cloud_backend.repositories.message import MessageRepository
 from agent_cloud_backend.repositories.session import SessionRepository
+from agent_cloud_backend.repositories.skill import AgentSkillEnableRepository
 from agent_cloud_backend.sandbox.deps import get_sandbox_manager
 from agent_cloud_backend.sandbox.manager import SandboxManager
 from agent_cloud_backend.schemas.turn import TurnRequest, TurnResponse, TurnUsage
+from agent_cloud_backend.skills.deps import get_object_store
+from agent_cloud_backend.skills.materialize import materialize_enabled_skills
+from agent_cloud_backend.skills.store import ObjectStore
 from agent_cloud_backend.turn.assemble import build_run_turn_request
 from agent_cloud_backend.turn.messages import common_to_content
 from agent_cloud_backend.turn.sse import error_sse, format_sse, turn_event_to_sse
@@ -40,6 +45,7 @@ async def run_turn_endpoint(
     db: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
     manager: SandboxManager = Depends(get_sandbox_manager),
+    store: ObjectStore = Depends(get_object_store),
 ):
     session_repo = SessionRepository(db)
     msg_repo = MessageRepository(db)
@@ -67,14 +73,25 @@ async def run_turn_endpoint(
         )
         await db.commit()
 
-        # 3. 组装 + 调 worker
+        # 3. 组装 + 物化已启用 skill + 调 worker
         sandbox_endpoint = await manager.get_endpoint_for_user(s.user_id)
+        enabled_skills = await AgentSkillEnableRepository(db).list_enabled_for_agent(
+            s.agent_config_id
+        )
+        materialize_enabled_skills(
+            base_root=Path(settings.sandbox_base_root),
+            user_id=s.user_id,
+            work_subdir=s.work_subdir,
+            skills=enabled_skills,
+            store=store,
+        )
         request = await build_run_turn_request(
             db,
             s,
             sandbox_endpoint=sandbox_endpoint,
             user_message=body.content,
             exclude_message_id=user_msg.id,
+            enabled_skills=enabled_skills,
         )
         try:
             response = await run_turn_via_worker(settings.worker_endpoint, request)
@@ -195,6 +212,7 @@ async def stream_turn_endpoint(
     db: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
     manager: SandboxManager = Depends(get_sandbox_manager),
+    store: ObjectStore = Depends(get_object_store),
 ):
     session_repo = SessionRepository(db)
     s = await session_repo.get(session_id)
@@ -216,12 +234,23 @@ async def stream_turn_endpoint(
         )
         await db.commit()
         sandbox_endpoint = await manager.get_endpoint_for_user(s.user_id)
+        enabled_skills = await AgentSkillEnableRepository(db).list_enabled_for_agent(
+            s.agent_config_id
+        )
+        materialize_enabled_skills(
+            base_root=Path(settings.sandbox_base_root),
+            user_id=s.user_id,
+            work_subdir=s.work_subdir,
+            skills=enabled_skills,
+            store=store,
+        )
         request = await build_run_turn_request(
             db,
             s,
             sandbox_endpoint=sandbox_endpoint,
             user_message=body.content,
             exclude_message_id=user_msg.id,
+            enabled_skills=enabled_skills,
         )
     except Exception:
         await db.rollback()
