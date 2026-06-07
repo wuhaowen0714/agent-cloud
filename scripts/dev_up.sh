@@ -1,20 +1,32 @@
 #!/usr/bin/env bash
 # 一键起全栈开发环境:Postgres(docker) + worker + backend(uvicorn) + frontend(vite)。
 # 前置:仓库根 .env 里有 AGENT_CLOUD_WORKER_OPENAI_API_KEY / _BASE_URL;前端已 npm install;Docker 在跑。
-# Ctrl-C 退出时清理后台进程 + Postgres 容器。
+# Ctrl-C 退出时清理后台进程组 + Postgres 容器。
 set -euo pipefail
+set -m  # 监控模式:每个后台 job 独立进程组,便于整组终止(连同 uv/python/uvicorn/npm/vite 子进程)
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 PG_NAME="agent-cloud-pg"
 PG_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/agent_cloud"
 
 # 载入仓库根 .env 并 export:worker 在 services/worker 下启动,其 pydantic env_file=".env"
 # 只会找 services/worker/.env(不是根 .env),故必须在这里把根 .env 的凭据 export 给所有子进程。
-# 环境变量优先级高于 pydantic 的 env_file。
+# 注意:source 会执行 .env 内的 shell,请确保该文件可信(只放自己的 KEY=value)。
 if [[ -f "$ROOT/.env" ]]; then
   set -a; source "$ROOT/.env"; set +a
 else
   echo "⚠ 未找到 $ROOT/.env —— worker 将缺少 OpenAI 凭据,回合会失败。请先按 .env.example 建 .env。"
 fi
+
+# 尽早装好清理钩子:即便 Postgres 启动/迁移失败,也停掉容器、不留半截状态。
+pids=()
+cleanup() {
+  echo; echo "stopping…"
+  # set -m 下 $! 是 job 的进程组 id;kill 负号 = 终止整组(含 uv/python/uvicorn/npm/vite)。
+  for p in "${pids[@]:-}"; do [[ -n "$p" ]] && kill -- -"$p" 2>/dev/null || true; done
+  docker stop "$PG_NAME" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
 
 echo "[1/5] Postgres…"
 if ! docker ps --format '{{.Names}}' | grep -q "^${PG_NAME}$"; then
@@ -25,14 +37,6 @@ until docker exec "$PG_NAME" pg_isready -U postgres >/dev/null 2>&1; do sleep 0.
 
 echo "[2/5] migrate…"
 ( cd "$ROOT/services/backend" && AGENT_CLOUD_DATABASE_URL="$PG_URL" uv run alembic upgrade head )
-
-pids=()
-cleanup() {
-  echo; echo "stopping…"
-  for p in "${pids[@]:-}"; do [[ -n "$p" ]] && kill "$p" 2>/dev/null || true; done
-  docker stop "$PG_NAME" >/dev/null 2>&1 || true
-}
-trap cleanup EXIT INT TERM
 
 echo "[3/5] worker…"
 ( cd "$ROOT/services/worker" && uv run python -m agent_cloud_worker ) & pids+=($!)

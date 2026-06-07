@@ -14,7 +14,13 @@ export function parseSSE(onEvent: (e: TurnEvent) => void): (chunk: string) => vo
         const trimmed = line.trim()
         if (trimmed.startsWith("data:")) {
           const payload = trimmed.slice("data:".length).trim()
-          if (payload) onEvent(JSON.parse(payload) as TurnEvent)
+          if (payload) {
+            try {
+              onEvent(JSON.parse(payload) as TurnEvent)
+            } catch {
+              // 跳过畸形事件:别让单个坏块 reject done → 整回合失败。
+            }
+          }
         }
       }
     }

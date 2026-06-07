@@ -29,4 +29,12 @@ describe("parseSSE", () => {
       "thinking_delta", "tool_call_start", "turn_done",
     ])
   })
+
+  it("skips a malformed data payload without throwing", () => {
+    const events = collect([
+      "data: not-json\n\n",
+      'data: {"type":"text_delta","text":"ok"}\n\n',
+    ])
+    expect(events).toEqual([{ type: "text_delta", text: "ok" }])
+  })
 })
