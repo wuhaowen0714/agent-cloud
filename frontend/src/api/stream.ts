@@ -56,3 +56,30 @@ export function streamTurn(
   })()
   return { done, abort: () => ctrl.abort() }
 }
+
+/** GET 续看进行中回合:204 → null(没有在跑);否则补播+实时,返回可中断句柄。 */
+export async function resumeTurn(
+  sessionId: string,
+  onEvent: (e: TurnEvent) => void,
+): Promise<{ done: Promise<void>; abort: () => void } | null> {
+  const ctrl = new AbortController()
+  const res = await fetch(`/api/sessions/${sessionId}/turn/stream`, { signal: ctrl.signal })
+  if (res.status === 204 || !res.body) return null
+  if (!res.ok) throw new Error(`resume failed: ${res.status}`)
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  const feed = parseSSE(onEvent)
+  const done = (async () => {
+    for (;;) {
+      const { done: rdone, value } = await reader.read()
+      if (rdone) break
+      feed(decoder.decode(value, { stream: true }))
+    }
+  })()
+  return { done, abort: () => ctrl.abort() }
+}
+
+/** 主动停止服务端正在跑的回合(幂等)。 */
+export async function cancelTurn(sessionId: string): Promise<void> {
+  await fetch(`/api/sessions/${sessionId}/turn/cancel`, { method: "POST" })
+}

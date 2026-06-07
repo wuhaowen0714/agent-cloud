@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest"
-import { parseSSE } from "./stream"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { cancelTurn, parseSSE, resumeTurn } from "./stream"
+
+afterEach(() => vi.unstubAllGlobals())
 
 function collect(chunks: string[]) {
   const events: unknown[] = []
@@ -36,5 +38,21 @@ describe("parseSSE", () => {
       'data: {"type":"text_delta","text":"ok"}\n\n',
     ])
     expect(events).toEqual([{ type: "text_delta", text: "ok" }])
+  })
+})
+
+describe("resumeTurn", () => {
+  it("returns null on 204 (no active turn)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })))
+    expect(await resumeTurn("s1", () => {})).toBeNull()
+  })
+})
+
+describe("cancelTurn", () => {
+  it("POSTs the cancel endpoint", async () => {
+    const f = vi.fn(async () => new Response(null, { status: 204 }))
+    vi.stubGlobal("fetch", f)
+    await cancelTurn("s1")
+    expect(f).toHaveBeenCalledWith("/api/sessions/s1/turn/cancel", { method: "POST" })
   })
 })
