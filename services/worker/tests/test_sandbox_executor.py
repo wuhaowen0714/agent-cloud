@@ -72,7 +72,7 @@ async def test_dead_sandbox_returns_error_not_exception():
     # The executor must convert that into is_error=True, mirroring LocalToolExecutor,
     # rather than letting the exception propagate and crash the turn (spec §10).
     async with grpc.aio.insecure_channel("localhost:1") as channel:
-        ex = SandboxToolExecutor(channel, work_subdir="s1")
+        ex = SandboxToolExecutor(channel, work_subdir="s1", max_attempts=1)
         result = await ex.execute(ToolCall(id="c1", name="bash", arguments={"command": "echo hi"}))
     assert result.is_error is True
     assert result.call_id == "c1"
@@ -89,8 +89,57 @@ async def test_run_turn_survives_dead_sandbox():
         ]
     )
     async with grpc.aio.insecure_channel("localhost:1") as channel:
-        ex = SandboxToolExecutor(channel, work_subdir="s1")
+        ex = SandboxToolExecutor(channel, work_subdir="s1", max_attempts=1)
         result = await run_turn(provider, ex, system="", history=[], user_message="run it")
     assert result.stop_reason == "end_turn"
     assert [m.role for m in result.new_messages] == [Role.ASSISTANT, Role.TOOL, Role.ASSISTANT]
     assert result.new_messages[1].tool_results[0].is_error is True
+
+
+class _Unavailable(grpc.aio.AioRpcError):
+    def __init__(self):
+        pass  # 跳过父类 init,只需 code()
+
+    def code(self):
+        return grpc.StatusCode.UNAVAILABLE
+
+
+class _Resp:
+    content = "ok"
+    is_error = False
+
+
+async def test_execute_retries_unavailable_then_succeeds():
+    # docker 沙箱冷启动期短暂 UNAVAILABLE → 重试遮掉(spec §4.1)。
+    class _Stub:
+        def __init__(self, fail_times):
+            self.fail_times = fail_times
+            self.calls = 0
+
+        async def ExecTool(self, req):
+            self.calls += 1
+            if self.calls <= self.fail_times:
+                raise _Unavailable()
+            return _Resp()
+
+    ex = SandboxToolExecutor(channel=None, work_subdir=".", max_attempts=5, retry_backoff=0.0)
+    ex._stub = _Stub(fail_times=2)
+    res = await ex.execute(ToolCall(id="c1", name="bash", arguments={"command": "echo hi"}))
+    assert res.is_error is False and res.content == "ok"
+    assert ex._stub.calls == 3
+
+
+async def test_execute_gives_up_after_max_attempts():
+    class _Stub:
+        def __init__(self):
+            self.calls = 0
+
+        async def ExecTool(self, req):
+            self.calls += 1
+            raise _Unavailable()
+
+    ex = SandboxToolExecutor(channel=None, work_subdir=".", max_attempts=3, retry_backoff=0.0)
+    ex._stub = _Stub()
+    res = await ex.execute(ToolCall(id="c1", name="bash", arguments={"command": "x"}))
+    assert res.is_error is True and "UNAVAILABLE" in res.content
+    assert ex._stub.calls == 3

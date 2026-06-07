@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 import grpc
@@ -25,11 +26,20 @@ class SandboxToolExecutor:
     """
 
     def __init__(
-        self, channel: grpc.aio.Channel, work_subdir: str, enabled_tools: list[str] | None = None
+        self,
+        channel: grpc.aio.Channel,
+        work_subdir: str,
+        enabled_tools: list[str] | None = None,
+        max_attempts: int = 10,
+        retry_backoff: float = 1.0,
     ) -> None:
-        self._stub = sandbox_pb2_grpc.SandboxStub(channel)
+        self._stub = sandbox_pb2_grpc.SandboxStub(channel) if channel is not None else None
         self._work_subdir = work_subdir
         self._enabled_tools = list(enabled_tools or [])
+        # 沙箱(尤其 docker 冷启动)可能短暂 UNAVAILABLE:对其重试,与首个 LLM 思考重叠
+        # 以隐藏冷启动(spec §4.1)。其它错误立即转成 is_error 结果。
+        self._max_attempts = max_attempts
+        self._retry_backoff = retry_backoff
 
     def specs(self) -> list[ToolSpec]:
         return filtered_tool_specs(self._enabled_tools)
@@ -43,21 +53,24 @@ class SandboxToolExecutor:
                 content=f"tool not enabled for this agent: {call.name}",
                 is_error=True,
             )
-        try:
-            resp = await self._stub.ExecTool(
-                sandbox_pb2.ExecToolRequest(
+        req = sandbox_pb2.ExecToolRequest(
+            call_id=call.id,
+            tool_name=call.name,
+            arguments_json=json.dumps(call.arguments),
+            work_subdir=self._work_subdir,
+        )
+        for attempt in range(self._max_attempts):
+            try:
+                resp = await self._stub.ExecTool(req)
+                return ToolResult(call_id=call.id, content=resp.content, is_error=resp.is_error)
+            except grpc.aio.AioRpcError as exc:
+                # 冷启动期的 UNAVAILABLE 重试;其它错误立即转成 is_error 结果交回模型
+                # (不让异常冒泡冲掉整个回合,与 LocalToolExecutor 一致,spec §10)。
+                if exc.code() == grpc.StatusCode.UNAVAILABLE and attempt < self._max_attempts - 1:
+                    await asyncio.sleep(self._retry_backoff)
+                    continue
+                return ToolResult(
                     call_id=call.id,
-                    tool_name=call.name,
-                    arguments_json=json.dumps(call.arguments),
-                    work_subdir=self._work_subdir,
+                    content=f"sandbox RPC failed: {exc.code().name}",
+                    is_error=True,
                 )
-            )
-        except grpc.aio.AioRpcError as exc:
-            # 沙箱不可达/RPC 失败时,转成错误结果交回模型,而不是让异常冒泡冲掉整个回合
-            # (与 LocalToolExecutor 一致,best-effort,spec §10)。
-            return ToolResult(
-                call_id=call.id,
-                content=f"sandbox RPC failed: {exc.code().name}",
-                is_error=True,
-            )
-        return ToolResult(call_id=call.id, content=resp.content, is_error=resp.is_error)
