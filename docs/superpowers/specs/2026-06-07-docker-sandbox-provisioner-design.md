@@ -98,7 +98,7 @@ backend(SandboxManager)
 - `cap_drop=["ALL"]`、`security_opt=["no-new-privileges"]`。
 - 根文件系统**可写**(让 apt/系统级安装在容器热期内可用,配合 §8.1 的依赖保留目标)。**跨用户隔离不依赖只读根 fs**——它来自「每用户独立容器 + 只挂自己的 `/workspace`」,根 fs 是否只读不影响别人的文件可见性。更严格场景可改 `read_only=True`(代价:apt 等系统安装直接失败)。`/tmp` 用 tmpfs。
 - 资源上限:`mem_limit`、`nano_cpus`、`pids_limit`、磁盘配额(防写满)。
-- 网络出网策略:默认可禁(`network_disabled` 或内部网络无出口);需要联网的工具(pip/curl)再按配置放开。
+- 网络出网:**默认允许出网**(`pip`/`npm` 装依赖需要,契合 §8.1 保留依赖的目标);可按 `ALLOW_NET=false` 收紧,或后续接出网代理/域名 allowlist(放行 PyPI/npm registry,挡其余)。
 - **绝不**给沙箱挂 docker socket。
 - 加固钩子:`runtime`(配 `runsc` 上 gVisor)预留为配置。
 
@@ -117,7 +117,7 @@ backend(SandboxManager)
 | `AGENT_CLOUD_SANDBOX_DOCKER_NETWORK_MODE` | `publish` | `publish`(dev)/ `network`(prod) |
 | `AGENT_CLOUD_SANDBOX_DOCKER_NETWORK` | `agent-cloud-net` | network 模式下的网络名 |
 | `AGENT_CLOUD_SANDBOX_MEM_LIMIT` / `_CPUS` / `_PIDS` | 合理默认 | 资源上限 |
-| `AGENT_CLOUD_SANDBOX_ALLOW_NET` | `false` | 沙箱是否可出网 |
+| `AGENT_CLOUD_SANDBOX_ALLOW_NET` | `true` | 沙箱是否可出网(装依赖需要;可关) |
 
 ## 11. 后端改动清单
 
