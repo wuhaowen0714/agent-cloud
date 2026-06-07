@@ -31,6 +31,17 @@ class SessionRepository(BaseRepository[Session]):
         result = await self.session.execute(select(Session).where(Session.user_id == user_id))
         return list(result.scalars().all())
 
+    async def user_ids_with_running_session(self, user_ids: list[uuid.UUID]) -> set[uuid.UUID]:
+        """给定用户里,哪些当前有 status='running' 的会话(reap 时用来跳过,避免长回合被中途回收)。"""
+        if not user_ids:
+            return set()
+        result = await self.session.execute(
+            select(Session.user_id)
+            .where(Session.user_id.in_(user_ids), Session.status == "running")
+            .distinct()
+        )
+        return set(result.scalars().all())
+
     async def try_acquire(self, session_id: uuid.UUID, lease_seconds: int = 600) -> bool:
         # Acquire if the session is idle OR its existing lock is stale (older
         # than the lease), which lets a later turn take over after a crashed

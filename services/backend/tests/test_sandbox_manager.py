@@ -33,6 +33,45 @@ async def _user(engine) -> uuid.UUID:
         return u.id
 
 
+async def _running_session(engine, user_id: uuid.UUID) -> None:
+    from agent_cloud_backend.models.agent_config import AgentConfig
+    from agent_cloud_backend.models.session import Session
+
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as s:
+        agent = AgentConfig(user_id=user_id, name="a", model="m", provider="p")
+        s.add(agent)
+        await s.flush()
+        s.add(
+            Session(
+                user_id=user_id, agent_config_id=agent.id, work_subdir="workspace", status="running"
+            )
+        )
+        await s.commit()
+
+
+async def test_reap_skips_user_with_running_session(engine):
+    # 长回合期间 last_used_at 不续,不排除会被中途回收(spec §4.1)。有 running 会话 → 跳过。
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    prov = FakeProvisioner()
+    mgr = SandboxManager(provisioner=prov, sessionmaker=maker, idle_ttl_seconds=1)
+    uid = await _user(engine)
+    await mgr.get_endpoint_for_user(uid)
+    async with maker() as s:
+        await s.execute(
+            update(SandboxRegistry).values(last_used_at=datetime.now(UTC) - timedelta(hours=1))
+        )
+        await s.commit()
+    await _running_session(engine, uid)
+
+    reaped = await mgr.reap_idle()
+    assert reaped == 0  # 有 running 会话 → 不回收
+    assert len(prov.stopped) == 0
+    async with maker() as s:
+        rows = (await s.execute(select(SandboxRegistry))).scalars().all()
+    assert rows[0].status == "active"  # 仍 active
+
+
 async def test_get_endpoint_spawns_then_reuses(engine):
     maker = async_sessionmaker(engine, expire_on_commit=False)
     prov = FakeProvisioner()

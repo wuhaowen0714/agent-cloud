@@ -88,10 +88,16 @@ class SandboxManager:
         on the next pass) instead of orphaning a still-running sandbox whose row
         was already flipped to ``dead`` -- a permanent leak.
         """
+        from agent_cloud_backend.repositories.session import SessionRepository
+
         cutoff = datetime.now(UTC) - timedelta(seconds=self._idle_ttl_seconds)
         async with self._sessionmaker() as db:
             stale = await SandboxRegistryRepository(db).list_active_idle_since(cutoff)
-            stale_ids = [s.id for s in stale]
+            # 跳过仍有 running 会话的用户:长回合期间 last_used_at 不续,不排除会被中途回收(spec §4.1)。
+            busy = await SessionRepository(db).user_ids_with_running_session(
+                [s.user_id for s in stale]
+            )
+            stale_ids = [s.id for s in stale if s.user_id not in busy]
 
         reaped = 0
         for sandbox_id in stale_ids:
