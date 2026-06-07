@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     sandbox_idle_ttl_seconds: int = 1800
     sandbox_reap_interval_seconds: int = 120
 
+    # 文件管理:单文件上传上限(字节)。超出 → 413。
+    file_upload_max_bytes: int = 100 * 1024 * 1024
+
     @property
     def effective_sandbox_host_root(self) -> str:
         return self.sandbox_host_root or self.sandbox_base_root
