@@ -1,3 +1,7 @@
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
@@ -14,9 +18,39 @@ from agent_cloud_backend.api import (
     users,
 )
 
+logger = logging.getLogger(__name__)
+
+
+async def _reaper_loop(interval_seconds: float, manager) -> None:
+    """周期性回收空闲沙箱。单次失败不退出循环(spec §4.1:接上原本无调用方的 reap_idle)。"""
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            await manager.reap_idle()
+        except Exception:
+            logger.exception("sandbox reaper pass failed")
+
+
+@asynccontextmanager
+async def lifespan(app):
+    from agent_cloud_backend.config import get_settings
+    from agent_cloud_backend.sandbox.deps import get_sandbox_manager
+
+    settings = get_settings()
+    manager = get_sandbox_manager()
+    task = asyncio.create_task(_reaper_loop(settings.sandbox_reap_interval_seconds, manager))
+    try:
+        yield
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Agent Cloud Backend")
+    app = FastAPI(title="Agent Cloud Backend", lifespan=lifespan)
 
     @app.exception_handler(IntegrityError)
     async def handle_integrity_error(_request: Request, _exc: IntegrityError) -> JSONResponse:
