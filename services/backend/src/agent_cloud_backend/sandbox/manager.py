@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.exc import IntegrityError
@@ -12,6 +13,9 @@ from agent_cloud_backend.sandbox.provisioner import SandboxProvisioner
 
 logger = logging.getLogger(__name__)
 
+# 返回 endpoint 是否存活。生产 provisioner 注入真实实现(见 sandbox/health.py)。
+HealthCheck = Callable[[str], Awaitable[bool]]
+
 
 class SandboxManager:
     def __init__(
@@ -19,23 +23,36 @@ class SandboxManager:
         provisioner: SandboxProvisioner,
         sessionmaker: async_sessionmaker,
         idle_ttl_seconds: int = 1800,
+        health_check: HealthCheck | None = None,
     ) -> None:
         self._provisioner = provisioner
         self._sessionmaker = sessionmaker
         self._idle_ttl_seconds = idle_ttl_seconds
+        self._health_check = health_check
 
     async def get_endpoint_for_user(self, user_id: uuid.UUID) -> str:
+        dead_sandbox_id: uuid.UUID | None = None
         async with self._sessionmaker() as db:
             repo = SandboxRegistryRepository(db)
             existing = await repo.get_active_for_user(user_id)
             if existing is not None:
-                # NOTE(4b): this trusts the row as live. A stale/dead endpoint
-                # (worker gone) is not detected here -- liveness/health check +
-                # mark-dead-on-RPC-failure needs the worker-failure feedback
-                # loop wired in Plan 4b, so it is intentionally out of scope.
-                await repo.touch(existing.id)
+                # 若注入了 health_check,先探活再复用;未注入(进程内/开发,恒存活)
+                # 则信任该行。探活失败 = 沙箱/worker 已死:标记 dead 不再路由,落到
+                # 下方重建一个新的(spec §10)。
+                if self._health_check is None or await self._health_check(existing.endpoint):
+                    await repo.touch(existing.id)
+                    await db.commit()
+                    return existing.endpoint
+                await repo.mark_dead(existing.id)
                 await db.commit()
-                return existing.endpoint
+                dead_sandbox_id = existing.id
+
+        if dead_sandbox_id is not None:
+            # 已在登记表标记 dead(不会再被路由);停掉是尽力清理,失败不阻断重建。
+            try:
+                await self._provisioner.stop(dead_sandbox_id)
+            except Exception:
+                logger.exception("failed to stop dead sandbox %s", dead_sandbox_id)
 
         # spawn outside the DB transaction (provisioning may be slow)
         sandbox_id, endpoint = await self._provisioner.spawn(user_id)

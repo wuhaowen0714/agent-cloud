@@ -198,3 +198,49 @@ async def test_get_active_for_user_orders_by_id_tiebreaker():
     assert "id desc" in order_clause
     # created_at is the primary sort key, id the tiebreaker
     assert order_clause.index("created_at desc") < order_clause.index("id desc")
+
+
+async def test_health_check_pass_reuses(engine):
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    prov = FakeProvisioner()
+
+    async def always_alive(endpoint):
+        return True
+
+    mgr = SandboxManager(provisioner=prov, sessionmaker=maker, health_check=always_alive)
+    uid = await _user(engine)
+    ep1 = await mgr.get_endpoint_for_user(uid)
+    ep2 = await mgr.get_endpoint_for_user(uid)
+    assert ep1 == ep2
+    assert len(prov.spawned) == 1  # alive -> reused, no respawn
+
+
+async def test_health_check_fail_marks_dead_and_respawns(engine):
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    prov = FakeProvisioner()
+    dead_endpoints = {"fake:1"}
+
+    async def health(endpoint):
+        return endpoint not in dead_endpoints
+
+    mgr = SandboxManager(provisioner=prov, sessionmaker=maker, health_check=health)
+    uid = await _user(engine)
+    ep1 = await mgr.get_endpoint_for_user(uid)
+    assert ep1 == "fake:1"
+    first_id = prov.spawned[0]
+
+    ep2 = await mgr.get_endpoint_for_user(uid)  # fake:1 探活失败 -> 重建 fake:2
+    assert ep2 == "fake:2" and ep2 != ep1
+    assert len(prov.spawned) == 2
+    assert prov.stopped == [first_id]  # 死沙箱被尽力停掉
+
+    async with maker() as s:
+        rows = (
+            (await s.execute(select(SandboxRegistry).where(SandboxRegistry.user_id == uid)))
+            .scalars()
+            .all()
+        )
+    status_by_id = {r.id: r.status for r in rows}
+    assert status_by_id[first_id] == "dead"
+    active = [r for r in rows if r.status == "active"]
+    assert len(active) == 1 and active[0].endpoint == "fake:2"
