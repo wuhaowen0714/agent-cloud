@@ -7,25 +7,36 @@ write_file/read_file/bash -> 沙箱执行 -> 结果回填 -> 收尾落库。
 进程内 worker gRPC + 进程内 sandbox),只把 FakeProvider 换成真实 OpenAIProvider。
 你零额外搭建——只要设密钥就能跑(Postgres 由 testcontainers 自动起,故需要 Docker)。
 
-用法:
-    cd /Users/wuhaowen/src/llm-agent/agent-cloud/services/backend
-    export AGENT_CLOUD_WORKER_OPENAI_API_KEY="你的key"
-    export AGENT_CLOUD_WORKER_OPENAI_BASE_URL="https://你的端点/v1"
-    # OpenAI 推理模型(o 系列/gpt-5)再加: export AGENT_CLOUD_WORKER_MAX_TOKENS_PARAM=max_completion_tokens
-    TESTCONTAINERS_RYUK_DISABLED=true uv run python ../../scripts/e2e_real_llm.py "你的模型名"
+用法(推荐 .env):
+    1) 在仓库根建 .env(参考 .env.example,已被 gitignore):
+         AGENT_CLOUD_WORKER_OPENAI_API_KEY=你的key
+         AGENT_CLOUD_WORKER_OPENAI_BASE_URL=https://你的端点/v1
+         # 推理模型(o 系列/gpt-5)才需要 MAX_TOKENS_PARAM,详见 .env.example
+    2) cd /Users/wuhaowen/src/llm-agent/agent-cloud/services/backend
+       uv run python ../../scripts/e2e_real_llm.py "你的模型名"
 
+脚本会自动读仓库根 .env、并自动设 TESTCONTAINERS_RYUK_DISABLED=true。也可以不用 .env、
+直接 export 这些环境变量(export 的优先级更高)。
 注意:必须从 services/backend 目录用 uv run 跑(那里才有 testcontainers / worker /
-sandbox 依赖);Docker 环境务必带 TESTCONTAINERS_RYUK_DISABLED=true。
+sandbox 依赖);需要本机 Docker(Postgres 由 testcontainers 自动起)。
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import tempfile
 import uuid
 from pathlib import Path
+
+from dotenv import load_dotenv
+
+# 从仓库根的 .env 读凭据(已被 gitignore);override=False 让显式 export 的环境变量优先。
+load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
+# 本机 Docker 必须禁用 Ryuk(否则 testcontainers 的 Postgres 会被中途回收挂住);自动设好。
+os.environ.setdefault("TESTCONTAINERS_RYUK_DISABLED", "true")
 
 PROMPT = (
     "Use the write_file tool to create a file named notes.txt containing exactly "

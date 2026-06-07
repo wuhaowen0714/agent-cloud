@@ -20,11 +20,17 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from pathlib import Path
 
 from agent_cloud_common import CompletionRequest, Message, Role, ToolSpec
-from agent_cloud_worker.config import get_worker_settings
-from agent_cloud_worker.factory import build_provider_factory
-from agent_cloud_worker.provider import (
+from dotenv import load_dotenv
+
+# 从仓库根的 .env 读凭据(已被 gitignore);override=False 让显式 export 的优先。
+load_dotenv(Path(__file__).resolve().parents[3] / ".env", override=False)
+
+from agent_cloud_worker.config import get_worker_settings  # noqa: E402
+from agent_cloud_worker.factory import build_provider_factory  # noqa: E402
+from agent_cloud_worker.provider import (  # noqa: E402
     ProviderCompleted,
     ProviderTextDelta,
     ProviderThinkingDelta,
