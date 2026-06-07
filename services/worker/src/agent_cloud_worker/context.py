@@ -56,8 +56,9 @@ BASE_SYSTEM_PROMPT = """\
 You are an autonomous AI agent running inside an isolated sandbox.
 
 Working directory and files:
-- You have a private working directory. The file tools (read_file, write_file) and the bash \
-tool all operate inside this working directory.
+- You have a persistent working directory that is shared across all of your sessions — files \
+you create remain available in later sessions. The file tools (read_file, write_file) and the \
+bash tool all operate inside this working directory.
 - Always use relative paths (e.g. `notes.txt`, `src/app.py`, `python3 script.py`). Do not use \
 absolute paths and do not assume any specific location such as `/workspace`, `/home`, or `/tmp` \
 — they may not exist.
