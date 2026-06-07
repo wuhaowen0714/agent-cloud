@@ -131,7 +131,12 @@ async def test_runner_cancel_emits_cancelled_and_releases(engine, monkeypatch):
     hub.register(active)
     active.task = asyncio.create_task(
         run_turn(
-            hub, active, worker_endpoint="x", request=object(), session_id=sid, heartbeat_interval=999
+            hub,
+            active,
+            worker_endpoint="x",
+            request=object(),
+            session_id=sid,
+            heartbeat_interval=999,
         )
     )
     await asyncio.sleep(0.03)
