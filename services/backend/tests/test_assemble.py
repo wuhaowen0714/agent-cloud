@@ -116,3 +116,25 @@ async def test_build_request_skills_default_empty(session):
         session, s, sandbox_endpoint="x", user_message="hi", exclude_message_id=None
     )
     assert list(req.skills) == []
+
+
+async def test_build_request_work_subdir_override(session):
+    user = await UserRepository(session).create(User(email="ws@example.com"))
+    await session.flush()
+    agent = await AgentConfigRepository(session).create(
+        AgentConfig(user_id=user.id, name="c", model="m", provider="p")
+    )
+    await session.flush()
+    s = await SessionRepository(session).create_for(user.id, agent.id, None)
+    await session.commit()
+    # 默认:用 session.work_subdir
+    req = await build_run_turn_request(
+        session, s, sandbox_endpoint="x", user_message="hi", exclude_message_id=None
+    )
+    assert req.work_subdir == s.work_subdir
+    # 覆盖(docker 沙箱用 "." —— workspace 已挂到 /workspace,不再二次嵌套)
+    req2 = await build_run_turn_request(
+        session, s, sandbox_endpoint="x", user_message="hi",
+        exclude_message_id=None, work_subdir=".",
+    )
+    assert req2.work_subdir == "."

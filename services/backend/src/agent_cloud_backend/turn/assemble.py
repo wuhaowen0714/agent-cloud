@@ -24,6 +24,7 @@ async def build_run_turn_request(
     user_message: str,
     exclude_message_id: uuid.UUID | None,
     enabled_skills: list[Skill] | None = None,
+    work_subdir: str | None = None,
 ) -> worker_pb2.RunTurnRequest:
     agent = await AgentConfigRepository(db).get(session.agent_config_id)
     doc_repo = ContextDocumentRepository(db)
@@ -59,5 +60,5 @@ async def build_run_turn_request(
         messages=[msg_to_proto(orm_to_common(m)) for m in history],
         user_message=user_message,
         sandbox_endpoint=sandbox_endpoint,
-        work_subdir=session.work_subdir,
+        work_subdir=work_subdir if work_subdir is not None else session.work_subdir,
     )

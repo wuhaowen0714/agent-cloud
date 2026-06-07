@@ -86,6 +86,10 @@ async def run_turn_endpoint(
             skills=enabled_skills,
             store=store,
         )
+        # docker 沙箱:容器已把用户 workspace 挂到 /workspace,请求 work_subdir 用 "."
+        # 避免再嵌套一层 workspace(spec §5);inprocess 仍用 session.work_subdir。
+        # 注意:上面 materialize 仍用 s.work_subdir(那是宿主侧 .skills 路径)。
+        req_work_subdir = "." if settings.sandbox_provisioner == "docker" else s.work_subdir
         request = await build_run_turn_request(
             db,
             s,
@@ -93,6 +97,7 @@ async def run_turn_endpoint(
             user_message=body.content,
             exclude_message_id=user_msg.id,
             enabled_skills=enabled_skills,
+            work_subdir=req_work_subdir,
         )
         try:
             async with session_heartbeat(session_id, settings.session_heartbeat_seconds):
@@ -250,6 +255,10 @@ async def stream_turn_endpoint(
             skills=enabled_skills,
             store=store,
         )
+        # docker 沙箱:容器已把用户 workspace 挂到 /workspace,请求 work_subdir 用 "."
+        # 避免再嵌套一层 workspace(spec §5);inprocess 仍用 session.work_subdir。
+        # 注意:上面 materialize 仍用 s.work_subdir(那是宿主侧 .skills 路径)。
+        req_work_subdir = "." if settings.sandbox_provisioner == "docker" else s.work_subdir
         request = await build_run_turn_request(
             db,
             s,
@@ -257,6 +266,7 @@ async def stream_turn_endpoint(
             user_message=body.content,
             exclude_message_id=user_msg.id,
             enabled_skills=enabled_skills,
+            work_subdir=req_work_subdir,
         )
     except Exception:
         await db.rollback()
