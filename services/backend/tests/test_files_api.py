@@ -75,3 +75,29 @@ def test_upload_too_large_413(client, monkeypatch):
     r = client.post("/files/upload", params={"user_id": UID},
                     files=[("files", ("big.bin", b"toolong", "application/octet-stream"))])
     assert r.status_code == 413
+
+
+def test_move_into_a_file_is_400_not_500(client):
+    # 把文件当目录用(move 进 f/inner)→ FileExistsError 应映射成 400,而非 500(I1)
+    client.post("/files/upload", params={"user_id": UID},
+                files=[("files", ("f", b"x", "text/plain"))])
+    r = client.post("/files/move", json={"user_id": UID, "src": "f", "dst": "f/inner"})
+    assert r.status_code == 400
+
+
+def test_upload_into_a_file_is_400_not_500(client):
+    client.post("/files/upload", params={"user_id": UID},
+                files=[("files", ("f", b"x", "text/plain"))])
+    r = client.post("/files/upload", params={"user_id": UID, "path": "f"},
+                    files=[("files", ("g", b"x", "text/plain"))])
+    assert r.status_code == 400
+
+
+def test_content_disposition_filename_sanitized(client, tmp_path):
+    # 直接落一个名字含 " 的文件(multipart 自身的引号规则无法传这种名),验证下载头不被破坏(M1)
+    ws = tmp_path / UID / "workspace"
+    ws.mkdir(parents=True)
+    (ws / 'a"b.txt').write_text("x")
+    r = client.get("/files/raw", params={"user_id": UID, "path": 'a"b.txt'})
+    assert r.status_code == 200
+    assert r.headers["content-disposition"].count('"') == 2  # 仅包裹 filename 的一对引号

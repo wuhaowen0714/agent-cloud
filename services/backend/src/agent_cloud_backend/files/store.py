@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import zipfile
 from collections.abc import Iterator
@@ -41,9 +42,9 @@ class LocalFileStore:
         self._host_root = Path(host_root)
 
     def _user_root(self, user_id: str) -> Path:
-        root = self._host_root / user_id / "workspace"
-        root.mkdir(parents=True, exist_ok=True)  # 懒创建:新用户也能浏览/上传
-        return root
+        # 不在此创建:读操作(list/stat)不该为任意 user_id 物化目录(防随机 UUID DoS,I3)。
+        # 真正的懒创建发生在写操作(write/mkdir/move 各自 mkdir 父链)。
+        return self._host_root / user_id / "workspace"
 
     def _resolve(self, user_id: str, rel_path: str) -> Path:
         """把相对路径解析成围栏内的绝对路径;越界一律抛 PathEscape。"""
@@ -76,6 +77,8 @@ class LocalFileStore:
         root = self._user_root(user_id).resolve()
         target = self._resolve(user_id, rel_path)
         if not target.exists():
+            if target == root:
+                return []  # 全新用户:空工作区,读操作不创建目录(I3)
             raise FileNotFoundError(rel_path)
         if not target.is_dir():
             raise NotADirectoryError(rel_path)
@@ -104,9 +107,11 @@ class LocalFileStore:
         if target == root:
             raise PathEscape("cannot write to workspace root")
         target.parent.mkdir(parents=True, exist_ok=True)
+        # 写临时文件再原子替换:中断/超限不会污染已有同名文件,失败一律清掉临时件(I2)。
+        tmp = target.parent / (target.name + ".part")
         written = 0
         try:
-            with target.open("wb") as f:
+            with tmp.open("wb") as f:
                 while True:
                     chunk = data.read(_CHUNK)
                     if not chunk:
@@ -115,8 +120,9 @@ class LocalFileStore:
                     if written > max_bytes:
                         raise FileTooLarge(f"{rel_path}: exceeds {max_bytes} bytes")
                     f.write(chunk)
-        except FileTooLarge:
-            target.unlink(missing_ok=True)  # 删半截
+            os.replace(tmp, target)
+        except Exception:
+            tmp.unlink(missing_ok=True)
             raise
         return self._entry(root, target)
 
@@ -163,7 +169,8 @@ class LocalFileStore:
         buf = BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
             for p in sorted(target.rglob("*")):
-                if p.is_file():
+                # 跳过符号链接:否则指向围栏外的链接会被打包,造成越狱读(M3)
+                if p.is_file() and not p.is_symlink():
                     zf.write(p, p.relative_to(target).as_posix())
         buf.seek(0)
         yield from iter(lambda: buf.read(_CHUNK), b"")

@@ -25,9 +25,15 @@ def _http_from(exc: Exception) -> HTTPException:
         return HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "file too large")
     if isinstance(exc, FileNotFoundError):
         return HTTPException(status.HTTP_404_NOT_FOUND, "not found")
-    if isinstance(exc, (NotADirectoryError, IsADirectoryError)):
+    # FileExistsError:把文件当目录用(move/upload 到 file/inner)→ 4xx 而非 500(I1)
+    if isinstance(exc, (FileExistsError, NotADirectoryError, IsADirectoryError)):
         return HTTPException(status.HTTP_400_BAD_REQUEST, "wrong file type")
     raise exc  # 未知错误 → 冒泡成 500
+
+
+def _cd_filename(name: str) -> str:
+    # 文件名可能含 " 或控制字符(沙箱可创建),会破坏 Content-Disposition 引号串(M1)
+    return name.replace('"', "").replace("\r", "").replace("\n", "")
 
 
 @router.get("", response_model=list[FileEntryRead])
@@ -55,7 +61,7 @@ def raw(
     except Exception as exc:
         raise _http_from(exc) from exc
     if entry.is_dir:
-        name = (entry.name or "workspace") + ".zip"
+        name = _cd_filename((entry.name or "workspace") + ".zip")
         return StreamingResponse(
             store.zip_dir(uid, path),
             media_type="application/zip",
@@ -64,6 +70,7 @@ def raw(
     fh = store.open_read(uid, path)
     media = mimetypes.guess_type(entry.name)[0] or "application/octet-stream"
     disp = "attachment" if attachment else "inline"
+    name = _cd_filename(entry.name)
 
     def _stream():
         try:
@@ -74,7 +81,7 @@ def raw(
     return StreamingResponse(
         _stream(),
         media_type=media,
-        headers={"Content-Disposition": f'{disp}; filename="{entry.name}"'},
+        headers={"Content-Disposition": f'{disp}; filename="{name}"'},
     )
 
 

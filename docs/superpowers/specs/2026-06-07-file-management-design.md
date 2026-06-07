@@ -165,6 +165,11 @@ REST,挂在 `/files` 前缀;GET 用查询参数,写操作用 JSON/multipart。`u
 - **删除/移动**仅在围栏内;不跟随越狱 symlink。
 - `user_id` 由前端传入,沿用当前无 auth 模型(与 sessions/agents 等一致);**鉴权是独立的后续工作**,不在本 spec。
 
+### 10.1 已知 v1 限制(对抗审查记录,显式接受)
+
+- **TOCTOU 符号链接竞态**:`_resolve` 返回规范化路径字符串后,操作再按该字符串走一遍;沙箱(同目录的不可信进程)若在 resolve 与操作之间把某中间组件换成符号链接,操作会跟随它越狱(可删/读/覆盖工作区外文件)。**静态**符号链接已被 `resolve()` 全部挡住(含中间组件);残留仅这一极窄竞态窗口,且需用户主动触发文件操作 + 抢赢竞态。鉴于 v1 **整体无鉴权**(任意 user_id 可访问任意工作区,这是更大的已接受缺口),专门为 TOCTOU 加固不成比例。**彻底修复**(per-component `openat` + `O_NOFOLLOW` / `dir_fd` 原子操作)与**鉴权 + 沙箱非 root/强隔离**(见 [[project_sandbox]])一并做。
+- **`zip_dir` 全量在内存**:目录下载先在 `BytesIO` 里建完整 zip 再流式吐出;超大工作区会吃内存。v1 工作区偏小可接受;后续换流式 zip / `SpooledTemporaryFile`。
+
 ## 11. 测试策略
 
 - **后端 `tests/test_filestore.py`**(test-first 安全围栏):

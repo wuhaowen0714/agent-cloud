@@ -12,10 +12,15 @@ def store(tmp_path):
     return LocalFileStore(str(tmp_path))
 
 
-def test_user_root_is_lazily_created(store, tmp_path):
-    # 新用户没跑过沙箱:解析根路径即懒创建工作区目录(list_dir 行为见操作测试)
-    store._resolve(UID, "")
-    assert (tmp_path / UID / "workspace").is_dir()
+def test_reads_do_not_create_workspace(store, tmp_path):
+    # 读操作(list)不为任意 user_id 物化目录 → 防随机 UUID 灌目录 DoS(I3)
+    assert store.list_dir(UID, "") == []
+    assert not (tmp_path / UID / "workspace").exists()
+
+
+def test_write_creates_workspace(store, tmp_path):
+    store.write(UID, "a.txt", io.BytesIO(b"x"), 100)
+    assert (tmp_path / UID / "workspace" / "a.txt").exists()
 
 
 @pytest.mark.parametrize("bad", ["..", "../x", "a/../../b", "/etc/passwd", "a\0b"])
@@ -114,3 +119,35 @@ def test_missing_paths_raise_not_found(store):
         store.stat(UID, "nope.txt")
     with pytest.raises(FileNotFoundError):
         store.open_read(UID, "nope.txt")
+
+
+def test_zip_skips_symlinks(store, tmp_path):
+    import zipfile
+
+    store.write(UID, "proj/a.txt", io.BytesIO(b"aaa"), 100)
+    (tmp_path / "outside.txt").write_text("secret")
+    (tmp_path / UID / "workspace" / "proj" / "link.txt").symlink_to(tmp_path / "outside.txt")
+    data = b"".join(store.zip_dir(UID, "proj"))
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        assert zf.namelist() == ["a.txt"]  # symlink 不打包(防越狱读,M3)
+
+
+class _BoomReader:
+    """读到第二个 chunk 时抛错,模拟上传中途断流/IO 错误。"""
+
+    def __init__(self) -> None:
+        self.n = 0
+
+    def read(self, _size: int) -> bytes:
+        self.n += 1
+        if self.n == 1:
+            return b"partial"
+        raise OSError("boom")
+
+
+def test_write_cleans_partial_on_stream_error(store, tmp_path):
+    with pytest.raises(OSError, match="boom"):
+        store.write(UID, "x.txt", _BoomReader(), max_bytes=1_000_000)
+    ws = tmp_path / UID / "workspace"
+    assert not (ws / "x.txt").exists()  # 原子替换:真实文件未被污染(I2)
+    assert list(ws.glob("*.part")) == []  # 临时文件已清
