@@ -1,6 +1,14 @@
 import { useState } from "react"
 
-export function Composer({ disabled, onSend }: { disabled: boolean; onSend: (text: string) => void }) {
+export function Composer({
+  disabled,
+  onSend,
+  onStop,
+}: {
+  disabled: boolean
+  onSend: (text: string) => void
+  onStop?: () => void
+}) {
   const [text, setText] = useState("")
   const send = () => {
     const t = text.trim()
@@ -18,16 +26,28 @@ export function Composer({ disabled, onSend }: { disabled: boolean; onSend: (tex
         disabled={disabled}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send() }
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault()
+            send()
+          }
         }}
       />
-      <button
-        className="rounded-lg bg-brand-600 px-4 text-sm text-white enabled:hover:bg-brand-700 disabled:opacity-40"
-        disabled={disabled}
-        onClick={send}
-      >
-        发送
-      </button>
+      {disabled && onStop ? (
+        <button
+          className="rounded-lg border border-slate-300 px-4 text-sm text-slate-600 hover:bg-slate-50"
+          onClick={onStop}
+        >
+          停止
+        </button>
+      ) : (
+        <button
+          className="rounded-lg bg-brand-600 px-4 text-sm text-white enabled:hover:bg-brand-700 disabled:opacity-40"
+          disabled={disabled}
+          onClick={send}
+        >
+          发送
+        </button>
+      )}
     </div>
   )
 }
