@@ -69,13 +69,21 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
             executor = SandboxToolExecutor(
                 channel, request.work_subdir, list(request.agent.enabled_tools)
             )
-            result = await run_turn(
-                provider,
-                executor,
-                system=system,
-                history=history,
-                user_message=request.user_message,
-            )
+            try:
+                result = await run_turn(
+                    provider,
+                    executor,
+                    system=system,
+                    history=history,
+                    user_message=request.user_message,
+                )
+            except Exception:
+                # provider 失败(超时/重试耗尽/上游 5xx)或 loop 守卫:收敛为 INTERNAL,
+                # 不把原始异常泄漏给客户端(与 RunTurnStream 一致)。后端会转成 502,
+                # 回合失败但无半成品(assistant 消息仅成功后落库)。
+                logger.exception("RunTurn failed")
+                await context.abort(grpc.StatusCode.INTERNAL, "turn failed")
+                return
         return worker_pb2.RunTurnResponse(
             new_messages=[msg_to_proto(m) for m in result.new_messages],
             input_tokens=result.usage.input_tokens,
