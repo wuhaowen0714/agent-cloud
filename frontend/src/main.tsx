@@ -4,7 +4,11 @@ import { createRoot } from "react-dom/client"
 import App from "./App"
 import "./index.css"
 
-const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+// refetchOnWindowFocus 关闭:聊天历史不应因切换标签页/窗口失焦再聚焦而在回合进行中重新拉取
+// ——那会和「乐观渲染的用户消息」(live.userText)重复出现。历史只在 turn_done 后主动失效刷新。
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
+})
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

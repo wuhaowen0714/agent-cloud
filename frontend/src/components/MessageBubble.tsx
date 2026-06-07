@@ -1,4 +1,5 @@
 import type { Message } from "../types"
+import { Markdown } from "./Markdown"
 import { ToolCallCard } from "./ToolCallCard"
 
 export function MessageBubble({ message }: { message: Message }) {
@@ -27,7 +28,7 @@ export function MessageBubble({ message }: { message: Message }) {
   return (
     <div className="flex justify-start">
       <div className="max-w-[80%] rounded-2xl bg-white px-3 py-2 text-sm text-slate-800 shadow-sm ring-1 ring-slate-200">
-        {content.text && <div className="whitespace-pre-wrap">{content.text}</div>}
+        {content.text && <Markdown>{content.text}</Markdown>}
         {content.tool_calls.map((c) => (
           <ToolCallCard key={c.id} call={c} />
         ))}

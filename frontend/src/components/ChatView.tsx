@@ -39,7 +39,7 @@ export function ChatView() {
     // 已有进行中回合则忽略(防 IME 回车 / 双击 / disabled 更新前的竞态导致重复发送)。
     if (useStore.getState().live?.status === "streaming") return
     const sid = sessionId // 捕获本回合所属会话
-    startLive()
+    startLive(text)
     let errored = false
     const { done, abort } = streamTurn(sid, text, (e) => {
       // 仅当仍停留在该会话时才更新 live(丢弃已切走会话的残余事件)。

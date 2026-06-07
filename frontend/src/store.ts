@@ -3,6 +3,7 @@ import type { ToolCall, ToolResult } from "./types"
 
 // 进行中回合的实时聚合(由 SSE 事件填充)
 export interface LiveTurn {
+  userText: string
   thinking: string
   text: string
   toolCalls: { call: ToolCall; result?: ToolResult }[]
@@ -18,12 +19,12 @@ interface AppState {
   setUser: (id: string | null) => void
   setAgent: (id: string | null) => void
   setSession: (id: string | null) => void
-  startLive: () => void
+  startLive: (userText: string) => void
   setLive: (fn: (t: LiveTurn) => LiveTurn) => void
   clearLive: () => void
 }
 
-const EMPTY: LiveTurn = { thinking: "", text: "", toolCalls: [], status: "streaming" }
+const EMPTY: LiveTurn = { userText: "", thinking: "", text: "", toolCalls: [], status: "streaming" }
 
 export const useStore = create<AppState>((set) => ({
   userId: localStorage.getItem("ac.userId"),
@@ -37,7 +38,7 @@ export const useStore = create<AppState>((set) => ({
   },
   setAgent: (id) => set({ agentId: id, sessionId: null }),
   setSession: (id) => set({ sessionId: id, live: null }),
-  startLive: () => set({ live: { ...EMPTY, toolCalls: [] } }),
+  startLive: (userText) => set({ live: { ...EMPTY, userText, toolCalls: [] } }),
   setLive: (fn) => set((s) => (s.live ? { live: fn(s.live) } : {})),
   clearLive: () => set({ live: null }),
 }))

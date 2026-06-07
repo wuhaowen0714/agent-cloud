@@ -1,3 +1,5 @@
+import json
+
 from agent_cloud_sandbox.tools import _MAX_OUTPUT, run_tool
 
 
@@ -46,6 +48,21 @@ def test_bash_nonzero_includes_stderr(tmp_path):
     )
     assert err is True
     assert "boom" in content
+
+
+def test_bash_failure_strips_grpc_fork_noise(tmp_path):
+    # gRPC fork-handler noise on stderr must be stripped from the failure message,
+    # while real stderr is kept. #3 (noise filter)
+    noise = (
+        "I0607 18:12:04.907837 50876146 ev_poll_posix.cc:593] "
+        "FD from fork parent still in poll list: fd(32, generation: 1)"
+    )
+    cmd = f"echo '{noise}' 1>&2; echo real-error 1>&2; exit 1"
+    content, err = run_tool(tmp_path, "s1", "bash", json.dumps({"command": cmd}))
+    assert err is True
+    assert "real-error" in content
+    assert "ev_poll_posix" not in content
+    assert "FD from fork parent" not in content
 
 
 def test_unknown_tool(tmp_path):

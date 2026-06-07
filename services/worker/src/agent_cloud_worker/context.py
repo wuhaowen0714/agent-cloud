@@ -49,12 +49,34 @@ def _render_skills(skills: list[SkillRef]) -> list[str]:
     return ["\n".join(lines)]
 
 
+# 基础系统提示词:无论是否有用户级文档/记忆/技能都先注入,给模型最起码的环境认知
+# (沙箱工作目录 + 相对路径约定)。否则空 system 会让模型幻觉 /workspace 之类不存在的
+# 绝对路径(实测 DeepSeek 会 `cd /workspace/<id>` 然后失败)。
+BASE_SYSTEM_PROMPT = """\
+You are an autonomous AI agent running inside an isolated sandbox.
+
+Working directory and files:
+- You have a private working directory. The file tools (read_file, write_file) and the bash \
+tool all operate inside this working directory.
+- Always use relative paths (e.g. `notes.txt`, `src/app.py`, `python3 script.py`). Do not use \
+absolute paths and do not assume any specific location such as `/workspace`, `/home`, or `/tmp` \
+— they may not exist.
+- Each bash call runs in a fresh shell that starts in the working directory. A `cd` affects only \
+that single command and does not carry over to the next call, so run files directly (e.g. \
+`python3 script.py`) rather than `cd`-ing first."""
+
+
 def build_system_prompt(
     *,
     documents: list[ContextDocument],
     memory: list[MemoryItem],
     skills: list[SkillRef],
 ) -> str:
-    """把配置文档(用户级在前)、记忆、技能元数据拼成分层 system 文本(spec §5.3)。"""
-    sections = _render_docs(documents) + _render_memory(memory) + _render_skills(skills)
+    """基础环境提示词 + 配置文档(用户级在前)+ 记忆 + 技能元数据,拼成分层 system 文本(spec §5.3)。"""
+    sections = [
+        BASE_SYSTEM_PROMPT,
+        *_render_docs(documents),
+        *_render_memory(memory),
+        *_render_skills(skills),
+    ]
     return "\n\n".join(sections)

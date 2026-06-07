@@ -24,6 +24,18 @@ def _truncate(output: str) -> str:
     return output[:_MAX_OUTPUT] + _TRUNCATION_MARKER
 
 
+def _clean_stderr(stderr: str) -> str:
+    # gRPC C-core 在 fork 子进程(shell=True)时会把 "FD from fork parent still in poll list"
+    # 之类噪声打到 stderr(ev_poll_posix.cc)。命令失败时我们会带上 stderr 便于排错,但这些
+    # 噪声会污染错误信息,故按行剔除(spec §3 噪声污染)。
+    lines = [
+        ln
+        for ln in stderr.splitlines()
+        if "ev_poll_posix" not in ln and "FD from fork parent" not in ln
+    ]
+    return "\n".join(lines)
+
+
 # bash 执行任意命令;进程/文件系统隔离由真实部署的沙箱(microVM/gVisor + cgroups,
 # spec §11)负责,不是这段本地实现的职责。
 def _bash(workdir: Path, args: dict) -> str:
@@ -31,7 +43,8 @@ def _bash(workdir: Path, args: dict) -> str:
     # 成功时只回 stdout:gRPC 的 fork/poll 噪声会落到子进程 stderr,排除 stderr 即可
     # 让正常输出保持干净(spec §3 噪声污染)。失败时把 stderr 一并带上便于排错。
     if proc.returncode != 0:
-        raise RuntimeError(_truncate(f"exit {proc.returncode}: {proc.stdout}{proc.stderr}"))
+        stderr = _clean_stderr(proc.stderr)
+        raise RuntimeError(_truncate(f"exit {proc.returncode}: {proc.stdout}{stderr}"))
     return _truncate(proc.stdout)
 
 

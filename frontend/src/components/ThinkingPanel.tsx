@@ -1,7 +1,13 @@
 import { useState } from "react"
 
-export function ThinkingPanel({ text }: { text: string }) {
-  const [open, setOpen] = useState(false)
+export function ThinkingPanel({
+  text,
+  defaultOpen = false,
+}: {
+  text: string
+  defaultOpen?: boolean
+}) {
+  const [open, setOpen] = useState(defaultOpen)
   if (!text) return null
   return (
     <div className="mt-1 text-xs">

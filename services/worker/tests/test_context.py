@@ -30,8 +30,14 @@ def test_includes_memory_and_skills():
     assert "<available_skills>" in out
 
 
-def test_empty_inputs_produce_empty_string():
-    assert build_system_prompt(documents=[], memory=[], skills=[]) == ""
+def test_empty_inputs_still_include_base_environment_prompt():
+    # 即使无用户文档/记忆/技能,也要注入基础环境提示词(沙箱工作目录 + 相对路径约定),
+    # 否则空 system 会让模型幻觉 /workspace 之类不存在的绝对路径。
+    out = build_system_prompt(documents=[], memory=[], skills=[])
+    assert out  # 不再为空
+    assert "working directory" in out
+    assert "relative paths" in out
+    assert "/workspace" in out  # 明确告知不要假设 /workspace
 
 
 def test_skill_metadata_is_xml_escaped():
