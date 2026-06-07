@@ -95,10 +95,10 @@ async def test_two_users_get_isolated_sandboxes(stack):
     rb = await client.post(f"/sessions/{sid_b}/turn", json={"content": "write b"})
     assert ra.status_code == 200 and rb.status_code == 200
 
-    # each user's file is under its OWN per-user sandbox dir; not visible to the other
-    assert (base / str(uid_a) / f"sessions/{sid_a}" / "a.txt").read_text() == "alpha"
-    assert (base / str(uid_b) / f"sessions/{sid_b}" / "b.txt").read_text() == "beta"
-    assert not (base / str(uid_a)).joinpath(f"sessions/{sid_b}", "b.txt").exists()
+    # each user's file is under its OWN per-user shared workspace; not visible to the other
+    assert (base / str(uid_a) / "workspace" / "a.txt").read_text() == "alpha"
+    assert (base / str(uid_b) / "workspace" / "b.txt").read_text() == "beta"
+    assert not (base / str(uid_a)).joinpath("workspace", "b.txt").exists()
 
     # registry has one active sandbox per user
     async with maker() as db:

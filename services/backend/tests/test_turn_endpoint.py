@@ -71,7 +71,7 @@ async def test_turn_persists_and_returns(client, fake_worker):
     assert [m["role"] for m in listed] == ["user", "assistant", "tool", "assistant"]
     # assembled request carried the user message + work_subdir
     assert fake_worker["request"].user_message == "say hi"
-    assert fake_worker["request"].work_subdir == f"sessions/{sid}"
+    assert fake_worker["request"].work_subdir == "workspace"
 
 
 async def test_turn_releases_lock_so_second_turn_works(client, fake_worker):

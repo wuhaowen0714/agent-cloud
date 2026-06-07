@@ -13,14 +13,16 @@ class SessionRepository(BaseRepository[Session]):
     async def create_for(
         self, user_id: uuid.UUID, agent_config_id: uuid.UUID, title: str | None
     ) -> Session:
+        # 用户级共享工作空间:同一用户的所有 agent/session 共用
+        # base_root/<user_id>/workspace/(base 本就按 user_id 划分且跨沙箱重建稳定)。
+        # 原先按 session 隔离(sessions/<id>),现改为固定子目录以便文件共享。
         s = Session(
             id=uuid.uuid4(),
             user_id=user_id,
             agent_config_id=agent_config_id,
             title=title,
-            work_subdir="",
+            work_subdir="workspace",
         )
-        s.work_subdir = f"sessions/{s.id}"
         self.session.add(s)
         await self.session.flush()
         return s

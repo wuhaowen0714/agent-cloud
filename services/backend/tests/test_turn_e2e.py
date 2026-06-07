@@ -80,8 +80,8 @@ async def test_full_turn_through_all_layers(stack):
     assert body["stop_reason"] == "end_turn"
     assert [m["role"] for m in body["messages"]] == ["assistant", "tool", "assistant"]
 
-    # 工具真的在沙箱里执行了(每用户沙箱目录:{uid}/sessions/{sid})
-    assert (base / str(uid) / f"sessions/{sid}" / "hello.txt").read_text() == "from-agent"
+    # 工具真的在沙箱里执行了(用户级共享工作空间:{uid}/workspace)
+    assert (base / str(uid) / "workspace" / "hello.txt").read_text() == "from-agent"
 
     # DB 落了 user + assistant + tool + assistant
     listed = (await client.get(f"/sessions/{sid}/messages")).json()

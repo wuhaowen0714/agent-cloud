@@ -101,8 +101,8 @@ async def test_full_streaming_turn(stack):
     assert kinds[-1] == "turn_done"
     assert events[-1]["stop_reason"] == "end_turn" and len(events[-1]["message_ids"]) == 3
 
-    # tool executed in the per-user sandbox dir ({uid}/sessions/{sid})
-    assert (base / str(uid) / f"sessions/{sid}" / "hi.txt").read_text() == "yo"
+    # tool executed in the per-user shared workspace ({uid}/workspace)
+    assert (base / str(uid) / "workspace" / "hi.txt").read_text() == "yo"
     # DB persisted user + assistant + tool + assistant
     listed = (await client.get(f"/sessions/{sid}/messages")).json()
     assert [m["role"] for m in listed] == ["user", "assistant", "tool", "assistant"]

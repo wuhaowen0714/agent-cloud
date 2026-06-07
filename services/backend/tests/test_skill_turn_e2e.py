@@ -88,8 +88,8 @@ async def test_enabled_skill_is_materialized_and_readable(skill_stack):
     assert r.status_code == 200, r.text
     assert r.json()["stop_reason"] == "end_turn"
 
-    # 1) skill 物化到了该会话沙箱目录
-    md = base / str(uid) / f"sessions/{sid}" / ".skills" / "example-greeting" / "SKILL.md"
+    # 1) skill 物化到了用户级共享工作空间
+    md = base / str(uid) / "workspace" / ".skills" / "example-greeting" / "SKILL.md"
     assert md.is_file()
     assert "example-greeting" in md.read_text()
 
@@ -120,4 +120,4 @@ async def test_disabled_skill_not_materialized(skill_stack):
     # FakeProvider 第一轮会尝试 read_file,读不到 → is_error;第二轮收尾。回合仍 200。
     r = await client.post(f"/sessions/{sid}/turn", json={"content": "x"})
     assert r.status_code == 200, r.text
-    assert not (base / str(uid) / f"sessions/{sid}" / ".skills").exists()
+    assert not (base / str(uid) / "workspace" / ".skills").exists()

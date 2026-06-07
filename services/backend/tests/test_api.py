@@ -34,7 +34,7 @@ async def test_session_and_messages(client):
     r = await client.post("/sessions", json={"user_id": uid, "agent_config_id": aid})
     assert r.status_code == 201, r.text
     sid = r.json()["id"]
-    assert r.json()["work_subdir"] == f"sessions/{sid}"
+    assert r.json()["work_subdir"] == "workspace"
 
     r = await client.post(
         f"/sessions/{sid}/messages", json={"role": "user", "content": {"text": "hello"}}

@@ -37,7 +37,7 @@ async def test_session_default_work_subdir(session):
     repo = SessionRepository(session)
     s = await repo.create_for(user_id=user.id, agent_config_id=agent.id, title="t")
     await session.commit()
-    assert s.work_subdir == f"sessions/{s.id}"
+    assert s.work_subdir == "workspace"
     assert s.status == "idle"
 
 
