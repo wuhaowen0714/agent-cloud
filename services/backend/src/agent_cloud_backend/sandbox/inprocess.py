@@ -28,3 +28,14 @@ class InProcessProvisioner:
         server = self._servers.pop(sandbox_id, None)
         if server is not None:
             await server.stop(None)
+
+    async def stop_all(self) -> None:
+        """停掉所有已起的 sandbox 服务并清空登记。
+
+        测试 teardown 用:未停的 aio server 会泄漏到解释器退出时被 GC 终结,
+        抛 'Event loop is closed' / 'AioServer.shutdown was never awaited',
+        进而挂死整进程(整套 backend 测试一次跑不完的根因)。
+        """
+        for server in self._servers.values():
+            await server.stop(None)
+        self._servers.clear()

@@ -61,3 +61,14 @@ async def test_persistent_workdir_across_respawn(tmp_path):
 async def test_stop_unknown_is_noop(tmp_path):
     prov = InProcessProvisioner(base_root=tmp_path)
     await prov.stop(uuid.uuid4())  # should not raise
+
+
+async def test_stop_all_clears_and_is_idempotent(tmp_path):
+    # stop_all 必须停掉所有已起的 sandbox 服务并清空登记;否则泄漏的 aio server 会在
+    # 解释器退出时被 GC 终结(Event loop is closed)挂死整进程。
+    prov = InProcessProvisioner(base_root=tmp_path)
+    await prov.spawn(uuid.uuid4())
+    await prov.spawn(uuid.uuid4())
+    await prov.stop_all()
+    assert prov._servers == {}
+    await prov.stop_all()  # idempotent, no raise

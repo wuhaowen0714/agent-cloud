@@ -65,9 +65,8 @@ async def stack(engine, tmp_path):
         async with maker() as s:
             yield s
 
-    manager = SandboxManager(
-        provisioner=InProcessProvisioner(base_root=tmp_path), sessionmaker=maker
-    )
+    provisioner = InProcessProvisioner(base_root=tmp_path)
+    manager = SandboxManager(provisioner=provisioner, sessionmaker=maker)
 
     app = create_app()
     app.dependency_overrides[get_session] = _override_session
@@ -77,6 +76,7 @@ async def stack(engine, tmp_path):
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c, tmp_path
     await worker_server.stop(None)
+    await provisioner.stop_all()
     db_module._sessionmaker = _saved
 
 

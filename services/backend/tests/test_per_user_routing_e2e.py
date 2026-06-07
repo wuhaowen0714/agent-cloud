@@ -51,9 +51,8 @@ async def stack(engine, tmp_path):
         return providers[provider]
 
     worker_server, wport = await create_worker_server(provider_factory=factory, port=0)
-    manager = SandboxManager(
-        provisioner=InProcessProvisioner(base_root=tmp_path), sessionmaker=maker
-    )
+    provisioner = InProcessProvisioner(base_root=tmp_path)
+    manager = SandboxManager(provisioner=provisioner, sessionmaker=maker)
 
     async def _override_session():
         async with maker() as s:
@@ -67,6 +66,7 @@ async def stack(engine, tmp_path):
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c, tmp_path, maker, providers
     await worker_server.stop(None)
+    await provisioner.stop_all()
 
 
 async def _user_session(client, email, provider_name):

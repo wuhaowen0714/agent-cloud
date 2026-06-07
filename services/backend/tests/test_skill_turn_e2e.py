@@ -49,9 +49,8 @@ async def skill_stack(engine, tmp_path):
     def _override_settings():
         return Settings(worker_endpoint=f"localhost:{wport}", sandbox_base_root=str(tmp_path))
 
-    manager = SandboxManager(
-        provisioner=InProcessProvisioner(base_root=tmp_path), sessionmaker=maker
-    )
+    provisioner = InProcessProvisioner(base_root=tmp_path)
+    manager = SandboxManager(provisioner=provisioner, sessionmaker=maker)
     store = LocalObjectStore(tmp_path / "obj")
 
     app = create_app()
@@ -63,6 +62,7 @@ async def skill_stack(engine, tmp_path):
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c, tmp_path
     await worker_server.stop(None)
+    await provisioner.stop_all()
 
 
 async def test_enabled_skill_is_materialized_and_readable(skill_stack):
