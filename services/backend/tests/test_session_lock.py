@@ -90,3 +90,34 @@ async def test_fresh_running_lock_is_not_taken_over(session):
 
     # within the lease window -> rejected
     assert await repo.try_acquire(sid) is False
+
+
+# --- #71: heartbeat keeps a live long turn from being taken over ---
+
+
+async def test_heartbeat_prevents_lease_takeover(session):
+    repo = SessionRepository(session)
+    s = await _session(session)
+    sid = s.id
+    await session.commit()
+
+    # running with an already-expired lease (700s > 600s); WITHOUT a heartbeat a
+    # concurrent turn could take this over mid-flight.
+    expired = datetime.now(UTC) - timedelta(seconds=700)
+    await _force_running(session, sid, expired)
+
+    # heartbeat renews last_active_at -> lease no longer expired
+    assert await repo.heartbeat(sid) is True
+    await session.commit()
+
+    # the takeover that would have succeeded is now rejected
+    assert await repo.try_acquire(sid) is False
+
+
+async def test_heartbeat_noop_when_not_running(session):
+    repo = SessionRepository(session)
+    s = await _session(session)
+    sid = s.id
+    await session.commit()
+    # idle session -> nothing to renew
+    assert await repo.heartbeat(sid) is False

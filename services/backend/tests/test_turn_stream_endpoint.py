@@ -177,7 +177,9 @@ async def test_sse_stream_releases_lock_on_client_disconnect(engine, monkeypatch
 
     monkeypatch.setattr(turn_module, "stream_turn_via_worker", _stream)
 
-    gen = turn_module._sse_stream("ignored", object(), session_id)
+    # large heartbeat interval: the renew task never fires during this short
+    # disconnect test; it's just started and then cancelled with the generator.
+    gen = turn_module._sse_stream("ignored", object(), session_id, 999)
 
     # Drive the generator from a task, mimicking Starlette's StreamingResponse:
     # ``async for chunk in body_iterator`` with an ``await`` between chunks (the

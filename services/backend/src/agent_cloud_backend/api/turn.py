@@ -26,6 +26,7 @@ from agent_cloud_backend.skills.deps import get_object_store
 from agent_cloud_backend.skills.materialize import materialize_enabled_skills
 from agent_cloud_backend.skills.store import ObjectStore
 from agent_cloud_backend.turn.assemble import build_run_turn_request
+from agent_cloud_backend.turn.heartbeat import session_heartbeat
 from agent_cloud_backend.turn.messages import common_to_content
 from agent_cloud_backend.turn.sse import error_sse, format_sse, turn_event_to_sse
 from agent_cloud_backend.turn.worker_client import (
@@ -94,7 +95,8 @@ async def run_turn_endpoint(
             enabled_skills=enabled_skills,
         )
         try:
-            response = await run_turn_via_worker(settings.worker_endpoint, request)
+            async with session_heartbeat(session_id, settings.session_heartbeat_seconds):
+                response = await run_turn_via_worker(settings.worker_endpoint, request)
         except grpc.aio.AioRpcError as exc:
             raise HTTPException(
                 status_code=502, detail=f"worker unavailable: {exc.code().name}"
@@ -154,39 +156,43 @@ async def _release_session_lock(session_id: uuid.UUID) -> None:
         logger.exception("failed to release session lock for session %s", session_id)
 
 
-async def _sse_stream(worker_endpoint: str, request, session_id: uuid.UUID):
+async def _sse_stream(
+    worker_endpoint: str, request, session_id: uuid.UUID, heartbeat_interval: float
+):
     try:
-        async for proto_event in stream_turn_via_worker(worker_endpoint, request):
-            event = turn_event_from_proto(proto_event)
-            if isinstance(event, TurnDone):
-                message_ids = []
-                async with get_sessionmaker()() as db:
-                    msg_repo = MessageRepository(db)
-                    for common in event.new_messages:
-                        row = await msg_repo.append(
-                            session_id,
-                            Message(
-                                session_id=session_id,
-                                seq=0,
-                                role=common.role.value,
-                                content=common_to_content(common),
-                            ),
-                        )
-                        message_ids.append(str(row.id))
-                    await db.commit()
-                yield format_sse(
-                    {
-                        "type": "turn_done",
-                        "usage": {
-                            "input_tokens": event.usage.input_tokens,
-                            "output_tokens": event.usage.output_tokens,
-                        },
-                        "message_ids": message_ids,
-                        "stop_reason": event.stop_reason,
-                    }
-                )
-            else:
-                yield format_sse(turn_event_to_sse(event))
+        # 流式回合期间续租会话锁(长回合不被并发回合抢锁);退出 async with 即停。
+        async with session_heartbeat(session_id, heartbeat_interval):
+            async for proto_event in stream_turn_via_worker(worker_endpoint, request):
+                event = turn_event_from_proto(proto_event)
+                if isinstance(event, TurnDone):
+                    message_ids = []
+                    async with get_sessionmaker()() as db:
+                        msg_repo = MessageRepository(db)
+                        for common in event.new_messages:
+                            row = await msg_repo.append(
+                                session_id,
+                                Message(
+                                    session_id=session_id,
+                                    seq=0,
+                                    role=common.role.value,
+                                    content=common_to_content(common),
+                                ),
+                            )
+                            message_ids.append(str(row.id))
+                        await db.commit()
+                    yield format_sse(
+                        {
+                            "type": "turn_done",
+                            "usage": {
+                                "input_tokens": event.usage.input_tokens,
+                                "output_tokens": event.usage.output_tokens,
+                            },
+                            "message_ids": message_ids,
+                            "stop_reason": event.stop_reason,
+                        }
+                    )
+                else:
+                    yield format_sse(turn_event_to_sse(event))
     except grpc.aio.AioRpcError as exc:
         yield format_sse(error_sse(exc.code()))
     except Exception:
@@ -258,6 +264,8 @@ async def stream_turn_endpoint(
         await db.commit()
         raise
     return StreamingResponse(
-        _sse_stream(settings.worker_endpoint, request, session_id),
+        _sse_stream(
+            settings.worker_endpoint, request, session_id, settings.session_heartbeat_seconds
+        ),
         media_type="text/event-stream",
     )

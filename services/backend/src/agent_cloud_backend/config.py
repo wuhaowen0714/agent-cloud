@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     object_store_root: str = "/tmp/agent-cloud-object-store"
     allow_uploaded_archives: bool = False
 
+    # 回合进行中每隔这么多秒续租会话锁(必须远小于 try_acquire 的 600s lease)
+    session_heartbeat_seconds: int = 200
+
 
 def get_settings() -> Settings:
     return Settings()

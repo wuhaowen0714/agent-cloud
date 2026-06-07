@@ -34,10 +34,10 @@ class SessionRepository(BaseRepository[Session]):
         # than the lease), which lets a later turn take over after a crashed
         # request strands the row in `running`.
         #
-        # Caveat: long turns are NOT heartbeated, so `lease_seconds` must exceed
-        # the maximum expected turn duration or a still-running turn could be
-        # taken over mid-flight. Per-turn heartbeat / lease-renewal is a later
-        # refinement.
+        # A live long turn is kept from being taken over by ``heartbeat()`` (the
+        # turn endpoint renews ``last_active_at`` periodically), so the lease only
+        # expires for a turn that actually died -- crash-recovery takeover without
+        # stealing a still-running turn.
         cutoff = datetime.now(UTC) - timedelta(seconds=lease_seconds)
         result = await self.session.execute(
             update(Session)
@@ -46,6 +46,19 @@ class SessionRepository(BaseRepository[Session]):
                 or_(Session.status == "idle", Session.last_active_at < cutoff),
             )
             .values(status="running", last_active_at=func.now())
+        )
+        return result.rowcount == 1
+
+    async def heartbeat(self, session_id: uuid.UUID) -> bool:
+        """续租:仅当会话仍 ``running`` 时刷新 ``last_active_at``;返回是否续上。
+
+        回合进行中由端点周期调用,使租约只在回合**真正死亡**时才过期,从而长回合
+        不会被同会话的并发回合抢锁(5b 评审里 .skills 在 reader 下被 rmtree 的根因)。
+        """
+        result = await self.session.execute(
+            update(Session)
+            .where(Session.id == session_id, Session.status == "running")
+            .values(last_active_at=func.now())
         )
         return result.rowcount == 1
 
