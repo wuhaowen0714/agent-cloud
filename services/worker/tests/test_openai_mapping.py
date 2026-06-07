@@ -79,3 +79,30 @@ def test_message_from_openai_with_tool_calls_parses_json_arguments():
     m = message_from_openai(om)
     assert m.text == ""
     assert m.tool_calls == [ToolCall(id="c1", name="bash", arguments={"command": "ls"})]
+
+
+def test_assistant_empty_text_no_tool_calls_keeps_empty_string():
+    # 无 tool_calls 时 content 必须是 ""(不能 null),否则回放历史里的空 assistant 会 400
+    msgs = [Message(role=Role.ASSISTANT, text="")]
+    out = to_openai_messages(CompletionRequest(system="", messages=msgs, tools=[]))
+    assert out[0] == {"role": "assistant", "content": ""}
+
+
+def test_assistant_empty_text_with_tool_calls_allows_null_content():
+    msgs = [
+        Message(
+            role=Role.ASSISTANT, text="", tool_calls=[ToolCall(id="c1", name="bash", arguments={})]
+        )
+    ]
+    out = to_openai_messages(CompletionRequest(system="", messages=msgs, tools=[]))
+    assert out[0]["content"] is None
+
+
+def test_tool_result_error_is_marked_in_content():
+    msgs = [
+        Message(
+            role=Role.TOOL, tool_results=[ToolResult(call_id="c1", content="boom", is_error=True)]
+        )
+    ]
+    out = to_openai_messages(CompletionRequest(system="", messages=msgs, tools=[]))
+    assert out[0]["content"] == "[tool error] boom"

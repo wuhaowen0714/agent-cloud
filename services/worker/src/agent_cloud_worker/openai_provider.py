@@ -44,7 +44,10 @@ def to_openai_messages(request: CompletionRequest) -> list[dict]:
         if m.role == Role.USER:
             out.append({"role": "user", "content": m.text})
         elif m.role == Role.ASSISTANT:
-            msg: dict = {"role": "assistant", "content": m.text or None}
+            # content 仅在有 tool_calls 时才可为 null;否则空文本必须是 ""(OpenAI 拒绝
+            # 无 tool_calls 的 content=null),否则回放历史里的空 assistant 会 400。
+            content = (m.text or None) if m.tool_calls else m.text
+            msg: dict = {"role": "assistant", "content": content}
             if m.tool_calls:
                 msg["tool_calls"] = [
                     {
@@ -57,7 +60,10 @@ def to_openai_messages(request: CompletionRequest) -> list[dict]:
             out.append(msg)
         elif m.role == Role.TOOL:
             for tr in m.tool_results:
-                out.append({"role": "tool", "tool_call_id": tr.call_id, "content": tr.content})
+                # OpenAI 的 tool 角色没有 is_error 字段,把失败标记折进 content,
+                # 否则模型分不清工具成功还是失败。
+                content = f"[tool error] {tr.content}" if tr.is_error else tr.content
+                out.append({"role": "tool", "tool_call_id": tr.call_id, "content": content})
     return out
 
 
@@ -81,16 +87,19 @@ class OpenAIProvider:
     用 base_url 覆盖构造,因此可对接任意 OpenAI 兼容端点。
     """
 
-    def __init__(self, client, model: str, max_tokens: int) -> None:
+    def __init__(
+        self, client, model: str, max_tokens: int, max_tokens_param: str = "max_tokens"
+    ) -> None:
         self._client = client
         self._model = model
         self._max_tokens = max_tokens
+        self._max_tokens_param = max_tokens_param
 
     def _create_kwargs(self, request: CompletionRequest) -> dict:
         kwargs: dict = {
             "model": self._model,
             "messages": to_openai_messages(request),
-            "max_tokens": self._max_tokens,
+            self._max_tokens_param: self._max_tokens,
         }
         if request.tools:
             kwargs["tools"] = to_openai_tools(request.tools)
@@ -99,9 +108,11 @@ class OpenAIProvider:
     async def complete(self, request: CompletionRequest) -> CompletionResult:
         resp = await self._client.chat.completions.create(**self._create_kwargs(request))
         message = message_from_openai(resp.choices[0].message)
+        # 部分 OpenAI 兼容端点非流式响应可能不带 usage;缺失按 0 计,不让成功的回合崩。
+        u = resp.usage
         usage = Usage(
-            input_tokens=resp.usage.prompt_tokens,
-            output_tokens=resp.usage.completion_tokens,
+            input_tokens=u.prompt_tokens if u else 0,
+            output_tokens=u.completion_tokens if u else 0,
         )
         return CompletionResult(message=message, usage=usage)
 

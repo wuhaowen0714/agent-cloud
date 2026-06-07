@@ -155,3 +155,32 @@ async def test_stream_maps_reasoning_content_to_thinking():
     provider = OpenAIProvider(client=_stream_client(chunks), model="m", max_tokens=9)
     events = [e async for e in provider.stream(_req())]
     assert any(isinstance(e, ProviderThinkingDelta) and e.text == "thinking..." for e in events)
+
+
+async def test_complete_tolerates_missing_usage():
+    # 部分 OpenAI 兼容端点非流式响应不带 usage;不应让成功的回合崩
+    resp = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="hi", tool_calls=None))],
+        usage=None,
+    )
+    provider = OpenAIProvider(client=_client(resp), model="m", max_tokens=9)
+    result = await provider.complete(_req())
+    assert result.message.text == "hi"
+    assert result.usage.input_tokens == 0 and result.usage.output_tokens == 0
+
+
+async def test_complete_uses_configured_max_tokens_param():
+    captured = {}
+    resp = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="x", tool_calls=None))],
+        usage=SimpleNamespace(prompt_tokens=0, completion_tokens=0),
+    )
+    provider = OpenAIProvider(
+        client=_client(resp, captured),
+        model="m",
+        max_tokens=7,
+        max_tokens_param="max_completion_tokens",
+    )
+    await provider.complete(_req())
+    assert captured["max_completion_tokens"] == 7
+    assert "max_tokens" not in captured

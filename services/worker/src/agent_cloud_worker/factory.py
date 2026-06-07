@@ -26,6 +26,11 @@ def build_provider_factory(settings: WorkerSettings) -> ProviderFactory:
             timeout=settings.openai_timeout_seconds,
             max_retries=settings.openai_max_retries,
         )
-        return OpenAIProvider(client=client, model=model, max_tokens=settings.request_max_tokens)
+        return OpenAIProvider(
+            client=client,
+            model=model,
+            max_tokens=settings.request_max_tokens,
+            max_tokens_param=settings.max_tokens_param,
+        )
 
     return factory

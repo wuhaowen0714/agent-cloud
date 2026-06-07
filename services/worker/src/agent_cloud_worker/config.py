@@ -14,6 +14,10 @@ class WorkerSettings(BaseSettings):
     openai_max_retries: int = 2
 
     request_max_tokens: int = 4096
+    # 经典 chat completions 用 "max_tokens";OpenAI 推理模型(o 系列 / gpt-5)要
+    # "max_completion_tokens"。多数兼容端点(vLLM/OpenRouter)用 max_tokens,故默认它;
+    # 接 OpenAI 推理模型时把本项设为 "max_completion_tokens"。
+    max_tokens_param: str = "max_tokens"
 
 
 def get_worker_settings() -> WorkerSettings:
