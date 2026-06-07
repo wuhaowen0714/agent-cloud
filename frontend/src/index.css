@@ -5,3 +5,8 @@
 :root { color-scheme: light; }
 html, body, #root { height: 100%; }
 body { margin: 0; background: #f8fafc; color: #0f172a; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+
+::selection { background: #99f6e4; }            /* brand-200 */
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }  /* slate-300 */
+*::-webkit-scrollbar-thumb:hover { background: #94a3b8; }                 /* slate-400 */
