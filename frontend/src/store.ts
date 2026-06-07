@@ -4,6 +4,7 @@ import type { Block } from "./blocks"
 // 进行中回合的实时聚合(由 SSE 事件填充)。blocks 按时间顺序记录思考/正文/工具,渲染即还原时序。
 export interface LiveTurn {
   userText: string
+  sessionId: string
   blocks: Block[]
   status: "streaming" | "done" | "error"
   errorMessage?: string
@@ -18,13 +19,13 @@ interface AppState {
   setUser: (id: string | null) => void
   setAgent: (id: string | null) => void
   setSession: (id: string | null) => void
-  startLive: (userText: string) => void
+  startLive: (userText: string, sessionId: string) => void
   setLive: (fn: (t: LiveTurn) => LiveTurn) => void
   clearLive: () => void
   toggleFileDrawer: () => void
 }
 
-const EMPTY: LiveTurn = { userText: "", blocks: [], status: "streaming" }
+const EMPTY: LiveTurn = { userText: "", sessionId: "", blocks: [], status: "streaming" }
 
 export const useStore = create<AppState>((set) => ({
   userId: localStorage.getItem("ac.userId"),
@@ -39,7 +40,7 @@ export const useStore = create<AppState>((set) => ({
   },
   setAgent: (id) => set({ agentId: id, sessionId: null }),
   setSession: (id) => set({ sessionId: id, live: null }),
-  startLive: (userText) => set({ live: { ...EMPTY, userText, blocks: [] } }),
+  startLive: (userText, sessionId) => set({ live: { ...EMPTY, userText, sessionId, blocks: [] } }),
   setLive: (fn) => set((s) => (s.live ? { live: fn(s.live) } : {})),
   clearLive: () => set({ live: null }),
   toggleFileDrawer: () => set((s) => ({ fileDrawerOpen: !s.fileDrawerOpen })),
