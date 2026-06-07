@@ -55,3 +55,11 @@ def test_prefix_traversal_rejected(tmp_path):
     store = LocalObjectStore(tmp_path / "store")
     with pytest.raises(ValueError):
         store.exists("../escape")
+
+
+def test_empty_prefix_rejected(tmp_path):
+    store = LocalObjectStore(tmp_path / "store")
+    with pytest.raises(ValueError):
+        store.delete_prefix("")
+    with pytest.raises(ValueError):
+        store.exists(".")

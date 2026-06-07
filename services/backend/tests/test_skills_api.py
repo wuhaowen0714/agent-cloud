@@ -85,3 +85,32 @@ async def test_delete_skill(client):
     assert (await client.delete(f"/skills/{sid}")).status_code == 204
     assert (await client.get(f"/skills?user_id={uid}")).json() == []
     assert (await client.delete(f"/skills/{sid}")).status_code == 404
+
+
+async def test_install_rejects_traversal_name(client):
+    uid = await _user(client, "trav@e.com")
+    r = await client.post("/skills/install", json={"user_id": uid, "name": "../config"})
+    assert r.status_code == 422
+
+
+def _macos_zip_bytes(name="mac-skill"):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(f"{name}/SKILL.md", f'---\nname: {name}\ndescription: "d"\n---\nbody\n')
+        # what macOS "Compress" adds alongside the real folder
+        zf.writestr("__MACOSX/._SKILL.md", "cruft")
+        zf.writestr(".DS_Store", "cruft")
+    buf.seek(0)
+    return buf.getvalue()
+
+
+async def test_upload_macos_zip_with_dunder_macosx(client, monkeypatch):
+    monkeypatch.setenv("AGENT_CLOUD_ALLOW_UPLOADED_ARCHIVES", "true")
+    uid = await _user(client, "mac@e.com")
+    r = await client.post(
+        "/skills/upload",
+        data={"user_id": uid},
+        files={"file": ("s.zip", _macos_zip_bytes(), "application/zip")},
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["name"] == "mac-skill"

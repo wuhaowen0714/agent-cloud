@@ -46,7 +46,7 @@ def test_bad_yaml():
 
 @pytest.mark.parametrize(
     "name",
-    ["", "Bad Name", "../evil", "a/b", "..", "UPPER", "with space"],
+    ["", "Bad Name", "../evil", "a/b", "..", "UPPER", "with space", "a" * 65],
 )
 def test_invalid_names_rejected(name):
     with pytest.raises(SkillManifestError):

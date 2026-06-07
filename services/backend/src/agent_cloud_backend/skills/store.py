@@ -21,6 +21,8 @@ class LocalObjectStore:
         self._root = Path(root)
 
     def _path(self, prefix: str) -> Path:
+        if not prefix or prefix.strip() in (".", "/", ""):
+            raise ValueError(f"invalid object store prefix: {prefix!r}")
         root = self._root.resolve()
         p = (self._root / prefix).resolve()
         if p != root and root not in p.parents:

@@ -34,19 +34,20 @@ async def install_skill_from_dir(
         raise ValueError(f"skill already installed: {manifest.name}")
 
     prefix = skill_package_ref(user_id, manifest.name)
+    skill = Skill(
+        user_id=user_id,
+        name=manifest.name,
+        description=manifest.description,
+        source=source,
+        version=manifest.version,
+        requires=manifest.requires,
+        package_ref=prefix,
+    )
+    # Flush the row first: the unique (user_id, name) constraint is enforced
+    # before any storage write, so a duplicate fails here having touched no
+    # storage, and a concurrent same-name install can't delete the winner's
+    # package dir. A later commit failure rolls the row back (orphan files,
+    # which are unreachable, beat orphan rows).
+    await repo.create(skill)
     store.put_dir(prefix, src_dir)
-    try:
-        skill = Skill(
-            user_id=user_id,
-            name=manifest.name,
-            description=manifest.description,
-            source=source,
-            version=manifest.version,
-            requires=manifest.requires,
-            package_ref=prefix,
-        )
-        return await repo.create(skill)
-    except Exception:
-        # DB 注册失败(如并发唯一冲突)→ 回滚已写入的对象存储,避免孤儿包
-        store.delete_prefix(prefix)
-        raise
+    return skill

@@ -33,7 +33,7 @@ def parse_skill_md(text: str) -> SkillManifest:
         raise SkillManifestError("frontmatter must be a mapping")
 
     name = data.get("name")
-    if not isinstance(name, str) or not _NAME_RE.match(name) or ".." in name:
+    if not isinstance(name, str) or not _NAME_RE.match(name) or ".." in name or len(name) > 64:
         raise SkillManifestError(f"invalid or missing skill name: {name!r}")
 
     description = data.get("description")

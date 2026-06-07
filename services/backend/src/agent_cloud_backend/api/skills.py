@@ -31,7 +31,11 @@ def _safe_extract_zip(fileobj, dest: Path) -> None:
 def _locate_skill_root(extract_dir: Path) -> Path | None:
     if (extract_dir / "SKILL.md").is_file():
         return extract_dir
-    entries = list(extract_dir.iterdir())
+    # Ignore macOS archive cruft (__MACOSX/, .DS_Store) so a folder zipped on a
+    # Mac — which contains a sibling __MACOSX/ — still resolves to its one skill dir.
+    entries = [
+        p for p in extract_dir.iterdir() if p.name != "__MACOSX" and not p.name.startswith(".")
+    ]
     if len(entries) == 1 and entries[0].is_dir() and (entries[0] / "SKILL.md").is_file():
         return entries[0]
     return None
@@ -49,6 +53,8 @@ async def install_skill(
     store: ObjectStore = Depends(get_object_store),
     registry_root: Path = Depends(get_skill_registry_root),
 ):
+    if not body.name or "/" in body.name or "\\" in body.name or ".." in body.name:
+        raise HTTPException(status_code=422, detail=f"invalid skill name: {body.name}")
     src_dir = registry_root / body.name
     if not (src_dir / "SKILL.md").is_file():
         raise HTTPException(status_code=404, detail=f"registry skill not found: {body.name}")
