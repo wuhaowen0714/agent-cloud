@@ -46,6 +46,14 @@ backend(SandboxManager)
 
 稳态容器数 ≈ 活跃用户数 + 一小段 TTL 尾巴,**随并发扩,不随注册用户数扩**(5 万用户/500 活跃 ≈ 500 容器;空闲的不存在,文件在卷上)。
 
+### 4.1 spawn / reap 时机(明确)
+
+- **spawn = 懒创建,在回合开始**(`get_endpoint_for_user`)按需:仅当该用户「无健康活跃沙箱」才建(首回合 / 被 reap 后再用 / 沙箱死了重建),否则复用并 `touch` 续期。建 user/agent/session、光浏览都**不**建沙箱。
+- **reap**:停掉「距上次回合开始超 `idle_ttl`(默认 1800s=30min)」的沙箱。活跃用户每回合 `touch` 续期 → 永不被收;回收的是容器、**卷保留**;回头再用冷启动一个新容器挂回同卷。
+- ⚠️ **必须接后台 reaper(本方案新增)**:现有 `reap_idle()` **没有任何调用方**——不接的话容器只建不收、越积越多。在 FastAPI lifespan 起后台任务,每 `reap_interval`(默认 120s)调 `reap_idle()`,关停时取消。
+- reaper **跳过 session 仍 `running` 的沙箱**(`last_used_at` 只在回合开始 touch,避免长回合被中途回收);`idle_ttl` 也须 > 最长回合时长。
+- **冷启动隐藏**:回合开始时**并行**预热容器(与首个 LLM 思考重叠)——模型要先思考几秒才会调第一个工具,这窗口正好让容器 ready;worker 首个工具调用对沙箱连接做**短重试**兜底。稳态(复用)0 冷启动;冷启动只在首回合 / 被回收后出现一次 ~1–3s,且基本被"思考"遮掉。
+
 ## 5. 路径 / 卷模型(关键)
 
 - **持久卷(宿主机)**:`<SANDBOX_HOST_ROOT>/<user_id>/workspace/`。这就是用户级共享工作空间(同用户所有 agent/session 共用),持久、跨容器重建稳定。
@@ -83,7 +91,7 @@ backend(SandboxManager)
 
 1. **语言级依赖 → 路由进 `/workspace` → 跨容器重建永久保留**(覆盖绝大多数场景)。镜像内设环境变量,把各工具的 home/缓存/安装前缀都指向卷:
    - `HOME=/workspace/.home`(→ `~/.local`、`~/.cache`、pip `--user` 等)
-   - Python:`VIRTUAL_ENV=/workspace/.venv` + `PATH=/workspace/.venv/bin:$PATH`,启动脚本检测缺失则 `python -m venv /workspace/.venv` → `pip install X` 落进卷
+   - Python:`PYTHONUSERBASE=/workspace/.home/.local` + `PIP_USER=1` → `pip install X` 默认装 `--user` 进卷,**免去建 venv 的冷启动开销**(建 venv 要多 2–5s)。需要隔离环境的项目仍可自建 `/workspace/.venv`。
    - Node:`NPM_CONFIG_PREFIX=/workspace/.npm-global`(+ PATH)、cache 在 HOME 下 → 本地与 `-g` 安装都持久
    - `XDG_DATA_HOME`/`XDG_CACHE_HOME`、`CARGO_HOME`、`GOPATH` 等同理指向 `/workspace/.home`
    - 这些 `.` 开头目录在卷里隐藏,不干扰用户可见的工作区根。
@@ -117,6 +125,8 @@ backend(SandboxManager)
 | `AGENT_CLOUD_SANDBOX_DOCKER_NETWORK_MODE` | `publish` | `publish`(dev)/ `network`(prod) |
 | `AGENT_CLOUD_SANDBOX_DOCKER_NETWORK` | `agent-cloud-net` | network 模式下的网络名 |
 | `AGENT_CLOUD_SANDBOX_MEM_LIMIT` / `_CPUS` / `_PIDS` | 合理默认 | 资源上限 |
+| `AGENT_CLOUD_SANDBOX_IDLE_TTL_SECONDS` | `1800` | 空闲多久回收(自上次回合开始) |
+| `AGENT_CLOUD_SANDBOX_REAP_INTERVAL_SECONDS` | `120` | 后台 reaper 轮询间隔 |
 | `AGENT_CLOUD_SANDBOX_ALLOW_NET` | `true` | 沙箱是否可出网(装依赖需要;可关) |
 
 ## 11. 后端改动清单
@@ -126,6 +136,9 @@ backend(SandboxManager)
 - assemble/turn 接线:provisioner=docker 时 `work_subdir="."`(见 §5)。
 - `config.py`:新增 §10 配置项。
 - `deploy/sandbox.Dockerfile` + `scripts/dev_up.sh` 增加构建沙箱镜像 + 设 `AGENT_CLOUD_SANDBOX_PROVISIONER=docker`(开发默认仍可切回 inprocess)。
+- `main.py` lifespan:起后台 reaper 任务(每 `REAP_INTERVAL_SECONDS` 调 `manager.reap_idle()`),关停时取消——**接上目前没有调用方的 `reap_idle`**。
+- `reap_idle` 跳过 session 仍 `running` 的沙箱(查 session 状态),避免长回合被中途回收。
+- 冷启动隐藏:回合开始**并行**预热沙箱(不阻塞首个 thinking 流);worker 首个工具调用对沙箱连接做短重试。
 - 依赖:backend 加 `docker`(Python SDK)。
 
 ## 12. 测试策略
