@@ -5,6 +5,8 @@ requires-python = ">=3.12"
 dependencies = [
     "agent-cloud-common",
     "grpcio",
+    "openai",
+    "pydantic-settings",
 ]
 
 [build-system]
