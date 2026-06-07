@@ -82,3 +82,70 @@ async def test_complete_omits_tools_when_empty():
     provider = OpenAIProvider(client=_client(resp, captured), model="m", max_tokens=1)
     await provider.complete(_req(tools=[]))
     assert "tools" not in captured  # 空工具集不传 tools 键
+
+
+from agent_cloud_worker.provider import (  # noqa: E402
+    ProviderCompleted,
+    ProviderTextDelta,
+    ProviderThinkingDelta,
+)
+
+
+def _stream_client(chunks, captured=None):
+    cap = captured if captured is not None else {}
+
+    class _Comp:
+        async def create(self, **kwargs):
+            cap.update(kwargs)
+
+            async def _gen():
+                for c in chunks:
+                    yield c
+
+            return _gen()
+
+    return SimpleNamespace(chat=SimpleNamespace(completions=_Comp()))
+
+
+def _delta(content=None, tool_calls=None, reasoning=None):
+    d = SimpleNamespace(content=content, tool_calls=tool_calls, reasoning_content=reasoning)
+    return SimpleNamespace(choices=[SimpleNamespace(delta=d, finish_reason=None)], usage=None)
+
+
+def _usage_chunk(pt, ct):
+    return SimpleNamespace(choices=[], usage=SimpleNamespace(prompt_tokens=pt, completion_tokens=ct))
+
+
+async def test_stream_text_then_completed():
+    chunks = [_delta(content="he"), _delta(content="llo"), _usage_chunk(5, 2)]
+    provider = OpenAIProvider(client=_stream_client(chunks), model="m", max_tokens=9)
+    events = [e async for e in provider.stream(_req())]
+    texts = [e.text for e in events if isinstance(e, ProviderTextDelta)]
+    assert texts == ["he", "llo"]
+    done = events[-1]
+    assert isinstance(done, ProviderCompleted)
+    assert done.message.text == "hello"
+    assert done.usage.input_tokens == 5 and done.usage.output_tokens == 2
+
+
+async def test_stream_accumulates_tool_call_arguments():
+    tc0 = SimpleNamespace(index=0, id="c1", function=SimpleNamespace(name="bash", arguments='{"comm'))
+    tc1 = SimpleNamespace(index=0, id=None, function=SimpleNamespace(name=None, arguments='and": "ls"}'))
+    chunks = [
+        _delta(tool_calls=[tc0]),
+        _delta(tool_calls=[tc1]),
+        _usage_chunk(1, 1),
+    ]
+    provider = OpenAIProvider(client=_stream_client(chunks), model="m", max_tokens=9)
+    events = [e async for e in provider.stream(_req())]
+    done = events[-1]
+    assert isinstance(done, ProviderCompleted)
+    assert done.message.tool_calls[0].name == "bash"
+    assert done.message.tool_calls[0].arguments == {"command": "ls"}
+
+
+async def test_stream_maps_reasoning_content_to_thinking():
+    chunks = [_delta(reasoning="thinking..."), _delta(content="answer"), _usage_chunk(1, 1)]
+    provider = OpenAIProvider(client=_stream_client(chunks), model="m", max_tokens=9)
+    events = [e async for e in provider.stream(_req())]
+    assert any(isinstance(e, ProviderThinkingDelta) and e.text == "thinking..." for e in events)

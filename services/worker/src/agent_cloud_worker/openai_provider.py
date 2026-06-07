@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 
 from agent_cloud_common import (
     CompletionRequest,
@@ -10,6 +11,13 @@ from agent_cloud_common import (
     ToolCall,
     ToolSpec,
     Usage,
+)
+
+from agent_cloud_worker.provider import (
+    ProviderCompleted,
+    ProviderEvent,
+    ProviderTextDelta,
+    ProviderThinkingDelta,
 )
 
 
@@ -92,3 +100,45 @@ class OpenAIProvider:
             output_tokens=resp.usage.completion_tokens,
         )
         return CompletionResult(message=message, usage=usage)
+
+    async def stream(self, request: CompletionRequest) -> AsyncIterator[ProviderEvent]:
+        kwargs = self._create_kwargs(request)
+        kwargs["stream"] = True
+        kwargs["stream_options"] = {"include_usage": True}
+        stream = await self._client.chat.completions.create(**kwargs)
+
+        text_parts: list[str] = []
+        # index -> {"id","name","args"};按 index 累积分片的 tool_call 参数
+        tool_acc: dict[int, dict] = {}
+        usage = Usage()
+
+        async for chunk in stream:
+            if chunk.usage is not None:
+                usage = Usage(
+                    input_tokens=chunk.usage.prompt_tokens,
+                    output_tokens=chunk.usage.completion_tokens,
+                )
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            reasoning = getattr(delta, "reasoning_content", None)
+            if reasoning:
+                yield ProviderThinkingDelta(text=reasoning)
+            if delta.content:
+                text_parts.append(delta.content)
+                yield ProviderTextDelta(text=delta.content)
+            for tcd in delta.tool_calls or []:
+                slot = tool_acc.setdefault(tcd.index, {"id": "", "name": "", "args": ""})
+                if tcd.id:
+                    slot["id"] = tcd.id
+                if tcd.function and tcd.function.name:
+                    slot["name"] = tcd.function.name
+                if tcd.function and tcd.function.arguments:
+                    slot["args"] += tcd.function.arguments
+
+        tool_calls = [
+            ToolCall(id=s["id"], name=s["name"], arguments=json.loads(s["args"] or "{}"))
+            for _, s in sorted(tool_acc.items())
+        ]
+        message = Message(role=Role.ASSISTANT, text="".join(text_parts), tool_calls=tool_calls)
+        yield ProviderCompleted(message=message, usage=usage)
