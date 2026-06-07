@@ -75,14 +75,29 @@ backend(SandboxManager)
 
 ## 8. 沙箱镜像
 
-`deploy/sandbox.Dockerfile`:基于 `python:3.13-slim`,装 `agent_cloud_sandbox` 包(+ `agent_cloud_common` 依赖),`CMD` 启动 gRPC 沙箱服务监听 `0.0.0.0:50051`、`base_workdir=/workspace`。镜像名 `agent-cloud-sandbox:latest`(配置可改)。多机部署推到 registry。`dev_up.sh` 增加一步 `docker build`。
+`deploy/sandbox.Dockerfile`:基于 `python:3.13-slim`,装 `agent_cloud_sandbox` 包(+ `agent_cloud_common` 依赖),`CMD` 启动 gRPC 沙箱服务监听 `0.0.0.0:50051`、`base_workdir=/workspace`。镜像名 `agent-cloud-sandbox:latest`(配置可改)。多机部署推到 registry。`dev_up.sh` 增加一步 `docker build`。**用户想长期具备的系统工具(apt 包)写进这个 Dockerfile**(所有用户共用、可复现)。
+
+## 8.1 依赖持久化(目标:尽量保留用户依赖)
+
+容器根 fs 是临时的、只有 `/workspace` 卷持久,所以策略是**把依赖尽量引到 `/workspace`**:
+
+1. **语言级依赖 → 路由进 `/workspace` → 跨容器重建永久保留**(覆盖绝大多数场景)。镜像内设环境变量,把各工具的 home/缓存/安装前缀都指向卷:
+   - `HOME=/workspace/.home`(→ `~/.local`、`~/.cache`、pip `--user` 等)
+   - Python:`VIRTUAL_ENV=/workspace/.venv` + `PATH=/workspace/.venv/bin:$PATH`,启动脚本检测缺失则 `python -m venv /workspace/.venv` → `pip install X` 落进卷
+   - Node:`NPM_CONFIG_PREFIX=/workspace/.npm-global`(+ PATH)、cache 在 HOME 下 → 本地与 `-g` 安装都持久
+   - `XDG_DATA_HOME`/`XDG_CACHE_HOME`、`CARGO_HOME`、`GOPATH` 等同理指向 `/workspace/.home`
+   - 这些 `.` 开头目录在卷里隐藏,不干扰用户可见的工作区根。
+2. **系统级(apt)依赖 → 容器热期内保留**:根 fs **可写**(见 §9),配合 A1 常驻容器,apt 装的系统包在容器被 reap/崩溃前一直在(跨回合、跨 session)。**冷重建后回到镜像初始态**(系统包丢失)。
+3. **让系统包也扛过冷重建**:写进沙箱镜像 Dockerfile;或(后续增强)用户在 `/workspace` 放 `requirements.txt`/`apt-packages.txt`,spawn 时自动重装(声明式、可复现)。
+
+> 不做 per-user `docker commit` 快照(镜像爆炸、慢、乱)。
 
 ## 9. 安全
 
 **沙箱容器(跑不可信代码)加固**(`docker run` 参数,配置可调):
-- `cap_drop=["ALL"]`、`security_opt=["no-new-privileges"]`、非 root 用户运行。
-- `read_only=True` 根文件系统;仅 `/workspace`(卷)可写;`/tmp` 用 tmpfs。
-- 资源上限:`mem_limit`、`nano_cpus`、`pids_limit`。
+- `cap_drop=["ALL"]`、`security_opt=["no-new-privileges"]`。
+- 根文件系统**可写**(让 apt/系统级安装在容器热期内可用,配合 §8.1 的依赖保留目标)。**跨用户隔离不依赖只读根 fs**——它来自「每用户独立容器 + 只挂自己的 `/workspace`」,根 fs 是否只读不影响别人的文件可见性。更严格场景可改 `read_only=True`(代价:apt 等系统安装直接失败)。`/tmp` 用 tmpfs。
+- 资源上限:`mem_limit`、`nano_cpus`、`pids_limit`、磁盘配额(防写满)。
 - 网络出网策略:默认可禁(`network_disabled` 或内部网络无出口);需要联网的工具(pip/curl)再按配置放开。
 - **绝不**给沙箱挂 docker socket。
 - 加固钩子:`runtime`(配 `runsc` 上 gVisor)预留为配置。
@@ -134,5 +149,6 @@ backend(SandboxManager)
 - 配 `AGENT_CLOUD_SANDBOX_PROVISIONER=docker` 跑 dev_up.sh:发消息能写文件、`python3 x.py` 能跑(相对路径)。
 - 用户 A 的会话写的文件,用户 A 的另一会话能读(用户级共享仍成立)。
 - **用户 B 的沙箱无法读到用户 A 的文件**(bash 绝对路径/`ls /` 都看不到)——越权洞关闭。
+- 用户 `pip install <包>`(或 `npm install`)后,**杀掉容器触发冷重建**,再 `python -c "import <包>"`(或用该 npm 包)**仍成功**——语言级依赖跨重建保留(§8.1)。
 - backend 重启后沙箱容器仍在、回合正常;空闲后容器被 reap。
 ```
