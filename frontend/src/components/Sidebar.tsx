@@ -1,4 +1,5 @@
 import { AgentSelector } from "./AgentSelector"
+import { FileButton } from "./files/FileButton"
 import { SessionList } from "./SessionList"
 import { UserBar } from "./UserBar"
 
@@ -9,6 +10,7 @@ export function Sidebar() {
       <UserBar />
       <AgentSelector />
       <div className="border-t border-slate-100" />
+      <FileButton />
       <SessionList />
     </aside>
   )

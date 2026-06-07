@@ -1,4 +1,5 @@
 import { ChatView } from "./components/ChatView"
+import { FileDrawer } from "./components/files/FileDrawer"
 import { Sidebar } from "./components/Sidebar"
 
 export default function App() {
@@ -8,6 +9,7 @@ export default function App() {
       <main className="flex min-w-0 flex-1 flex-col bg-slate-50">
         <ChatView />
       </main>
+      <FileDrawer />
     </div>
   )
 }
