@@ -66,7 +66,9 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                 ("grpc.max_receive_message_length", MAX_GRPC_MESSAGE_BYTES),
             ],
         ) as channel:
-            executor = SandboxToolExecutor(channel, request.work_subdir)
+            executor = SandboxToolExecutor(
+                channel, request.work_subdir, list(request.agent.enabled_tools)
+            )
             result = await run_turn(
                 provider,
                 executor,
@@ -103,7 +105,9 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
             ("grpc.max_receive_message_length", MAX_GRPC_MESSAGE_BYTES),
         ]
         async with grpc.aio.insecure_channel(request.sandbox_endpoint, options=options) as channel:
-            executor = SandboxToolExecutor(channel, request.work_subdir)
+            executor = SandboxToolExecutor(
+                channel, request.work_subdir, list(request.agent.enabled_tools)
+            )
             # 流中途失败(provider 抛错 / loop 守卫)是 worker-fault:收敛为通用 INTERNAL,
             # 不把原始异常文本泄漏给客户端(会暴露内部细节且与 UNKNOWN 无法区分)。
             # context.abort 不在 run_turn_stream 内调用,故此处的宽 except 是安全的。
