@@ -49,6 +49,25 @@ async def _release_session_lock(session_id: uuid.UUID) -> None:
         logger.exception("failed to release session lock for session %s", session_id)
 
 
+async def _finalize(active: ActiveTurn, session_id: uuid.UUID) -> None:
+    """唤醒订阅者(done)+ 释放会话锁。包进 shield 调用,二次取消下仍跑完。"""
+    await active.finish()
+    await _release_session_lock(session_id)
+
+
+async def drain_hub(hub: TurnHub) -> None:
+    """关停时调用:取消所有 runner、等其收尾,再兜底释放仍在 hub 里(含从未启动
+    就被取消、其 finally 未跑的)会话锁,避免锁卡到 600s 租约过期(I2/I3)。"""
+    tasks = hub.all_tasks()
+    for t in tasks:
+        t.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    for sid in hub.session_ids():
+        await _release_session_lock(sid)
+        hub.remove(sid)
+
+
 async def run_turn(
     hub: TurnHub,
     active: ActiveTurn,
@@ -87,6 +106,8 @@ async def run_turn(
         logger.exception("turn run failed for session %s", session_id)
         await active.emit({"type": "error", "message": "the turn failed", "recoverable": False})
     finally:
-        await active.finish()
-        await asyncio.shield(_release_session_lock(session_id))
+        # 进入 finally 后,务必在后续(二次)取消下仍完成:从 Hub 移除 + 唤醒订阅者 +
+        # 释放锁。hub.remove 同步先做(无 await,必成);finish+release 包进 shield 的
+        # 一个协程,二次取消时其内部仍跑完(C1)。
         hub.remove(session_id)
+        await asyncio.shield(_finalize(active, session_id))

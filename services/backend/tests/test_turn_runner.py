@@ -146,3 +146,22 @@ async def test_runner_cancel_emits_cancelled_and_releases(engine, monkeypatch):
     assert active.events[-1] == {"type": "error", "message": "turn cancelled", "recoverable": False}
     assert await _status(engine, sid) == "idle"
     assert hub.get(sid) is None
+
+
+async def test_drain_hub_releases_stranded_lock_for_never_started_runner(engine, monkeypatch):
+    # I3 兜底:runner 在首次运行前就被取消 → 其 finally 从未跑 → 锁残留;drain_hub 兜底释放。
+    from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub
+    from agent_cloud_backend.turn.runner import drain_hub
+
+    _patch_global_sessionmaker(monkeypatch, engine)
+    sid = await _make_session_row(engine)
+    await _acquire(engine, sid)
+
+    hub = TurnHub()
+    hub.register(ActiveTurn(session_id=sid))  # task 留 None:模拟从未启动/无 runner 的残留
+    assert await _status(engine, sid) == "running"
+
+    await drain_hub(hub)
+
+    assert await _status(engine, sid) == "idle"  # 锁被兜底释放
+    assert hub.get(sid) is None  # 残留清掉

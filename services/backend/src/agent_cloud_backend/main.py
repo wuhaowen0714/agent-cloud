@@ -49,11 +49,12 @@ async def lifespan(app):
             await task
         except asyncio.CancelledError:
             pass
-        # 取消所有在跑的回合 Runner(独立任务),避免关停时 "task pending" 并让锁释放跑完。
+        # 取消所有在跑的回合 Runner,等其收尾,并兜底释放残留会话锁(否则关停时
+        # shield 的释放可能没跑完、或从未启动的 runner 没机会释放 → 锁卡到租约过期)。
         from agent_cloud_backend.turn.hub import get_turn_hub
+        from agent_cloud_backend.turn.runner import drain_hub
 
-        for t in get_turn_hub().all_tasks():
-            t.cancel()
+        await drain_hub(get_turn_hub())
 
 
 def create_app() -> FastAPI:

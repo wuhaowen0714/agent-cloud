@@ -45,6 +45,9 @@ class TurnHub:
     def all_tasks(self) -> list[asyncio.Task]:
         return [a.task for a in self._turns.values() if a.task is not None]
 
+    def session_ids(self) -> list[uuid.UUID]:
+        return list(self._turns.keys())
+
 
 _HUB = TurnHub()
 
