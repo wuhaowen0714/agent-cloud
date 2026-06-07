@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef } from "react"
 import { api } from "../api/client"
 import { streamTurn } from "../api/stream"
+import { appendDelta, appendToolCall, attachToolResult } from "../blocks"
 import { useStore } from "../store"
 import { Composer } from "./Composer"
 import { MessageList } from "./MessageList"
@@ -44,16 +45,14 @@ export function ChatView() {
     const { done, abort } = streamTurn(sid, text, (e) => {
       // 仅当仍停留在该会话时才更新 live(丢弃已切走会话的残余事件)。
       if (useStore.getState().sessionId !== sid) return
-      if (e.type === "thinking_delta") setLive((t) => ({ ...t, thinking: t.thinking + e.text }))
-      else if (e.type === "text_delta") setLive((t) => ({ ...t, text: t.text + e.text }))
+      if (e.type === "thinking_delta") setLive((t) => ({ ...t, blocks: appendDelta(t.blocks, "thinking", e.text) }))
+      else if (e.type === "text_delta") setLive((t) => ({ ...t, blocks: appendDelta(t.blocks, "text", e.text) }))
       else if (e.type === "tool_call_start")
-        setLive((t) => ({ ...t, toolCalls: [...t.toolCalls, { call: { id: e.call_id, name: e.tool, arguments: e.args } }] }))
+        setLive((t) => ({ ...t, blocks: appendToolCall(t.blocks, { id: e.call_id, name: e.tool, arguments: e.args }) }))
       else if (e.type === "tool_result")
         setLive((t) => ({
           ...t,
-          toolCalls: t.toolCalls.map((tc) =>
-            tc.call.id === e.call_id ? { ...tc, result: { call_id: e.call_id, content: e.result, is_error: e.is_error } } : tc,
-          ),
+          blocks: attachToolResult(t.blocks, e.call_id, { call_id: e.call_id, content: e.result, is_error: e.is_error }),
         }))
       else if (e.type === "turn_done") setLive((t) => ({ ...t, status: "done" }))
       else if (e.type === "error") { errored = true; setLive((t) => ({ ...t, status: "error", errorMessage: e.message })) }

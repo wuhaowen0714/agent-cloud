@@ -1,12 +1,10 @@
 import { create } from "zustand"
-import type { ToolCall, ToolResult } from "./types"
+import type { Block } from "./blocks"
 
-// 进行中回合的实时聚合(由 SSE 事件填充)
+// 进行中回合的实时聚合(由 SSE 事件填充)。blocks 按时间顺序记录思考/正文/工具,渲染即还原时序。
 export interface LiveTurn {
   userText: string
-  thinking: string
-  text: string
-  toolCalls: { call: ToolCall; result?: ToolResult }[]
+  blocks: Block[]
   status: "streaming" | "done" | "error"
   errorMessage?: string
 }
@@ -24,7 +22,7 @@ interface AppState {
   clearLive: () => void
 }
 
-const EMPTY: LiveTurn = { userText: "", thinking: "", text: "", toolCalls: [], status: "streaming" }
+const EMPTY: LiveTurn = { userText: "", blocks: [], status: "streaming" }
 
 export const useStore = create<AppState>((set) => ({
   userId: localStorage.getItem("ac.userId"),
@@ -38,7 +36,7 @@ export const useStore = create<AppState>((set) => ({
   },
   setAgent: (id) => set({ agentId: id, sessionId: null }),
   setSession: (id) => set({ sessionId: id, live: null }),
-  startLive: (userText) => set({ live: { ...EMPTY, userText, toolCalls: [] } }),
+  startLive: (userText) => set({ live: { ...EMPTY, userText, blocks: [] } }),
   setLive: (fn) => set((s) => (s.live ? { live: fn(s.live) } : {})),
   clearLive: () => set({ live: null }),
 }))

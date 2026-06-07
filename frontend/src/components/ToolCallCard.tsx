@@ -8,7 +8,7 @@ export function ToolCallCard({ call, result }: { call: ToolCall; result?: ToolRe
       </div>
       {result && (
         <pre
-          className={`mt-1 whitespace-pre-wrap font-mono ${
+          className={`mt-1 max-h-60 overflow-auto whitespace-pre-wrap font-mono ${
             result.is_error ? "text-red-600" : "text-slate-500"
           }`}
         >

@@ -1,10 +1,9 @@
-import { useEffect, useRef } from "react"
+import { Fragment, useEffect, useMemo, useRef } from "react"
+import { messagesToTurns } from "../blocks"
 import { useStore } from "../store"
 import type { Message } from "../types"
-import { Markdown } from "./Markdown"
-import { MessageBubble } from "./MessageBubble"
-import { ThinkingPanel } from "./ThinkingPanel"
-import { ToolCallCard } from "./ToolCallCard"
+import { AssistantBubble, UserBubble } from "./Bubble"
+import { TurnBlocks } from "./TurnBlocks"
 
 export function MessageList({ messages }: { messages: Message[] }) {
   const live = useStore((s) => s.live)
@@ -13,38 +12,32 @@ export function MessageList({ messages }: { messages: Message[] }) {
     endRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, live])
 
+  // 已落库历史:按回合分组,每个回合 = 一个用户气泡 + 一个助手气泡(块流)。
+  // memo:MessageList 订阅 live,流式期间每帧重渲染,避免每帧重算整段历史。
+  const turns = useMemo(() => messagesToTurns(messages), [messages])
+
   return (
     <div className="flex-1 space-y-3 overflow-auto p-4">
-      {messages.map((m) => (
-        <MessageBubble key={m.id} message={m} />
+      {turns.map((turn) => (
+        <Fragment key={turn.id}>
+          {turn.userText !== null && <UserBubble text={turn.userText} />}
+          {turn.blocks.length > 0 && (
+            <AssistantBubble>
+              <TurnBlocks blocks={turn.blocks} />
+            </AssistantBubble>
+          )}
+        </Fragment>
       ))}
       {live && (
         <>
           {/* 乐观渲染本回合的用户消息(权威历史在 turn_done 后接管) */}
-          {live.userText && (
-            <div className="flex justify-end">
-              <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl bg-brand-600 px-3 py-2 text-sm text-white">
-                {live.userText}
-              </div>
-            </div>
-          )}
-          <div className="flex justify-start">
-            <div className="max-w-[80%] rounded-2xl bg-white px-3 py-2 text-sm text-slate-800 shadow-sm ring-1 ring-slate-200">
-              <ThinkingPanel text={live.thinking} defaultOpen />
-              {live.toolCalls.map((tc) => (
-                <ToolCallCard key={tc.call.id} call={tc.call} result={tc.result} />
-              ))}
-              {live.text && <Markdown>{live.text}</Markdown>}
-              {live.status === "streaming" && (
-                <span className="ml-0.5 animate-pulse text-brand-600">▍</span>
-              )}
-              {live.status === "error" && (
-                <div className="mt-1 text-xs text-red-600">
-                  ⚠ {live.errorMessage ?? "回合失败"},可重试。
-                </div>
-              )}
-            </div>
-          </div>
+          {live.userText && <UserBubble text={live.userText} />}
+          <AssistantBubble>
+            <TurnBlocks blocks={live.blocks} streaming={live.status === "streaming"} />
+            {live.status === "error" && (
+              <div className="mt-1 text-xs text-red-600">⚠ {live.errorMessage ?? "回合失败"},可重试。</div>
+            )}
+          </AssistantBubble>
         </>
       )}
       <div ref={endRef} />
