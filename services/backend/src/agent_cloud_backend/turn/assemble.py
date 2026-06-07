@@ -7,10 +7,12 @@ from agent_cloud_common.codec import msg_to_proto
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_cloud_backend.models.session import Session
+from agent_cloud_backend.models.skill import Skill
 from agent_cloud_backend.repositories.agent_config import AgentConfigRepository
 from agent_cloud_backend.repositories.context_document import ContextDocumentRepository
 from agent_cloud_backend.repositories.memory_entry import MemoryEntryRepository
 from agent_cloud_backend.repositories.message import MessageRepository
+from agent_cloud_backend.skills.materialize import skill_location
 from agent_cloud_backend.turn.messages import orm_to_common
 
 
@@ -21,6 +23,7 @@ async def build_run_turn_request(
     sandbox_endpoint: str,
     user_message: str,
     exclude_message_id: uuid.UUID | None,
+    enabled_skills: list[Skill] | None = None,
 ) -> worker_pb2.RunTurnRequest:
     agent = await AgentConfigRepository(db).get(session.agent_config_id)
     doc_repo = ContextDocumentRepository(db)
@@ -47,7 +50,12 @@ async def build_run_turn_request(
             for d in [*user_docs, *agent_docs]
         ],
         memory=[worker_pb2.Mem(scope=e.scope, content=e.content) for e in [*user_mem, *agent_mem]],
-        skills=[],  # Plan 5
+        skills=[
+            worker_pb2.Skill(
+                name=sk.name, description=sk.description, location=skill_location(sk.name)
+            )
+            for sk in (enabled_skills or [])
+        ],
         messages=[msg_to_proto(orm_to_common(m)) for m in history],
         user_message=user_message,
         sandbox_endpoint=sandbox_endpoint,

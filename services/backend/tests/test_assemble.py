@@ -1,11 +1,13 @@
 from agent_cloud_backend.models.agent_config import AgentConfig
 from agent_cloud_backend.models.message import Message as OrmMessage
+from agent_cloud_backend.models.skill import Skill
 from agent_cloud_backend.models.user import User
 from agent_cloud_backend.repositories.agent_config import AgentConfigRepository
 from agent_cloud_backend.repositories.context_document import ContextDocumentRepository
 from agent_cloud_backend.repositories.memory_entry import MemoryEntryRepository
 from agent_cloud_backend.repositories.message import MessageRepository
 from agent_cloud_backend.repositories.session import SessionRepository
+from agent_cloud_backend.repositories.skill import SkillRepository
 from agent_cloud_backend.repositories.user import UserRepository
 from agent_cloud_backend.turn.assemble import build_run_turn_request
 
@@ -72,3 +74,45 @@ async def test_build_request_excludes_current_user_message(session):
         exclude_message_id=current.id,
     )
     assert req.messages == []  # the only message was excluded
+
+
+async def test_build_request_includes_enabled_skills(session):
+    user = await UserRepository(session).create(User(email="sk@example.com"))
+    await session.flush()
+    agent = await AgentConfigRepository(session).create(
+        AgentConfig(user_id=user.id, name="c", model="m", provider="p")
+    )
+    await session.flush()
+    s = await SessionRepository(session).create_for(user.id, agent.id, None)
+    await session.flush()
+    skill = await SkillRepository(session).create(
+        Skill(
+            user_id=user.id, name="greet", description="say hi", source="registry",
+            version="1.0.0", requires={}, package_ref=f"users/{user.id}/skills/greet",
+        )
+    )
+    await session.commit()
+
+    req = await build_run_turn_request(
+        session, s, sandbox_endpoint="x", user_message="hi",
+        exclude_message_id=None, enabled_skills=[skill],
+    )
+    assert len(req.skills) == 1
+    assert req.skills[0].name == "greet"
+    assert req.skills[0].description == "say hi"
+    assert req.skills[0].location == ".skills/greet/SKILL.md"
+
+
+async def test_build_request_skills_default_empty(session):
+    user = await UserRepository(session).create(User(email="sk2@example.com"))
+    await session.flush()
+    agent = await AgentConfigRepository(session).create(
+        AgentConfig(user_id=user.id, name="c", model="m", provider="p")
+    )
+    await session.flush()
+    s = await SessionRepository(session).create_for(user.id, agent.id, None)
+    await session.commit()
+    req = await build_run_turn_request(
+        session, s, sandbox_endpoint="x", user_message="hi", exclude_message_id=None
+    )
+    assert list(req.skills) == []
