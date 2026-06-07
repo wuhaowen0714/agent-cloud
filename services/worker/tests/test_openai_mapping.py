@@ -106,3 +106,28 @@ def test_tool_result_error_is_marked_in_content():
     ]
     out = to_openai_messages(CompletionRequest(system="", messages=msgs, tools=[]))
     assert out[0]["content"] == "[tool error] boom"
+
+
+def test_message_from_openai_captures_reasoning_content():
+    om = SimpleNamespace(content="hi", tool_calls=None, reasoning_content="because X")
+    assert message_from_openai(om).reasoning == "because X"
+
+
+def test_assistant_reasoning_is_passed_back():
+    # 思考模式端点要求把发起工具调用那轮的 reasoning 回传
+    msgs = [
+        Message(
+            role=Role.ASSISTANT,
+            text="",
+            reasoning="my thoughts",
+            tool_calls=[ToolCall(id="c1", name="bash", arguments={})],
+        )
+    ]
+    out = to_openai_messages(CompletionRequest(system="", messages=msgs, tools=[]))
+    assert out[0]["reasoning_content"] == "my thoughts"
+
+
+def test_assistant_without_reasoning_omits_field():
+    msgs = [Message(role=Role.ASSISTANT, text="hi")]
+    out = to_openai_messages(CompletionRequest(system="", messages=msgs, tools=[]))
+    assert "reasoning_content" not in out[0]

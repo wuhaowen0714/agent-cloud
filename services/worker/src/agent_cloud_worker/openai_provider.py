@@ -48,6 +48,10 @@ def to_openai_messages(request: CompletionRequest) -> list[dict]:
             # 无 tool_calls 的 content=null),否则回放历史里的空 assistant 会 400。
             content = (m.text or None) if m.tool_calls else m.text
             msg: dict = {"role": "assistant", "content": content}
+            # 思考模式端点(DeepSeek 等)要求把发起工具调用那轮的 reasoning_content 回传;
+            # 非思考端点 m.reasoning 恒为 "",不会带这个字段,故对两者都安全。
+            if m.reasoning:
+                msg["reasoning_content"] = m.reasoning
             if m.tool_calls:
                 msg["tool_calls"] = [
                     {
@@ -68,7 +72,10 @@ def to_openai_messages(request: CompletionRequest) -> list[dict]:
 
 
 def message_from_openai(om) -> Message:
-    """OpenAI 响应 message → 领域 Message(assistant)。tool_call 参数始终 json.loads。"""
+    """OpenAI 响应 message → 领域 Message(assistant)。tool_call 参数始终 json.loads。
+
+    捕获 reasoning_content(思考模式端点),以便回合内后续请求把它回传(DeepSeek 等要求)。
+    """
     tool_calls = [
         ToolCall(
             id=tc.id,
@@ -77,7 +84,10 @@ def message_from_openai(om) -> Message:
         )
         for tc in (om.tool_calls or [])
     ]
-    return Message(role=Role.ASSISTANT, text=om.content or "", tool_calls=tool_calls)
+    reasoning = getattr(om, "reasoning_content", None) or ""
+    return Message(
+        role=Role.ASSISTANT, text=om.content or "", tool_calls=tool_calls, reasoning=reasoning
+    )
 
 
 class OpenAIProvider:
@@ -123,6 +133,7 @@ class OpenAIProvider:
         stream = await self._client.chat.completions.create(**kwargs)
 
         text_parts: list[str] = []
+        reasoning_parts: list[str] = []
         # index -> {"id","name","args"};按 index 累积分片的 tool_call 参数
         tool_acc: dict[int, dict] = {}
         usage = Usage()
@@ -138,6 +149,7 @@ class OpenAIProvider:
             delta = chunk.choices[0].delta
             reasoning = getattr(delta, "reasoning_content", None)
             if reasoning:
+                reasoning_parts.append(reasoning)
                 yield ProviderThinkingDelta(text=reasoning)
             if delta.content:
                 text_parts.append(delta.content)
@@ -155,5 +167,10 @@ class OpenAIProvider:
             ToolCall(id=s["id"], name=s["name"], arguments=json.loads(s["args"] or "{}"))
             for _, s in sorted(tool_acc.items())
         ]
-        message = Message(role=Role.ASSISTANT, text="".join(text_parts), tool_calls=tool_calls)
+        message = Message(
+            role=Role.ASSISTANT,
+            text="".join(text_parts),
+            tool_calls=tool_calls,
+            reasoning="".join(reasoning_parts),
+        )
         yield ProviderCompleted(message=message, usage=usage)

@@ -2,7 +2,8 @@ from agent_cloud_worker.config import WorkerSettings
 
 
 def test_defaults():
-    s = WorkerSettings()
+    # _env_file=None:忽略开发机本地可能存在的 .env(含真实凭据),测真正的代码默认值
+    s = WorkerSettings(_env_file=None)
     assert s.grpc_port == 50052
     assert s.openai_base_url == "https://api.openai.com/v1"
     assert s.openai_max_retries == 2

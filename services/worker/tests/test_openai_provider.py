@@ -184,3 +184,31 @@ async def test_complete_uses_configured_max_tokens_param():
     await provider.complete(_req())
     assert captured["max_completion_tokens"] == 7
     assert "max_tokens" not in captured
+
+
+async def test_complete_captures_reasoning():
+    resp = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content="hi", tool_calls=None, reasoning_content="why")
+            )
+        ],
+        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+    )
+    provider = OpenAIProvider(client=_client(resp), model="m", max_tokens=9)
+    result = await provider.complete(_req())
+    assert result.message.reasoning == "why"
+
+
+async def test_stream_accumulates_reasoning_into_message():
+    chunks = [
+        _delta(reasoning="th"),
+        _delta(reasoning="ought"),
+        _delta(content="answer"),
+        _usage_chunk(1, 1),
+    ]
+    provider = OpenAIProvider(client=_stream_client(chunks), model="m", max_tokens=9)
+    events = [e async for e in provider.stream(_req())]
+    done = events[-1]
+    assert done.message.reasoning == "thought"
+    assert done.message.text == "answer"

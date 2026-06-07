@@ -30,6 +30,9 @@ class Message:
     text: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)   # assistant 用
     tool_results: list[ToolResult] = field(default_factory=list)  # tool 角色用
+    # 思考模式的 reasoning_content。部分端点(如 DeepSeek 思考模式)要求:带 reasoning 的
+    # assistant 回合(尤其发起工具调用那条)在回合内后续请求里必须把 reasoning 一并回传。
+    reasoning: str = ""
 
 
 @dataclass
