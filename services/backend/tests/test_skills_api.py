@@ -1,4 +1,5 @@
 import io
+import os
 import uuid
 import zipfile
 
@@ -118,3 +119,81 @@ async def test_list_registry_skills(auth_client):
     r = await auth_client.get("/skills/registry")
     assert r.status_code == 200
     assert "example-greeting" in r.json()  # 仓库内置 registry 技能
+
+
+_WS_SKILL_MD = (
+    '---\nname: {name}\ndescription: "Does a thing. Use when needed."\nversion: "1.0.0"\n'
+    "---\n# {name}\nbody\n"
+)
+
+
+async def _upload(client, path, filename, data: bytes):
+    return await client.post(
+        "/files/upload",
+        params={"path": path},
+        files=[("files", (filename, data, "text/markdown"))],
+    )
+
+
+async def test_install_from_workspace_then_list(client):
+    await _auth(client)
+    md = _WS_SKILL_MD.format(name="wsskill").encode()
+    assert (await _upload(client, "wsskill", "SKILL.md", md)).status_code == 201
+    r = await client.post("/skills/install-from-workspace", json={"path": "wsskill"})
+    assert r.status_code == 201, r.text
+    assert r.json()["name"] == "wsskill" and r.json()["source"] == "workspace"
+    assert "wsskill" in [s["name"] for s in (await client.get("/skills")).json()]
+
+
+async def test_install_from_workspace_missing_skill_md_404(client):
+    await _auth(client)
+    await _upload(client, "notaskill", "foo.txt", b"hi")  # 目录里没有 SKILL.md
+    r = await client.post("/skills/install-from-workspace", json={"path": "notaskill"})
+    assert r.status_code == 404
+
+
+async def test_install_from_workspace_nonexistent_path_404(client):
+    await _auth(client)
+    r = await client.post("/skills/install-from-workspace", json={"path": "nope"})
+    assert r.status_code == 404
+
+
+async def test_install_from_workspace_path_escape_400(client):
+    await _auth(client)
+    r = await client.post("/skills/install-from-workspace", json={"path": "../escape"})
+    assert r.status_code == 400
+
+
+async def test_install_from_workspace_duplicate_409(client):
+    await _auth(client)
+    md = _WS_SKILL_MD.format(name="dupskill").encode()
+    await _upload(client, "dupskill", "SKILL.md", md)
+    assert (
+        await client.post("/skills/install-from-workspace", json={"path": "dupskill"})
+    ).status_code == 201
+    assert (
+        await client.post("/skills/install-from-workspace", json={"path": "dupskill"})
+    ).status_code == 409
+
+
+async def test_install_from_workspace_binary_skill_md_422(client):
+    # agent 写出二进制/非 UTF-8 的 SKILL.md → 归类为 manifest 错(422),而非 409/500。
+    await _auth(client)
+    await _upload(client, "binskill", "SKILL.md", b"\xff\xfe\x00not utf-8")
+    r = await client.post("/skills/install-from-workspace", json={"path": "binskill"})
+    assert r.status_code == 422
+
+
+async def test_install_from_workspace_rejects_symlinks(client, tmp_path):
+    # 安全:包内符号链接(agent 可用 bash `ln -s` 造)会被 copytree 跟随,拷进宿主文件内容 → 拒绝。
+    reg = await client.post(
+        "/auth/register", json={"email": f"{uuid.uuid4()}@e.com", "password": "password123"}
+    )
+    body = reg.json()
+    client.headers["Authorization"] = f"Bearer {body['access_token']}"
+    uid = body["user"]["id"]
+    await _upload(client, "symskill", "SKILL.md", _WS_SKILL_MD.format(name="symskill").encode())
+    ws = tmp_path / "filestore" / uid / "workspace" / "symskill"
+    os.symlink("/etc/hosts", ws / "leak")  # 指向围栏外的宿主文件
+    r = await client.post("/skills/install-from-workspace", json={"path": "symskill"})
+    assert r.status_code == 400

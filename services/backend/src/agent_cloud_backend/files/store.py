@@ -24,6 +24,7 @@ class FileEntry:
 class FileStore(Protocol):
     def list_dir(self, user_id: str, rel_path: str) -> list[FileEntry]: ...
     def stat(self, user_id: str, rel_path: str) -> FileEntry: ...
+    def abspath(self, user_id: str, rel_path: str) -> Path: ...
     def open_read(self, user_id: str, rel_path: str) -> BinaryIO: ...
     def write(self, user_id: str, rel_path: str, data: BinaryIO, max_bytes: int) -> FileEntry: ...
     def mkdir(self, user_id: str, rel_path: str) -> FileEntry: ...
@@ -61,6 +62,11 @@ class LocalFileStore:
         if candidate != root and root not in candidate.parents:
             raise PathEscape(f"path escapes workspace: {rel_path!r}")
         return candidate
+
+    def abspath(self, user_id: str, rel_path: str) -> Path:
+        """围栏内的绝对路径(可能不存在);越界抛 PathEscape。供需要直接读工作区目录的调用方
+        (如从工作区安装技能)复用同一套路径解析,确保与文件抽屉看到的是同一处。"""
+        return self._resolve(user_id, rel_path)
 
     def _entry(self, root: Path, p: Path) -> FileEntry:
         st = p.stat()

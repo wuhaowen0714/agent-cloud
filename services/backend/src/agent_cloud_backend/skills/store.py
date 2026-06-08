@@ -34,7 +34,9 @@ class LocalObjectStore:
         if dst.exists():
             shutil.rmtree(dst)
         dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(src_dir, dst)
+        # symlinks=True:保留链接、不跟随。否则源目录(尤其用户工作区)里指向宿主文件的链接会把
+        # 宿主内容拷进技能包→物化进沙箱。api 层已拒符号链接,这里兜底堵 TOCTOU。
+        shutil.copytree(src_dir, dst, symlinks=True)
 
     def get_dir(self, prefix: str, dst_dir: Path) -> None:
         src = self._path(prefix)
@@ -43,7 +45,7 @@ class LocalObjectStore:
         dst = Path(dst_dir)
         if dst.exists():
             shutil.rmtree(dst)
-        shutil.copytree(src, dst)
+        shutil.copytree(src, dst, symlinks=True)  # 同 put_dir:保留链接、不跟随(防越权拷贝宿主内容)
 
     def delete_prefix(self, prefix: str) -> None:
         p = self._path(prefix)

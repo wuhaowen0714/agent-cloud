@@ -124,6 +124,11 @@ export const api = {
   listRegistry: () => http<string[]>("/skills/registry"),
   installSkill: (name: string) =>
     http<Skill>("/skills/install", { method: "POST", body: JSON.stringify({ name }) }),
+  installSkillFromWorkspace: (path: string) =>
+    http<Skill>("/skills/install-from-workspace", {
+      method: "POST",
+      body: JSON.stringify({ path }),
+    }),
   deleteSkill: (id: string) => http<void>(`/skills/${id}`, { method: "DELETE" }),
   getAgentSkills: (agentId: string) => http<Skill[]>(`/agent-configs/${agentId}/skills`),
   setAgentSkills: (agentId: string, skillIds: string[]) =>

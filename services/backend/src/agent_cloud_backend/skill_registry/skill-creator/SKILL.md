@@ -61,10 +61,11 @@ deps with `pip install --user` / `npm install -g` as the environment requires).
    - Frontmatter parses as YAML and is between two `---` lines.
    - `name` matches `^[a-z0-9][a-z0-9._-]*$`, ≤ 64 chars, and equals the directory name.
    - `description` is present, non-empty, and says *what + when*.
-4. Tell the user how to install it (the agent cannot self-install): either upload the folder as a
-   `.zip` via the workspace's skill upload (if enabled), or have an operator drop the directory into
-   the server's skill registry. Once installed and enabled for an agent, it appears in
-   `<available_skills>`.
+4. Tell the user how to install it (the agent cannot self-install — installation is a user action by
+   design). In the workspace **file drawer**, find the skill folder you just created and click
+   **"安装为技能" (Install as skill)** on it. Then enable it for an agent in that agent's settings —
+   it appears in `<available_skills>` on the next turn. (Alternatively: upload the folder as a `.zip`
+   if archive upload is enabled.)
 
 ## Example: a minimal skill
 

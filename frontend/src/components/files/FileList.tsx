@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { api } from "../../api/client"
 import { formatSize } from "../../files"
 import type { FileEntry } from "../../types"
@@ -23,10 +23,20 @@ export function FileList({
   onPreview: (e: FileEntry) => void
   onChanged: () => void
 }) {
+  const qc = useQueryClient()
   const del = useMutation({ mutationFn: (e: FileEntry) => api.deleteFile(e.path), onSuccess: onChanged })
   const rename = useMutation({
     mutationFn: ({ e, dst }: { e: FileEntry; dst: string }) => api.moveFile(e.path, dst),
     onSuccess: onChanged,
+  })
+  // 把一个含 SKILL.md 的工作区文件夹安装进技能池(agent 用 skill-creator 现写的成果一键可用)。
+  const install = useMutation({
+    mutationFn: (e: FileEntry) => api.installSkillFromWorkspace(e.path),
+    onSuccess: (sk) => {
+      qc.invalidateQueries({ queryKey: ["skills"] }) // 刷新技能列表/agent 设置里的技能池
+      alert(`已安装技能:${sk.name}(去 agent 设置启用)`)
+    },
+    onError: (err) => alert(`安装失败:${String(err)}`),
   })
 
   if (entries.length === 0) {
@@ -46,6 +56,15 @@ export function FileList({
           </button>
           {!e.is_dir && <span className="shrink-0 text-xs text-slate-400">{formatSize(e.size)}</span>}
           <span className="flex shrink-0 gap-1.5 text-xs opacity-0 group-hover:opacity-100">
+            {e.is_dir && (
+              <button
+                className="text-slate-400 hover:text-brand-600"
+                title="若该文件夹含 SKILL.md,安装为技能"
+                onClick={() => install.mutate(e)}
+              >
+                安装为技能
+              </button>
+            )}
             {!e.is_dir && (
               <button className="text-slate-400 hover:text-brand-600" onClick={() => downloadFile(e)}>
                 下载

@@ -8,9 +8,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_cloud_backend.api.deps import get_current_user, get_session
 from agent_cloud_backend.config import get_settings
+from agent_cloud_backend.files.deps import get_file_store
+from agent_cloud_backend.files.errors import PathEscape
+from agent_cloud_backend.files.store import FileStore
 from agent_cloud_backend.models.user import User
 from agent_cloud_backend.repositories.skill import SkillRepository
-from agent_cloud_backend.schemas.skill import SkillInstallRequest, SkillRead
+from agent_cloud_backend.schemas.skill import (
+    SkillInstallFromWorkspaceRequest,
+    SkillInstallRequest,
+    SkillRead,
+)
 from agent_cloud_backend.skills.deps import get_object_store, get_skill_registry_root
 from agent_cloud_backend.skills.manifest import SkillManifestError
 from agent_cloud_backend.skills.service import install_skill_from_dir
@@ -84,6 +91,49 @@ async def install_skill(
             repo=SkillRepository(session),
             store=store,
         )
+    except SkillManifestError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    await session.commit()
+    return skill
+
+
+@router.post(
+    "/install-from-workspace", response_model=SkillRead, status_code=status.HTTP_201_CREATED
+)
+async def install_skill_from_workspace(
+    body: SkillInstallFromWorkspaceRequest,
+    session: AsyncSession = Depends(get_session),
+    store: ObjectStore = Depends(get_object_store),
+    file_store: FileStore = Depends(get_file_store),
+    user: User = Depends(get_current_user),
+):
+    """把用户工作区里(agent 现写的)一个含 SKILL.md 的目录安装进技能池。
+
+    复用 install_skill_from_dir;src_dir 经 file_store 围栏解析,确保就是文件抽屉里那个目录。
+    """
+    try:
+        src_dir = file_store.abspath(str(user.id), body.path)
+    except PathEscape as e:
+        raise HTTPException(status_code=400, detail="invalid path") from e
+    if not src_dir.is_dir():
+        raise HTTPException(status_code=404, detail="workspace path is not a directory")
+    # 安全:拒绝包内符号链接,否则后续 copytree 会把链接指向的宿主文件内容拷进技能包→物化进沙箱
+    # (同 FileStore.zip_dir 的防护)。rglob 不会下探进符号链接目录,故顶层链接会先被这里发现、在
+    # copytree 下探前就拒掉;put_dir/get_dir 另用 symlinks=True 作 TOCTOU 兜底(双保险)。
+    if src_dir.is_symlink() or any(p.is_symlink() for p in src_dir.rglob("*")):
+        raise HTTPException(status_code=400, detail="skill folder must not contain symlinks")
+    try:
+        skill = await install_skill_from_dir(
+            user_id=user.id,
+            src_dir=src_dir,
+            source="workspace",
+            repo=SkillRepository(session),
+            store=store,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail="directory has no SKILL.md") from e
     except SkillManifestError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     except ValueError as e:

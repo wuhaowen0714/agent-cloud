@@ -6,6 +6,8 @@ from collections.abc import AsyncIterator
 import pytest
 import pytest_asyncio
 from agent_cloud_backend.api.deps import get_session
+from agent_cloud_backend.files.deps import get_file_store
+from agent_cloud_backend.files.store import LocalFileStore
 from agent_cloud_backend.main import create_app
 from agent_cloud_backend.models import Base
 from agent_cloud_backend.sandbox.deps import get_sandbox_manager
@@ -40,6 +42,13 @@ def override_object_store(app, root):
     """让 skill 端点写到隔离的临时对象存储目录。"""
     store = LocalObjectStore(root)
     app.dependency_overrides[get_object_store] = lambda: store
+    return store
+
+
+def override_file_store(app, root):
+    """让文件端点(及从工作区安装技能)写到隔离的临时工作区根。"""
+    store = LocalFileStore(str(root))
+    app.dependency_overrides[get_file_store] = lambda: store
     return store
 
 
@@ -93,6 +102,7 @@ async def client(engine, tmp_path) -> AsyncIterator[AsyncClient]:
     app.dependency_overrides[get_session] = _override
     override_sandbox_manager_fake(app, engine)
     override_object_store(app, tmp_path / "objstore")
+    override_file_store(app, tmp_path / "filestore")
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
@@ -113,6 +123,7 @@ async def client_noraise(engine, tmp_path) -> AsyncIterator[AsyncClient]:
     app.dependency_overrides[get_session] = _override
     override_sandbox_manager_fake(app, engine)
     override_object_store(app, tmp_path / "objstore")
+    override_file_store(app, tmp_path / "filestore")
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from agent_cloud_backend.models.skill import Skill
 from agent_cloud_backend.repositories.skill import SkillRepository
-from agent_cloud_backend.skills.manifest import parse_skill_md
+from agent_cloud_backend.skills.manifest import SkillManifestError, parse_skill_md
 from agent_cloud_backend.skills.store import ObjectStore
 
 
@@ -28,7 +28,12 @@ async def install_skill_from_dir(
     skill_md = Path(src_dir) / "SKILL.md"
     if not skill_md.is_file():
         raise FileNotFoundError("package missing SKILL.md")
-    manifest = parse_skill_md(skill_md.read_text())
+    try:
+        text = skill_md.read_text()
+    except UnicodeDecodeError as exc:
+        # 二进制/非 UTF-8 的 SKILL.md(agent 可能写出)→ 归为 manifest 错(422),而非 409/500。
+        raise SkillManifestError("SKILL.md is not valid UTF-8") from exc
+    manifest = parse_skill_md(text)
 
     if await repo.get_by_user_and_name(user_id, manifest.name) is not None:
         raise ValueError(f"skill already installed: {manifest.name}")
