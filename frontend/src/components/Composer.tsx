@@ -19,7 +19,7 @@ export function Composer({
   }
   return (
     <div className="border-t border-slate-200 bg-white/80 p-3 backdrop-blur">
-      <div className="mx-auto flex max-w-3xl items-end gap-2">
+      <div className="mx-auto flex max-w-5xl items-end gap-2">
         <Textarea
           className="min-h-[44px] flex-1"
           placeholder={disabled ? "生成中…" : "说点什么(Enter 发送,Shift+Enter 换行)"}
