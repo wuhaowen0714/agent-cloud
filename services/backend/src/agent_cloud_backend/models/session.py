@@ -23,3 +23,6 @@ class Session(Base, TimestampMixin):
     last_active_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    # 会话压缩(spec §7):此前历史折叠成的摘要 + 已折叠到的最大 seq(之后的消息逐字保留)。
+    summary: Mapped[str] = mapped_column(default="", nullable=False)
+    summary_through_seq: Mapped[int] = mapped_column(default=-1, nullable=False)
