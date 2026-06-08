@@ -219,6 +219,24 @@ async def stream_turn_endpoint(
             await db.commit()
             raise
 
+    # 重试时重新组装请求:开新 DB session(读到 force_compact 写回的新摘要),重查 skills
+    # (避免跨已关闭 session 访问 ORM)。worker/可恢复失败时由 runner 调用。
+    async def _reassemble():
+        async with get_sessionmaker()() as rdb:
+            rs = await SessionRepository(rdb).get(session_id)
+            rskills = await AgentSkillEnableRepository(rdb).list_enabled_for_agent(
+                rs.agent_config_id
+            )
+            return await build_run_turn_request(
+                rdb,
+                rs,
+                sandbox_endpoint=sandbox_endpoint,
+                user_message=body.content,
+                exclude_message_id=user_msg.id,
+                enabled_skills=rskills,
+                work_subdir=req_work_subdir,
+            )
+
     # DB 已关闭。起独立 Runner(asyncio.create_task,断连不取消)+ 返回订阅流(补播+实时)。
     active = ActiveTurn(session_id=session_id)
     hub.register(active)
@@ -228,6 +246,7 @@ async def stream_turn_endpoint(
             active,
             worker_endpoint=settings.worker_endpoint,
             request=request,
+            reassemble=_reassemble,
             session_id=session_id,
             heartbeat_interval=settings.session_heartbeat_seconds,
             settings=settings,

@@ -12,6 +12,11 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 _REQ = SimpleNamespace(agent=SimpleNamespace(model="m"))
 
 
+async def _reassemble():
+    # 重试时重新组装请求;测试里 fake worker 忽略请求内容,直接回 _REQ。
+    return _REQ
+
+
 def _patch_global_sessionmaker(monkeypatch, engine):
     import agent_cloud_backend.db as db_module
 
@@ -140,7 +145,7 @@ async def test_runner_persists_and_releases_without_any_subscriber(engine, monke
     active = ActiveTurn(session_id=sid)
     hub.register(active)
     await run_turn(
-        hub, active, worker_endpoint="x", request=_REQ, session_id=sid,
+        hub, active, worker_endpoint="x", request=_REQ, reassemble=_reassemble, session_id=sid,
         heartbeat_interval=999, settings=Settings(),
     )
 
@@ -176,7 +181,7 @@ async def test_runner_cancel_emits_cancelled_and_releases(engine, monkeypatch):
             hub,
             active,
             worker_endpoint="x",
-            request=_REQ,
+            request=_REQ, reassemble=_reassemble,
             session_id=sid,
             heartbeat_interval=999,
             settings=Settings(),
@@ -246,7 +251,7 @@ async def test_runner_post_turn_compaction_when_over_threshold(engine, monkeypat
     active = ActiveTurn(session_id=sid)
     hub.register(active)
     await run_turn(
-        hub, active, worker_endpoint="x", request=_REQ, session_id=sid,
+        hub, active, worker_endpoint="x", request=_REQ, reassemble=_reassemble, session_id=sid,
         heartbeat_interval=999, settings=settings,
     )
 
@@ -294,7 +299,7 @@ async def test_runner_no_compaction_when_under_threshold(engine, monkeypatch):
     active = ActiveTurn(session_id=sid)
     hub.register(active)
     await run_turn(
-        hub, active, worker_endpoint="x", request=_REQ, session_id=sid,
+        hub, active, worker_endpoint="x", request=_REQ, reassemble=_reassemble, session_id=sid,
         heartbeat_interval=999, settings=settings,
     )
 
@@ -347,7 +352,7 @@ async def test_runner_per_model_threshold_override_suppresses_compaction(engine,
     hub.register(active)
     await run_turn(
         hub, active, worker_endpoint="x",
-        request=_REQ,
+        request=_REQ, reassemble=_reassemble,
         session_id=sid, heartbeat_interval=999, settings=settings,
     )
 
@@ -356,8 +361,8 @@ async def test_runner_per_model_threshold_override_suppresses_compaction(engine,
     assert summary == "" and through == -1
 
 
-async def test_runner_resource_exhausted_force_compacts_and_recoverable(engine, monkeypatch):
-    # worker 报 RESOURCE_EXHAUSTED(上下文超窗)→ force-compact + 末事件可恢复。
+async def test_runner_overflow_auto_retries_with_reset(engine, monkeypatch):
+    # 首次流抛 RESOURCE_EXHAUSTED → force_compact 有进展 → 发 reset → 重试成功落库(用户无感)。
     from agent_cloud_backend.config import Settings
     from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub
     from agent_cloud_backend.turn.runner import run_turn
@@ -365,24 +370,33 @@ async def test_runner_resource_exhausted_force_compacts_and_recoverable(engine, 
     _patch_global_sessionmaker(monkeypatch, engine)
     sid = await _make_session_row(engine)
     await _acquire(engine, sid)
-    # 预置 4 条,使 force_compact(keep_recent=2)能折叠
-    await _seed_messages(engine, sid, 4)
+    await _seed_messages(engine, sid, 4)  # 供 force_compact(keep_recent=1)折叠
+
+    calls = {"n": 0}
 
     async def _gen(endpoint, request):
-        raise grpc.aio.AioRpcError(
-            grpc.StatusCode.RESOURCE_EXHAUSTED,
-            initial_metadata=grpc.aio.Metadata(),
-            trailing_metadata=grpc.aio.Metadata(),
-        )
-        yield  # pragma: no cover — 使其成为 async generator
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise grpc.aio.AioRpcError(
+                grpc.StatusCode.RESOURCE_EXHAUSTED,
+                initial_metadata=grpc.aio.Metadata(),
+                trailing_metadata=grpc.aio.Metadata(),
+            )
+            yield  # pragma: no cover
+        else:
+            yield turn_event_to_proto(TextDelta(text="hi"))
+            yield turn_event_to_proto(
+                TurnDone(
+                    new_messages=[Message(role=Role.ASSISTANT, text="done")],
+                    usage=Usage(input_tokens=1, output_tokens=2),
+                    stop_reason="end_turn",
+                )
+            )
 
     _fake_worker(monkeypatch, _gen)
 
-    called = {"n": 0}
-
     async def _fake_summarize(endpoint, req):
-        called["n"] += 1
-        return "FORCED"
+        return "S"
 
     monkeypatch.setattr(
         "agent_cloud_backend.turn.compaction.summarize_via_worker", _fake_summarize
@@ -392,16 +406,93 @@ async def test_runner_resource_exhausted_force_compacts_and_recoverable(engine, 
     active = ActiveTurn(session_id=sid)
     hub.register(active)
     await run_turn(
-        hub, active, worker_endpoint="x", request=_REQ, session_id=sid,
+        hub, active, worker_endpoint="x", request=_REQ, reassemble=_reassemble, session_id=sid,
         heartbeat_interval=999, settings=Settings(),
     )
 
+    kinds = [e["type"] for e in active.events]
+    assert "reset" in kinds  # 重试前清屏
+    assert any(e["type"] == "turn_done" for e in active.events)  # 重试成功
+    assert calls["n"] == 2  # 失败 1 次 + 重试 1 次
+    # 4 seed + 1 new assistant
+    assert await _roles(engine, sid) == ["user", "assistant", "user", "assistant", "assistant"]
+    assert await _status(engine, sid) == "idle"
+
+
+async def test_runner_transient_auto_retries_with_backoff(engine, monkeypatch):
+    # 首次抛 UNAVAILABLE → 退避后重试成功(用户无感)。
+    from agent_cloud_backend.config import Settings
+    from agent_cloud_backend.turn import retry as retry_mod
+    from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub
+    from agent_cloud_backend.turn.runner import run_turn
+
+    _patch_global_sessionmaker(monkeypatch, engine)
+    sid = await _make_session_row(engine)
+    await _acquire(engine, sid)
+    monkeypatch.setattr(retry_mod.RetryPolicy, "backoff_seconds", lambda self, i: 0.0)
+
+    calls = {"n": 0}
+
+    async def _gen(endpoint, request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise grpc.aio.AioRpcError(
+                grpc.StatusCode.UNAVAILABLE,
+                initial_metadata=grpc.aio.Metadata(),
+                trailing_metadata=grpc.aio.Metadata(),
+            )
+            yield  # pragma: no cover
+        yield turn_event_to_proto(
+            TurnDone(
+                new_messages=[Message(role=Role.ASSISTANT, text="ok")],
+                usage=Usage(input_tokens=1, output_tokens=1),
+                stop_reason="end_turn",
+            )
+        )
+
+    _fake_worker(monkeypatch, _gen)
+    hub = TurnHub()
+    active = ActiveTurn(session_id=sid)
+    hub.register(active)
+    await run_turn(
+        hub, active, worker_endpoint="x", request=_REQ, reassemble=_reassemble, session_id=sid,
+        heartbeat_interval=999, settings=Settings(),
+    )
+    assert calls["n"] == 2
+    assert any(e["type"] == "turn_done" for e in active.events)
+
+
+async def test_runner_transient_exhausted_recoverable_error(engine, monkeypatch):
+    # 瞬时错误一直失败 → 退避重试耗尽 → 末事件可恢复(用户可稍后再试)。
+    from agent_cloud_backend.config import Settings
+    from agent_cloud_backend.turn import retry as retry_mod
+    from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub
+    from agent_cloud_backend.turn.runner import run_turn
+
+    _patch_global_sessionmaker(monkeypatch, engine)
+    sid = await _make_session_row(engine)
+    await _acquire(engine, sid)
+    monkeypatch.setattr(retry_mod.RetryPolicy, "backoff_seconds", lambda self, i: 0.0)
+
+    async def _gen(endpoint, request):
+        raise grpc.aio.AioRpcError(
+            grpc.StatusCode.UNAVAILABLE,
+            initial_metadata=grpc.aio.Metadata(),
+            trailing_metadata=grpc.aio.Metadata(),
+        )
+        yield  # pragma: no cover
+
+    _fake_worker(monkeypatch, _gen)
+    hub = TurnHub()
+    active = ActiveTurn(session_id=sid)
+    hub.register(active)
+    await run_turn(
+        hub, active, worker_endpoint="x", request=_REQ, reassemble=_reassemble, session_id=sid,
+        heartbeat_interval=999, settings=Settings(turn_max_transient_retries=2),
+    )
     assert active.events[-1]["type"] == "error"
-    assert active.events[-1]["recoverable"] is True  # RESOURCE_EXHAUSTED + 有进展 → 可恢复
-    assert called["n"] == 1  # force_compact 跑了
-    summary, _ = await _summary(engine, sid)
-    assert summary == "FORCED"
-    assert await _status(engine, sid) == "idle"  # 锁仍被释放
+    assert active.events[-1]["recoverable"] is True  # 瞬时耗尽 → 可恢复
+    assert await _status(engine, sid) == "idle"
 
 
 async def test_runner_resource_exhausted_no_progress_is_non_recoverable(engine, monkeypatch):
@@ -439,7 +530,7 @@ async def test_runner_resource_exhausted_no_progress_is_non_recoverable(engine, 
     active = ActiveTurn(session_id=sid)
     hub.register(active)
     await run_turn(
-        hub, active, worker_endpoint="x", request=_REQ, session_id=sid,
+        hub, active, worker_endpoint="x", request=_REQ, reassemble=_reassemble, session_id=sid,
         heartbeat_interval=999, settings=Settings(),
     )
 

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import uuid
 
 import grpc
 from agent_cloud_common import (
@@ -284,3 +285,65 @@ async def test_cancel_is_204_and_idempotent(client, engine, monkeypatch):
     sid = await _make_session(client)
     # 无在跑回合 → 幂等 204
     assert (await client.post(f"/sessions/{sid}/turn/cancel")).status_code == 204
+
+
+async def _seed(engine, sid, n):
+    from agent_cloud_backend.models.message import Message as M
+    from agent_cloud_backend.repositories.message import MessageRepository
+
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        for i in range(n):
+            await MessageRepository(db).append(
+                uuid.UUID(sid),
+                M(
+                    session_id=uuid.UUID(sid),
+                    seq=0,
+                    role="user" if i % 2 == 0 else "assistant",
+                    content={"text": f"m{i}", "tool_calls": [], "tool_results": []},
+                ),
+            )
+        await db.commit()
+
+
+async def test_stream_endpoint_overflow_auto_retries_with_reset(client, engine, monkeypatch):
+    # 端到端:首流 RESOURCE_EXHAUSTED → 压缩 → reset → 重试成功。SSE 里 turn_done 前应有 reset。
+    _patch_global_sessionmaker(monkeypatch, engine)
+    calls = {"n": 0}
+
+    async def _gen(worker_endpoint, request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise grpc.aio.AioRpcError(
+                grpc.StatusCode.RESOURCE_EXHAUSTED,
+                initial_metadata=grpc.aio.Metadata(),
+                trailing_metadata=grpc.aio.Metadata(),
+            )
+            yield  # pragma: no cover
+        else:
+            yield turn_event_to_proto(TextDelta(text="hi"))
+            yield turn_event_to_proto(
+                TurnDone(
+                    new_messages=[Message(role=Role.ASSISTANT, text="done")],
+                    usage=Usage(input_tokens=1, output_tokens=1),
+                    stop_reason="end_turn",
+                )
+            )
+
+    _set_worker_stream(monkeypatch, _gen)
+
+    async def _fake_summarize(endpoint, req):
+        return "S"
+
+    monkeypatch.setattr(
+        "agent_cloud_backend.turn.compaction.summarize_via_worker", _fake_summarize
+    )
+
+    sid = await _make_session(client)
+    await _seed(engine, sid, 4)  # 供 force_compact 折叠
+    resp = await client.post(f"/sessions/{sid}/turn/stream", json={"content": "go"})
+    assert resp.status_code == 200
+    kinds = [e["type"] for e in _parse_sse(resp.text)]
+    assert "reset" in kinds  # 重试前清屏
+    assert kinds[-1] == "turn_done"  # 重试成功收尾
+    assert calls["n"] == 2

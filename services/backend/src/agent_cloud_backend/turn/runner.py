@@ -18,6 +18,7 @@ from agent_cloud_backend.turn.compaction import force_compact, maybe_compact_aft
 from agent_cloud_backend.turn.heartbeat import session_heartbeat
 from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub
 from agent_cloud_backend.turn.messages import common_to_content
+from agent_cloud_backend.turn.retry import RetryAction, RetryPolicy
 from agent_cloud_backend.turn.sse import error_sse, turn_event_to_sse
 
 logger = logging.getLogger(__name__)
@@ -76,60 +77,86 @@ async def run_turn(
     *,
     worker_endpoint: str,
     request,
+    reassemble,  # async () -> RunTurnRequest;重试时重新组装(读到压缩后的会话)
     session_id: uuid.UUID,
     heartbeat_interval: float,
     settings: Settings,
 ) -> None:
-    """独立任务:消费 worker 流 → 缓冲 + 落库;断连不取消它(由 asyncio.create_task 起)。"""
+    """独立任务:消费 worker 流 → 落库;可恢复失败在回合内透明自动重试(spec: turn-recovery)。
+
+    断连不取消本任务(由 asyncio.create_task 起)。重试前发 reset 事件让前端清屏;
+    reset 标记留在补播缓冲里,重连补播自洽(回放旧增量→遇 reset 清掉→回放重试后内容)。
+    """
+    policy = RetryPolicy.from_settings(settings)
+    overflow_used = transient_used = total_used = 0
     ctx_tokens = 0
+    current = request
     try:
         async with session_heartbeat(session_id, heartbeat_interval):
-            async for proto_event in worker_client.stream_turn_via_worker(worker_endpoint, request):
-                event = turn_event_from_proto(proto_event)
-                if isinstance(event, TurnDone):
-                    message_ids = await _persist(session_id, event.new_messages)
-                    ctx_tokens = event.context_tokens
-                    await active.emit(
-                        {
-                            "type": "turn_done",
-                            "usage": {
-                                "input_tokens": event.usage.input_tokens,
-                                "output_tokens": event.usage.output_tokens,
-                            },
-                            "message_ids": message_ids,
-                            "stop_reason": event.stop_reason,
-                        }
+            while True:
+                total_used += 1
+                try:
+                    async for proto_event in worker_client.stream_turn_via_worker(
+                        worker_endpoint, current
+                    ):
+                        event = turn_event_from_proto(proto_event)
+                        if isinstance(event, TurnDone):
+                            message_ids = await _persist(session_id, event.new_messages)
+                            ctx_tokens = event.context_tokens
+                            await active.emit(
+                                {
+                                    "type": "turn_done",
+                                    "usage": {
+                                        "input_tokens": event.usage.input_tokens,
+                                        "output_tokens": event.usage.output_tokens,
+                                    },
+                                    "message_ids": message_ids,
+                                    "stop_reason": event.stop_reason,
+                                }
+                            )
+                        else:
+                            await active.emit(turn_event_to_sse(event))
+                    # 回合成功收尾 → 主动压缩(仍在心跳内续租)→ 结束
+                    await maybe_compact_after_turn(
+                        session_id, ctx_tokens, model=current.agent.model, settings=settings
                     )
-                else:
-                    await active.emit(turn_event_to_sse(event))
-            # 回合成功收尾后主动压缩(用模型返回的真实 context_tokens 判阈值,阈值按模型解析)。
-            # 仍在心跳上下文内 —— 大历史 Summarize 可能较慢,期间继续续租,避免锁被判过期抢走。
-            # best-effort(内部吞异常),且仍在会话锁内(_finalize 释放锁在 finally,晚于此)。
-            await maybe_compact_after_turn(
-                session_id, ctx_tokens, model=request.agent.model, settings=settings
-            )
+                    return
+                except grpc.aio.AioRpcError as exc:
+                    action = policy.decide(
+                        exc.code(),
+                        overflow_used=overflow_used,
+                        transient_used=transient_used,
+                        total_used=total_used,
+                    )
+                    if action == RetryAction.COMPACT_RETRY:
+                        progressed = await force_compact(session_id, settings=settings)
+                        if not progressed:
+                            # 无可折叠(仅剩最近一条仍超窗)→ 不可恢复,别让用户白重试
+                            await active.emit(
+                                {
+                                    "type": "error",
+                                    "message": "context too large to compact; "
+                                    "please start a new session",
+                                    "recoverable": False,
+                                }
+                            )
+                            return
+                        overflow_used += 1
+                        await active.emit({"type": "reset"})  # 清屏;标记留缓冲,补播自洽
+                        current = await reassemble()
+                        continue
+                    if action == RetryAction.BACKOFF_RETRY:
+                        await asyncio.sleep(policy.backoff_seconds(transient_used))
+                        transient_used += 1
+                        await active.emit({"type": "reset"})
+                        current = await reassemble()
+                        continue
+                    # GIVE_UP:瞬时耗尽 → recoverable(code 在 _RECOVERABLE);fatal → 不可恢复。
+                    await active.emit(error_sse(exc.code()))
+                    return
     except asyncio.CancelledError:
-        # 主动取消 → 转成干净的终止事件,让 finally 收尾(不再 re-raise)
+        # 主动取消(含退避/重试间隙)→ 转成干净的终止事件,让 finally 收尾(不再 re-raise)
         await active.emit({"type": "error", "message": "turn cancelled", "recoverable": False})
-    except grpc.aio.AioRpcError as exc:
-        if exc.code() == grpc.StatusCode.RESOURCE_EXHAUSTED:
-            # 上下文超窗:兜底 force-compact(自起一段心跳续租,因 force_compact 折叠量大、
-            # Summarize 可能慢)。有进展 → 可恢复(重试通常装得下);无进展(仅剩最近一条
-            # + 摘要仍超窗)→ 不可恢复,别让用户白重试。
-            async with session_heartbeat(session_id, heartbeat_interval):
-                progressed = await force_compact(session_id, settings=settings)
-            if progressed:
-                await active.emit(error_sse(exc.code()))
-            else:
-                await active.emit(
-                    {
-                        "type": "error",
-                        "message": "context too large to compact; please start a new session",
-                        "recoverable": False,
-                    }
-                )
-        else:
-            await active.emit(error_sse(exc.code()))
     except Exception:
         logger.exception("turn run failed for session %s", session_id)
         await active.emit({"type": "error", "message": "the turn failed", "recoverable": False})
