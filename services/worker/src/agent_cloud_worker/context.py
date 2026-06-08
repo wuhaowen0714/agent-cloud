@@ -79,17 +79,33 @@ Do not try to install OS packages — use a pip or npm package, or a Python stdl
 instead."""
 
 
+def _render_summary(history_summary: str) -> list[str]:
+    # 压缩后此前历史折叠成的摘要。放在末尾(贴近随后的消息历史),并标明这是浓缩的早期对话,
+    # 而非用户配置 —— 让模型把它当作上下文延续而不是新指令。
+    if not history_summary.strip():
+        return []
+    return [
+        "# 此前对话摘要\n"
+        "以下是本次会话早期内容的浓缩摘要(为节省上下文已折叠原始消息)。"
+        "把它当作已发生的对话背景,继续后续回合:\n\n"
+        f"{history_summary}"
+    ]
+
+
 def build_system_prompt(
     *,
     documents: list[ContextDocument],
     memory: list[MemoryItem],
     skills: list[SkillRef],
+    history_summary: str = "",
 ) -> str:
-    """基础环境提示词 + 配置文档(用户级在前)+ 记忆 + 技能元数据,拼成分层 system 文本(spec §5.3)。"""
+    """基础环境提示词 + 配置文档(用户级在前)+ 记忆 + 技能元数据 + 此前对话摘要,
+    拼成分层 system 文本(spec §5.3 / §6)。"""
     sections = [
         BASE_SYSTEM_PROMPT,
         *_render_docs(documents),
         *_render_memory(memory),
         *_render_skills(skills),
+        *_render_summary(history_summary),
     ]
     return "\n\n".join(sections)

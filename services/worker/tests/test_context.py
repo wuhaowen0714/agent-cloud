@@ -50,6 +50,26 @@ def test_base_prompt_states_sandbox_capabilities():
     assert "internet" in out.lower()
 
 
+def test_history_summary_injected_into_system():
+    # 压缩后,此前历史折叠成的摘要应拼进 system(spec §6),让模型保留早期上下文。
+    out = build_system_prompt(
+        documents=[],
+        memory=[],
+        skills=[],
+        history_summary="早期:用户要做排序,已完成 bubble sort。",
+    )
+    assert "早期:用户要做排序" in out
+    assert "摘要" in out  # 有个小标题标明这是此前对话的浓缩
+    # 摘要置于基础环境提示词之后(贴近随后的消息历史)
+    assert out.index("autonomous AI agent") < out.index("早期:用户要做排序")
+
+
+def test_no_summary_section_when_empty():
+    # 默认无摘要(未压缩过的会话):不应出现摘要小标题,避免空段污染 prompt。
+    out = build_system_prompt(documents=[], memory=[], skills=[])
+    assert "此前对话摘要" not in out
+
+
 def test_skill_metadata_is_xml_escaped():
     # 恶意/含特殊字符的 description 不得破坏 <available_skills> 结构(prompt-injection 防护)
     out = build_system_prompt(

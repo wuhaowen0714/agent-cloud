@@ -30,6 +30,7 @@ def _build_context_and_history(request: worker_pb2.RunTurnRequest) -> tuple[str,
         documents=[ContextDocument(d.scope, d.type, d.content) for d in request.documents],
         memory=[MemoryItem(m.scope, m.content) for m in request.memory],
         skills=[SkillRef(s.name, s.description, s.location) for s in request.skills],
+        history_summary=request.history_summary,
     )
     history = [msg_from_proto(m) for m in request.messages]
     return system, history
