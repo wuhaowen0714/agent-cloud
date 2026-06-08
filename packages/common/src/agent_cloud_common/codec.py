@@ -79,6 +79,7 @@ def turn_event_to_proto(event: TurnEvent) -> worker_pb2.TurnEvent:
                 input_tokens=event.usage.input_tokens,
                 output_tokens=event.usage.output_tokens,
                 stop_reason=event.stop_reason,
+                context_tokens=event.context_tokens,
             )
         )
     raise ValueError(f"unknown turn event type: {type(event).__name__}")
@@ -104,5 +105,6 @@ def turn_event_from_proto(proto: worker_pb2.TurnEvent) -> TurnEvent:
             new_messages=[msg_from_proto(m) for m in t.new_messages],
             usage=Usage(input_tokens=t.input_tokens, output_tokens=t.output_tokens),
             stop_reason=t.stop_reason,
+            context_tokens=t.context_tokens,
         )
     raise ValueError(f"empty or unknown TurnEvent oneof: {which!r}")

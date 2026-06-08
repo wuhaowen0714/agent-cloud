@@ -34,6 +34,7 @@ class TurnDone:
     new_messages: list[Message]
     usage: Usage
     stop_reason: str  # "end_turn" | "max_iterations"
+    context_tokens: int = 0  # 最后一次 LLM 调用的 input_tokens(真实上下文大小,供压缩判阈值)
 
 
 TurnEvent = TextDelta | ThinkingDelta | ToolCallStarted | ToolResultEvent | TurnDone
