@@ -18,6 +18,7 @@ export type TurnEvent =
   | { type: "tool_result"; call_id: string; result: string; is_error: boolean }
   | { type: "turn_done"; usage: { input_tokens: number; output_tokens: number }; message_ids: string[]; stop_reason: string }
   | { type: "error"; message: string; recoverable: boolean }
+  | { type: "reset" }  // 透明自动重试:清掉本回合已显示内容,从头重来
 
 export interface FileEntry { name: string; path: string; is_dir: boolean; size: number; mtime: number }
 export interface Skill { id: string; user_id: string; name: string; description: string; source: string; version: string }

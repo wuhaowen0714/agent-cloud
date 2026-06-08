@@ -8,6 +8,7 @@ export interface LiveTurn {
   blocks: Block[]
   status: "streaming" | "done" | "error"
   errorMessage?: string
+  recoverable?: boolean // 失败时是否可重试(false=如上下文过大,引导开新会话)
 }
 
 interface AppState {

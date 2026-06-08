@@ -46,7 +46,16 @@ export function ChatView() {
         }),
       }))
     else if (e.type === "turn_done") setLive((t) => ({ ...t, status: "done" }))
-    else if (e.type === "error") setLive((t) => ({ ...t, status: "error", errorMessage: e.message }))
+    else if (e.type === "reset")
+      // 透明自动重试:清掉本回合已显示内容,从头重来(状态保持 streaming)
+      setLive((t) => ({ ...t, blocks: [], status: "streaming", errorMessage: undefined }))
+    else if (e.type === "error")
+      setLive((t) => ({
+        ...t,
+        status: "error",
+        errorMessage: e.message,
+        recoverable: e.recoverable,
+      }))
   }
 
   // 消费一个流(POST 或 GET resume)到结束:成功→刷新历史+清 live;主动中断(切走)→不动。
@@ -119,9 +128,15 @@ export function ChatView() {
     if (sessionId) void cancelTurn(sessionId)
   }
 
+  // 手动重试:重发本回合的用户消息(瞬时错误自动重试耗尽后给用户的兜底入口)。
+  const onRetry = () => {
+    const t = useStore.getState().live
+    if (t && t.status === "error") void onSend(t.userText)
+  }
+
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <MessageList messages={messages} />
+      <MessageList messages={messages} onRetry={onRetry} />
       <Composer disabled={live?.status === "streaming"} onSend={onSend} onStop={onStop} />
     </div>
   )

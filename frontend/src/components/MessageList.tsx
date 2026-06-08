@@ -5,7 +5,13 @@ import type { Message } from "../types"
 import { AssistantBubble, UserBubble } from "./Bubble"
 import { TurnBlocks } from "./TurnBlocks"
 
-export function MessageList({ messages }: { messages: Message[] }) {
+export function MessageList({
+  messages,
+  onRetry,
+}: {
+  messages: Message[]
+  onRetry?: () => void
+}) {
   const live = useStore((s) => s.live)
   const endRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -44,7 +50,25 @@ export function MessageList({ messages }: { messages: Message[] }) {
           <AssistantBubble>
             <TurnBlocks blocks={live.blocks} streaming={live.status === "streaming"} />
             {live.status === "error" && (
-              <div className="mt-1 text-xs text-red-600">⚠ {live.errorMessage ?? "回合失败"},可重试。</div>
+              <div className="mt-1 text-xs text-red-600">
+                {live.recoverable === false ? (
+                  // 不可恢复(如上下文过大):不给重试,引导开新会话
+                  <span>⚠ {live.errorMessage ?? "回合失败"} —— 请开新会话。</span>
+                ) : (
+                  <span>
+                    ⚠ {live.errorMessage ?? "回合失败"}
+                    {onRetry && (
+                      <button
+                        type="button"
+                        onClick={onRetry}
+                        className="ml-2 underline hover:text-red-800"
+                      >
+                        重试
+                      </button>
+                    )}
+                  </span>
+                )}
+              </div>
             )}
           </AssistantBubble>
         </>
