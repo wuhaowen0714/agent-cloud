@@ -18,16 +18,25 @@ export function MessageList({ messages }: { messages: Message[] }) {
 
   return (
     <div className="flex-1 space-y-3 overflow-auto p-4">
-      {turns.map((turn) => (
-        <Fragment key={turn.id}>
-          {turn.userText !== null && <UserBubble text={turn.userText} />}
-          {turn.blocks.length > 0 && (
-            <AssistantBubble>
-              <TurnBlocks blocks={turn.blocks} />
-            </AssistantBubble>
-          )}
-        </Fragment>
-      ))}
+      {turns.map((turn, i) => {
+        // user 消息但没有任何助手块 = 该回合被取消/出错(未完成)。但最后一条且当前
+        // 有 live(正在流式/重连)的不算——那是进行中的回合,助手内容在下面的 live 里。
+        const unfinished =
+          turn.userText !== null && turn.blocks.length === 0 && !(i === turns.length - 1 && live)
+        return (
+          <Fragment key={turn.id}>
+            {turn.userText !== null && <UserBubble text={turn.userText} />}
+            {turn.blocks.length > 0 && (
+              <AssistantBubble>
+                <TurnBlocks blocks={turn.blocks} />
+              </AssistantBubble>
+            )}
+            {unfinished && (
+              <div className="text-center text-xs text-slate-400">— 回合未完成 —</div>
+            )}
+          </Fragment>
+        )
+      })}
       {live && (
         <>
           {/* 乐观渲染本回合的用户消息(权威历史在 turn_done 后接管) */}

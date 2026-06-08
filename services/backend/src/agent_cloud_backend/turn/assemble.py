@@ -16,6 +16,20 @@ from agent_cloud_backend.skills.materialize import skill_location
 from agent_cloud_backend.turn.messages import orm_to_common
 
 
+def _strip_unanswered_user_messages(history: list) -> list:
+    """丢弃没有助手回复的 user 消息——被取消/出错的回合只在库里留下了 user 消息
+    (助手消息仅在 TurnDone 成功时才落库)。否则模型会把上一轮没答完的问题也一并
+    回答。判定:某 user 消息之后紧跟的不是助手/工具消息(是另一个 user,或已到末尾)。"""
+    kept = []
+    for i, m in enumerate(history):
+        if m.role == "user":
+            nxt = history[i + 1] if i + 1 < len(history) else None
+            if nxt is None or nxt.role == "user":
+                continue
+        kept.append(m)
+    return kept
+
+
 async def build_run_turn_request(
     db: AsyncSession,
     session: Session,
@@ -35,6 +49,7 @@ async def build_run_turn_request(
     agent_mem = await mem_repo.list_for_context("agent", session.agent_config_id)
     history = await MessageRepository(db).list_by_session(session.id)
     history = [m for m in history if m.id != exclude_message_id]
+    history = _strip_unanswered_user_messages(history)
 
     return worker_pb2.RunTurnRequest(
         session_id=str(session.id),

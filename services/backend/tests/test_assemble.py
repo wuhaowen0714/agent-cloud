@@ -30,9 +30,19 @@ async def test_build_request_from_db(session):
     await ContextDocumentRepository(session).upsert("user", "USER", user.id, "# user")
     await ContextDocumentRepository(session).upsert("agent", "AGENTS", agent.id, "# agent")
     await MemoryEntryRepository(session).append("user", user.id, "likes tea")
-    # history: one prior user message (NOT the current turn's)
+    # history: one COMPLETE prior turn (user + assistant). 未完成(无助手回复)的 user
+    # 消息会被 _strip_unanswered_user_messages 丢掉(见专项单测)。
     await MessageRepository(session).append(
         s.id, OrmMessage(session_id=s.id, seq=0, role="user", content={"text": "earlier"})
+    )
+    await MessageRepository(session).append(
+        s.id,
+        OrmMessage(
+            session_id=s.id,
+            seq=0,
+            role="assistant",
+            content={"text": "replied", "tool_calls": [], "tool_results": []},
+        ),
     )
     await session.commit()
 
@@ -47,7 +57,7 @@ async def test_build_request_from_db(session):
     assert req.agent.model == "claude-x" and list(req.agent.enabled_tools) == ["bash"]
     assert {d.type for d in req.documents} == {"USER", "AGENTS"}
     assert any(m.content == "likes tea" for m in req.memory)
-    assert [m.text for m in req.messages] == ["earlier"]  # history
+    assert [m.text for m in req.messages] == ["earlier", "replied"]  # 完整历史保留
     assert req.user_message == "now"
     assert req.sandbox_endpoint == "localhost:50051"
     assert req.work_subdir == s.work_subdir
@@ -138,3 +148,30 @@ async def test_build_request_work_subdir_override(session):
         exclude_message_id=None, work_subdir=".",
     )
     assert req2.work_subdir == "."
+
+
+def _ns(role: str):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(role=role)
+
+
+def test_strip_unanswered_user_messages_drops_cancelled_turns():
+    from agent_cloud_backend.turn.assemble import _strip_unanswered_user_messages
+
+    h = [
+        _ns("user"), _ns("assistant"), _ns("tool"), _ns("assistant"),  # 完整轮 → 保留
+        _ns("user"),  # 取消轮(后跟 user)→ 丢
+        _ns("user"), _ns("assistant"),  # 完整轮 → 保留
+    ]
+    assert [m.role for m in _strip_unanswered_user_messages(h)] == [
+        "user", "assistant", "tool", "assistant", "user", "assistant",
+    ]
+
+
+def test_strip_drops_trailing_unanswered_user_and_handles_empty():
+    from agent_cloud_backend.turn.assemble import _strip_unanswered_user_messages
+
+    h = [_ns("user"), _ns("assistant"), _ns("user")]  # 末尾 user 无回复 → 丢
+    assert [m.role for m in _strip_unanswered_user_messages(h)] == ["user", "assistant"]
+    assert _strip_unanswered_user_messages([]) == []
