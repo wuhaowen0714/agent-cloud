@@ -1,4 +1,4 @@
-import type { AgentConfig, FileEntry, Message, Session, User } from "../types"
+import type { AgentConfig, ContextDocument, FileEntry, Message, Session, Skill, User } from "../types"
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -43,4 +43,26 @@ export const api = {
     http<FileEntry>("/files/move", { method: "POST", body: JSON.stringify({ user_id: userId, src, dst }) }),
   deleteFile: (userId: string, path: string) =>
     http<void>(`/files?user_id=${userId}&path=${encodeURIComponent(path)}`, { method: "DELETE" }),
+  patchAgent: (
+    id: string,
+    body: Partial<Pick<AgentConfig, "name" | "model" | "provider" | "thinking_level" | "enabled_tools">>,
+  ) => http<AgentConfig>(`/agent-configs/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  listDocs: (scope: string, ownerId: string) =>
+    http<ContextDocument[]>(`/context-documents?scope=${scope}&owner_id=${ownerId}`),
+  putDoc: (scope: string, type: string, ownerId: string, content: string) =>
+    http<ContextDocument>("/context-documents", {
+      method: "PUT",
+      body: JSON.stringify({ scope, type, owner_id: ownerId, content }),
+    }),
+  listSkills: (userId: string) => http<Skill[]>(`/skills?user_id=${userId}`),
+  listRegistry: () => http<string[]>("/skills/registry"),
+  installSkill: (userId: string, name: string) =>
+    http<Skill>("/skills/install", { method: "POST", body: JSON.stringify({ user_id: userId, name }) }),
+  deleteSkill: (id: string) => http<void>(`/skills/${id}`, { method: "DELETE" }),
+  getAgentSkills: (agentId: string) => http<Skill[]>(`/agent-configs/${agentId}/skills`),
+  setAgentSkills: (agentId: string, skillIds: string[]) =>
+    http<Skill[]>(`/agent-configs/${agentId}/skills`, {
+      method: "PUT",
+      body: JSON.stringify({ skill_ids: skillIds }),
+    }),
 }

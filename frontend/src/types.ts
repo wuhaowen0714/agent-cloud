@@ -20,3 +20,5 @@ export type TurnEvent =
   | { type: "error"; message: string; recoverable: boolean }
 
 export interface FileEntry { name: string; path: string; is_dir: boolean; size: number; mtime: number }
+export interface Skill { id: string; user_id: string; name: string; description: string; source: string; version: string }
+export interface ContextDocument { id: string; scope: string; type: string; owner_id: string; content: string }

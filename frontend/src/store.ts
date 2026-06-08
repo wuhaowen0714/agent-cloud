@@ -16,6 +16,7 @@ interface AppState {
   sessionId: string | null
   live: LiveTurn | null
   fileDrawerOpen: boolean
+  settingsOpen: boolean
   setUser: (id: string | null) => void
   setAgent: (id: string | null) => void
   setSession: (id: string | null) => void
@@ -23,6 +24,8 @@ interface AppState {
   setLive: (fn: (t: LiveTurn) => LiveTurn) => void
   clearLive: () => void
   toggleFileDrawer: () => void
+  openSettings: () => void
+  closeSettings: () => void
 }
 
 const EMPTY: LiveTurn = { userText: "", sessionId: "", blocks: [], status: "streaming" }
@@ -34,11 +37,12 @@ export const useStore = create<AppState>((set) => ({
   sessionId: localStorage.getItem("ac.sessionId"),
   live: null,
   fileDrawerOpen: false,
+  settingsOpen: false,
   setUser: (id) => {
     if (id) localStorage.setItem("ac.userId", id)
     else localStorage.removeItem("ac.userId")
     localStorage.removeItem("ac.sessionId") // 换用户清掉会话归属
-    set({ userId: id, agentId: null, sessionId: null })
+    set({ userId: id, agentId: null, sessionId: null, settingsOpen: false })
   },
   setAgent: (id) => {
     localStorage.removeItem("ac.sessionId")
@@ -53,4 +57,6 @@ export const useStore = create<AppState>((set) => ({
   setLive: (fn) => set((s) => (s.live ? { live: fn(s.live) } : {})),
   clearLive: () => set({ live: null }),
   toggleFileDrawer: () => set((s) => ({ fileDrawerOpen: !s.fileDrawerOpen })),
+  openSettings: () => set({ settingsOpen: true }),
+  closeSettings: () => set({ settingsOpen: false }),
 }))
