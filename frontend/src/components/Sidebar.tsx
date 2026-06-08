@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { api } from "../api/client"
 import { useStore } from "../store"
 import { AccountMenu } from "./AccountMenu"
-import { AgentSwitcher } from "./AgentSwitcher"
+import { AgentList } from "./AgentList"
 import { SessionList } from "./SessionList"
 import { Button } from "./ui"
 
@@ -40,10 +40,10 @@ export function Sidebar() {
         ＋ 新对话
       </Button>
 
-      {/* agent 切换器 */}
-      <AgentSwitcher />
+      {/* agent 列表(直接点选,无下拉)*/}
+      <AgentList />
 
-      {/* 对话列表(占据剩余高度)*/}
+      {/* 当前 agent 的对话列表(占据剩余高度)*/}
       <SessionList />
 
       {/* 贴底账户区 */}

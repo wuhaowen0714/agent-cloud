@@ -40,7 +40,8 @@ const EMPTY: LiveTurn = { userText: "", sessionId: "", blocks: [], status: "stre
 export const useStore = create<AppState>((set, get) => ({
   user: null, // 由 bootstrap(refresh→me)决定,不再从 localStorage 假造
   userId: null,
-  agentId: null,
+  // 持久化当前 agent:刷新后保持选中(侧栏 agent 列表高亮 + 会话列表过滤到它)。
+  agentId: localStorage.getItem("ac.agentId"),
   // 持久化当前会话:刷新后自动回到原会话(并触发 resume 重挂在跑的回合)。
   sessionId: localStorage.getItem("ac.sessionId"),
   live: null,
@@ -54,6 +55,7 @@ export const useStore = create<AppState>((set, get) => ({
     // 重确认同一用户则保留,以便刷新后回到原会话。
     if (prev !== null && prev !== uid) {
       localStorage.removeItem("ac.sessionId")
+      localStorage.removeItem("ac.agentId")
       set({ user, userId: uid, agentId: null, sessionId: null, live: null, settingsOpen: false })
     } else {
       set({ user, userId: uid })
@@ -62,6 +64,7 @@ export const useStore = create<AppState>((set, get) => ({
   logout: () => {
     setAccess(null) // 丢弃内存里的 access(refresh cookie 由 /auth/logout 吊销)
     localStorage.removeItem("ac.sessionId")
+    localStorage.removeItem("ac.agentId")
     clearQueryCache() // 清掉所有缓存,避免下个用户读到上个用户残留(尤其未按 user 命名的 key)
     set({
       user: null,
@@ -74,6 +77,8 @@ export const useStore = create<AppState>((set, get) => ({
     })
   },
   setAgent: (id) => {
+    if (id) localStorage.setItem("ac.agentId", id)
+    else localStorage.removeItem("ac.agentId")
     localStorage.removeItem("ac.sessionId")
     set({ agentId: id, sessionId: null })
   },
