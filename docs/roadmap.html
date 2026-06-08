@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>无状态 Agent Cloud — 后续计划与 Roadmap</title>
+<style>
+  :root{
+    --teal:#0d9488; --teal-d:#0f766e; --teal-l:#ccfbf1; --teal-bg:#f0fdfa;
+    --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --card:#ffffff; --bg:#f8fafc;
+    --done:#10b981; --soon:#0d9488; --mid:#f59e0b; --later:#94a3b8;
+    --s:#3b82f6; --m:#8b5cf6; --l:#ef4444;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px 96px}
+  header.hero{background:linear-gradient(135deg,var(--teal-d),var(--teal));color:#fff;padding:48px 24px 40px;margin-bottom:8px}
+  header.hero .inner{max-width:1080px;margin:0 auto}
+  header.hero h1{margin:0 0 8px;font-size:30px;letter-spacing:-.5px}
+  header.hero p{margin:4px 0;opacity:.92;font-size:14px}
+  .pillrow{margin-top:16px;display:flex;gap:8px;flex-wrap:wrap}
+  .pill{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.28);border-radius:999px;padding:4px 12px;font-size:12.5px}
+  h2{font-size:21px;margin:44px 0 6px;padding-top:12px;letter-spacing:-.3px}
+  h2 .num{color:var(--teal);font-weight:800;margin-right:8px}
+  h3{font-size:16px;margin:26px 0 8px}
+  .lead{color:var(--muted);margin:0 0 18px;max-width:78ch}
+  a{color:var(--teal-d)}
+  .toc{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 20px;margin:24px 0 8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px 24px}
+  .toc a{display:block;text-decoration:none;color:var(--ink);font-size:14px;padding:3px 0}
+  .toc a:hover{color:var(--teal-d)}
+  .toc b{color:var(--teal);font-variant-numeric:tabular-nums;margin-right:8px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin:14px 0;box-shadow:0 1px 2px rgba(15,23,42,.03)}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--muted);margin:10px 0 0}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:999px;margin-right:6px;vertical-align:middle}
+  .dot.done{background:var(--done)} .dot.soon{background:var(--soon)} .dot.mid{background:var(--mid)} .dot.later{background:var(--later)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px;margin:12px 0}
+  .feat{background:var(--teal-bg);border:1px solid var(--teal-l);border-radius:12px;padding:14px 16px}
+  .feat h4{margin:0 0 8px;font-size:14.5px;color:var(--teal-d);display:flex;align-items:center;gap:7px}
+  .feat ul{margin:0;padding-left:18px}
+  .feat li{font-size:13px;color:#334155;margin:3px 0}
+  .check{color:var(--done);font-weight:800}
+  table{width:100%;border-collapse:collapse;margin:8px 0 2px;font-size:13.5px}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+  td.itm{font-weight:600;width:24%}
+  td .why{color:var(--muted);font-size:12.5px;margin-top:3px}
+  .tag{display:inline-block;border-radius:6px;padding:1px 8px;font-size:11.5px;font-weight:700;white-space:nowrap}
+  .tag.S{background:#eff6ff;color:var(--s)} .tag.M{background:#f5f3ff;color:var(--m)} .tag.L{background:#fef2f2;color:var(--l)}
+  .phase{border-left:4px solid var(--teal);padding-left:18px;margin:30px 0}
+  .phase.p1{border-color:var(--soon)} .phase.p2{border-color:#14b8a6} .phase.p3{border-color:var(--mid)} .phase.p4{border-color:#f59e0b} .phase.p5{border-color:var(--later)}
+  .phase h2{margin-top:6px}
+  .phase .meta{font-size:12.5px;color:var(--muted);margin:-2px 0 10px}
+  .badge{display:inline-block;border-radius:999px;padding:2px 11px;font-size:12px;font-weight:700;color:#fff}
+  .badge.soon{background:var(--soon)} .badge.mid{background:var(--mid)} .badge.later{background:var(--later)}
+  .seq{counter-reset:step;margin:14px 0 0;padding:0;list-style:none}
+  .seq li{position:relative;padding:10px 0 10px 42px;border-bottom:1px dashed var(--line)}
+  .seq li:before{counter-increment:step;content:counter(step);position:absolute;left:0;top:9px;width:26px;height:26px;border-radius:999px;background:var(--teal);color:#fff;font-weight:800;font-size:13px;display:grid;place-items:center}
+  .seq b{color:var(--teal-d)}
+  .note{background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:14px 18px;margin:14px 0;font-size:13.5px}
+  .note b{color:#b45309}
+  .principles li{margin:6px 0}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;background:#f1f5f9;border-radius:5px;padding:1px 6px}
+  footer{color:var(--muted);font-size:12.5px;margin-top:40px;border-top:1px solid var(--line);padding-top:16px}
+  .arch{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.7;background:#0f172a;color:#cbd5e1;border-radius:12px;padding:18px 20px;overflow:auto}
+  .arch .g{color:#34d399} .arch .o{color:#fbbf24} .arch .c{color:#64748b}
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="inner">
+    <h1>无状态 Agent Cloud · 后续计划与 Roadmap</h1>
+    <p>从「能用的原型」到「可托管的多租户 agent 云」的演进路线</p>
+    <p>日期:2026-06-08 · 基线:已完成 13 个实现计划(Plan 1–13)· 关联设计:<span class="mono">docs/superpowers/specs/2026-06-05-stateless-agent-cloud-design.md</span></p>
+    <div class="pillrow">
+      <span class="pill">FastAPI 后端</span>
+      <span class="pill">gRPC Worker(脑·持 Key)</span>
+      <span class="pill">gRPC Sandbox(不可信执行)</span>
+      <span class="pill">React + SSE 前端</span>
+      <span class="pill">Postgres 持久层</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="toc">
+    <a href="#vision"><b>0</b>愿景与现状一句话</a>
+    <a href="#done"><b>1</b>已建成(基线盘点)</a>
+    <a href="#gaps"><b>2</b>关键缺口</a>
+    <a href="#p1"><b>P1</b>多租户与生产化基座</a>
+    <a href="#p2"><b>P2</b>记忆与 agent 能力</a>
+    <a href="#p3"><b>P3</b>可观测、成本与运营</a>
+    <a href="#p4"><b>P4</b>弹性与规模</a>
+    <a href="#p5"><b>P5</b>高级体验与产品深度</a>
+    <a href="#seq"><b>3</b>推荐推进顺序</a>
+    <a href="#principles"><b>4</b>贯穿性原则</a>
+  </div>
+
+  <h2 id="vision"><span class="num">0</span>愿景与现状一句话</h2>
+  <p class="lead">
+    <b>愿景</b>(源自设计 §1):把"一个用户焊死一个进程"的脆弱架构,拆成<b>有状态后端 + 无状态 agent 服务</b>——
+    状态(对话/配置/文件/记忆)放在持久层,计算单元(worker/sandbox)随时可替换、可横向扩容、互不拖累。
+    稳定性来自"状态放在哪",而非"计算活多久"。
+  </p>
+  <p class="lead">
+    <b>现状一句话</b>:核心闭环已经跑通且可靠——用户能在隔离沙箱里和 agent 多会话对话、用工具读写持久文件、
+    断网刷新可续看、上下文满了自动压缩、回合失败会透明自愈。
+    <b>但它目前更像一个「单人可用的强原型」</b>:还没有真正的<b>鉴权与多租户</b>、没有<b>智能体记忆</b>、
+    没有<b>成本/用量可观测</b>、没有<b>规模化派发</b>。Roadmap 即围绕把它变成"可对外托管的云"。
+  </p>
+
+  <div class="arch">
+前端 / 客户端(聊天 UI + 文件管理)
+   │  <span class="c">① SSE + REST(公网)</span>
+<span class="o">后端 Backend(有状态:Postgres / 配置 / 会话 / 文件编排 / 编排锁 / 压缩)</span>
+   │  <span class="c">② gRPC 流式</span>
+<span class="g">Worker「脑」(无状态:agent-loop · provider · 持 LLM Key · 可信)</span>
+   │  <span class="c">③ gRPC ExecTool</span>
+<span class="g">Sandbox「手」(无状态:bash/读写文件 · cap_drop · 无 Key · 不可信)</span>
+   │
+<span class="o">每用户持久 workspace 卷(跨会话/跨 agent 共享)</span>
+  </div>
+
+  <!-- ===================== DONE ===================== -->
+  <h2 id="done"><span class="num">1</span>已建成 — 基线盘点</h2>
+  <p class="lead">13 个实现计划已落地,每个都经 TDD + 对抗式审查。下面按能力域归类(✅=已完成)。</p>
+  <div class="grid">
+    <div class="feat">
+      <h4><span class="check">✓</span> 核心回合循环</h4>
+      <ul>
+        <li>三跳架构:FE↔BE(SSE/REST)、BE↔Worker、Worker↔Sandbox(gRPC 流式)</li>
+        <li>agent-loop:LLM→工具→回填→收尾;一元 + 完整流式</li>
+        <li>OpenAI 兼容 provider(DeepSeek-V4-Pro / sophnet);思考流(reasoning)</li>
+        <li>分层 system 提示词:环境 + 配置文档 + 记忆 + 技能 + 摘要</li>
+      </ul>
+    </div>
+    <div class="feat">
+      <h4><span class="check">✓</span> 沙箱隔离与文件</h4>
+      <ul>
+        <li>Docker provisioner(真隔离,cap_drop=ALL)+ inprocess(CI)</li>
+        <li>每用户共享持久 workspace;pip --user / npm -g 持久</li>
+        <li>空闲 TTL 回收 + reaper;跳过在跑会话</li>
+        <li>文件管理:浏览 / 上传 / 下载 / 删除 / 重命名 / 新建夹 / 预览(路径越狱防护)</li>
+      </ul>
+    </div>
+    <div class="feat">
+      <h4><span class="check">✓</span> 前端体验</h4>
+      <ul>
+        <li>时序化块流渲染(思考 / 正文 / 工具卡片)</li>
+        <li>多会话 / 多 agent 配置;侧栏分组</li>
+        <li>配置抽屉:agent 设置 + 指令文档 + 技能启用</li>
+        <li>localStorage 记住当前用户/会话</li>
+      </ul>
+    </div>
+    <div class="feat">
+      <h4><span class="check">✓</span> 可靠性与上下文</h4>
+      <ul>
+        <li>可重连回合:刷新/切会话/断网续看(Hub + 心跳租约 + 停止按钮)</li>
+        <li>会话压缩:回合后按真实 context_tokens 主动折叠 + per-model 阈值</li>
+        <li>透明自动恢复:超窗→压缩重试、瞬时→退避重试、reset 清屏、耗尽给措辞</li>
+        <li>尽力而为容错:回合为无状态边界,助手消息仅成功落库(无半成品)</li>
+      </ul>
+    </div>
+    <div class="feat">
+      <h4><span class="check">✓</span> 配置 / 技能 / 数据层</h4>
+      <ul>
+        <li>数据模型:user / agent_config / session / message / context_document / memory_entry / skill / sandbox_registry</li>
+        <li>技能:registry 列表 + 物化进沙箱 + 每 agent 启用</li>
+        <li>会话内串行锁(并发同会话 409),用户级并发会话</li>
+        <li>alembic 迁移;后端独占 DB</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ===================== GAPS ===================== -->
+  <h2 id="gaps"><span class="num">2</span>关键缺口(Roadmap 的依据)</h2>
+  <p class="lead">把"强原型"变成"云"还差四类东西。前两类(鉴权、记忆)是设计里已点名或低估的,后两类(可观测、规模)是产品/运营必需:</p>
+  <table>
+    <tr><th>缺口</th><th>现状</th><th>为什么要紧</th></tr>
+    <tr><td class="itm">鉴权 / 多租户</td><td>零鉴权;前端 localStorage 假 user;后端信任任意传入的 user_id</td><td>无法对外、无法隔离用户、无法计费——是"云"的前提</td></tr>
+    <tr><td class="itm">智能体记忆</td><td>仅数据管道骨架(读取+追加 + 注入 prompt);无写入工具/抽取/检索/UI/遗忘</td><td>"跨会话记住偏好与事实"是 agent 产品的核心价值,目前几乎 inert</td></tr>
+    <tr><td class="itm">可观测 / 成本</td><td>回合 usage 已采集,但无面板、无配额、无追踪</td><td>LLM 产品烧钱;不可见 = 不可控、不可运营、不可信任</td></tr>
+    <tr><td class="itm">弹性 / 规模</td><td>BE↔Worker 直连;无队列派发、无池化/自动扩缩</td><td>设计目标正是"横向扩容、互不拖累";直连下扛不住多用户</td></tr>
+  </table>
+
+  <p class="lead" style="margin-top:18px">下面把后续工作排成 5 个阶段(P1→P5)。每项标注<b>工作量</b>(<span class="tag S">S 小</span> <span class="tag M">M 中</span> <span class="tag L">大</span>)与依赖。</p>
+  <div class="legend">
+    <span><span class="dot done"></span>已完成</span>
+    <span><span class="dot soon"></span>近期(基座)</span>
+    <span><span class="dot mid"></span>中期</span>
+    <span><span class="dot later"></span>远期</span>
+  </div>
+
+  <!-- ===================== P1 ===================== -->
+  <div class="phase p1" id="p1">
+    <h2><span class="badge soon">P1 · 近期</span> &nbsp;多租户与生产化基座</h2>
+    <p class="meta">目标:让它能安全地对外给多个用户用。这是把"原型"变"云"的硬门槛,建议优先。</p>
+    <table>
+      <tr><th>事项</th><th>目标 / 内容</th><th>依赖</th><th>量</th></tr>
+      <tr>
+        <td class="itm">认证(AuthN)</td>
+        <td>真实登录(OAuth/邮箱魔链/密码);签发会话 token;后端每请求从 token 解析 user,取代 localStorage。<div class="why">前端登录态 + 受保护路由。</div></td>
+        <td>—</td><td><span class="tag M">M</span></td>
+      </tr>
+      <tr>
+        <td class="itm">授权(AuthZ)</td>
+        <td>资源归属校验:用户只能访问自己的 session/agent/file/memory。中间件统一注入 owner,移除"信任传入 user_id"。<div class="why">当前最大的安全洞。</div></td>
+        <td>AuthN</td><td><span class="tag M">M</span></td>
+      </tr>
+      <tr>
+        <td class="itm">密钥与 provider 管理</td>
+        <td>把 <span class="mono">key_ref</span> 落到真实密钥解析(KMS/密钥库);支持多 provider / 多 model / 每租户自带 Key(BYO-Key)。<div class="why">设计已预留 key_ref + KMS;v1 是单 Key 共用。</div></td>
+        <td>AuthZ</td><td><span class="tag M">M</span></td>
+      </tr>
+      <tr>
+        <td class="itm">限流 / 配额 / 滥用防护</td>
+        <td>按用户/租户的并发与速率上限;基础滥用/安全护栏(沙箱出网 allowlist 收紧、危险操作)。</td>
+        <td>AuthN</td><td><span class="tag M">M</span></td>
+      </tr>
+      <tr>
+        <td class="itm">部署与 CI/CD</td>
+        <td>容器化全栈 + 一键部署(compose→k8s);CI 跑三套件 + ruff/tsc;迁移自动化;健康检查/就绪探针。<div class="why">目前是 dev_up.sh 本地起栈。</div></td>
+        <td>—</td><td><span class="tag L">L</span></td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ===================== P2 ===================== -->
+  <div class="phase p2" id="p2">
+    <h2><span class="badge soon">P2 · 近—中期</span> &nbsp;记忆与 agent 能力</h2>
+    <p class="meta">目标:让 agent 真正"会记、能力更强"。记忆是当前最大的能力空白;工具/技能生态决定 agent 能做多少事。</p>
+    <table>
+      <tr><th>事项</th><th>目标 / 内容</th><th>依赖</th><th>量</th></tr>
+      <tr>
+        <td class="itm">智能体记忆 — 写入路径</td>
+        <td>两条可选(建议先做自动提炼):①会话结束/压缩时后端自动提炼耐久事实写入 <span class="mono">memory_entries</span>(天然在后端、复用压缩机制);②给 agent 一个 <span class="mono">remember</span> 工具(需 worker→后端回写通道,因 DB 后端独占)。<div class="why">现状:除手动 POST /memory 外无人写。</div></td>
+        <td>—</td><td><span class="tag M">M</span></td>
+      </tr>
+      <tr>
+        <td class="itm">记忆 — 向量检索</td>
+        <td>给 <span class="mono">memory_entries</span> 加 embedding 列 + ANN 索引(pgvector);读取从"近 N 全量"换成 top-k 相关。<div class="why">设计 §14 已点名;数据模型已预留 embedding 接口。</div></td>
+        <td>记忆写入</td><td><span class="tag M">M</span></td>
+      </tr>
+      <tr>
+        <td class="itm">记忆 — 生命周期 + UI</td>
+        <td>去重 / 更新 / 遗忘;记忆管理 UI(查看/编辑/删除);与压缩协同(摘要 vs 记忆边界)。</td>
+        <td>记忆写入</td><td><span class="tag M">M</span></td>
+      </tr>
+      <tr>
+        <td class="itm">工具生态扩展</td>
+        <td>在 bash/read/write 之外补常用工具(HTTP 抓取、结构化文件编辑、grep/search);评估接入 <span class="mono">MCP</span> 工具协议。</td>
+        <td>—</td><td><span class="tag M">M</span></td>
+      </tr>
+      <tr>
+        <td class="itm">技能市场 / 发现</td>
+        <td>上传 zip 技能(配 <span class="mono">allow_uploaded_archives</span>)+ 审核/签名;语义检索式技能发现;市场 UI。<div class="why">设计 §14;当前只有 registry 列表 + 启用。</div></td>
+        <td>AuthZ</td><td><span class="tag L">L</span></td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ===================== P3 ===================== -->
+  <div class="phase p3" id="p3">
+    <h2><span class="badge mid">P3 · 中期</span> &nbsp;可观测、成本与运营</h2>
+    <p class="meta">目标:看得见、控得住、能运营。LLM 产品的成本与可观测是商业化前提,且与 P1 配额互补。</p>
+    <table>
+      <tr><th>事项</th><th>目标 / 内容</th><th>依赖</th><th>量</th></tr>
+      <tr>
+        <td class="itm">用量与成本面板</td>
+        <td>按用户/会话/agent 聚合 token + 估算 $;预算/配额与告警(超额降级或拦截)。<div class="why">回合 usage 已采集,缺聚合与展示。</div></td>
+        <td>AuthN</td><td><span class="tag M">M</span></td>
+      </tr>
+      <tr>
+        <td class="itm">追踪 / 指标 / 日志</td>
+        <td>回合级分布式追踪(三跳串起);结构化日志 + 指标(时延/失败率/重试率/压缩率);仪表盘。</td>
+        <td>—</td><td><span class="tag M">M</span></td>
+      </tr>
+      <tr>
+        <td class="itm">运营 / 管理后台</td>
+        <td>管理员视图:用户/会话/沙箱清单与回收、卡住回合排查、强制释放锁。</td>
+        <td>AuthZ</td><td><span class="tag S">S</span></td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ===================== P4 ===================== -->
+  <div class="phase p4" id="p4">
+    <h2><span class="badge mid">P4 · 中—远期</span> &nbsp;弹性与规模</h2>
+    <p class="meta">目标:兑现设计的"横向扩容、互不拖累"。规模上来后再做;接口在设计中已预留。</p>
+    <table>
+      <tr><th>事项</th><th>目标 / 内容</th><th>依赖</th><th>量</th></tr>
+      <tr>
+        <td class="itm">队列化派发(第②跳)</td>
+        <td>BE↔Worker 从直连改为消息队列派发 + pub/sub,解耦与削峰,提升弹性。<div class="why">设计 §14。</div></td>
+        <td>部署/CI</td><td><span class="tag L">L</span></td>
+      </tr>
+      <tr>
+        <td class="itm">Worker / Sandbox 池化与自动扩缩</td>
+        <td>预热池 + 按负载自动扩缩;沙箱跨主机调度;冷启动优化。</td>
+        <td>队列派发</td><td><span class="tag L">L</span></td>
+      </tr>
+      <tr>
+        <td class="itm">回合中途断点续跑</td>
+        <td>细粒度 checkpoint + 工具幂等,从"整轮重试"升级到"断点续跑"。<div class="why">设计 §14;当前是尽力而为整轮重试(P13 已做透明重试)。</div></td>
+        <td>—</td><td><span class="tag L">L</span></td>
+      </tr>
+      <tr>
+        <td class="itm">用户卷多区域 / 跨 AZ</td>
+        <td>workspace 卷的多区域复制与就近调度。</td>
+        <td>池化</td><td><span class="tag L">L</span></td>
+      </tr>
+      <tr>
+        <td class="itm">per-user 自定义沙箱镜像</td>
+        <td>devcontainer 式构建管线 + registry,应对重系统依赖。<div class="why">设计 §14;v1 靠较全基础镜像。</div></td>
+        <td>部署/CI</td><td><span class="tag L">L</span></td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ===================== P5 ===================== -->
+  <div class="phase p5" id="p5">
+    <h2><span class="badge later">P5 · 远期</span> &nbsp;高级体验与产品深度</h2>
+    <p class="meta">目标:差异化体验。锦上添花,待核心稳固后按产品需要取舍。</p>
+    <table>
+      <tr><th>事项</th><th>目标 / 内容</th><th>依赖</th><th>量</th></tr>
+      <tr>
+        <td class="itm">实时 steering(WebSocket)</td>
+        <td>回合进行中实时打断/纠偏;第①跳按需引入 WS(流层已设计成可替换抽象)。<div class="why">设计 §14。</div></td>
+        <td>队列派发</td><td><span class="tag M">M</span></td>
+      </tr>
+      <tr>
+        <td class="itm">可分支会话树</td>
+        <td>openclaw 式 <span class="mono">moveTo</span>/分支导航;当前是线性历史。<div class="why">设计 v1 明确不做,留后续。</div></td>
+        <td>—</td><td><span class="tag L">L</span></td>
+      </tr>
+      <tr>
+        <td class="itm">原生 app / 协作</td>
+        <td><span class="mono">apps/</span> 占位的 iOS/Android/桌面端;会话/agent 分享与协作。</td>
+        <td>AuthN</td><td><span class="tag L">L</span></td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ===================== SEQUENCING ===================== -->
+  <h2 id="seq"><span class="num">3</span>推荐推进顺序</h2>
+  <p class="lead">两条路线取决于近期目标。下面是我的建议序列(可按你的优先级调整):</p>
+  <ol class="seq">
+    <li><b>先打地基(P1)</b> —— 认证 → 授权 → 密钥/限流。没有它,任何对外动作都不安全;且它是计费/配额/市场的前置。</li>
+    <li><b>补最大能力空白(P2 记忆)</b> —— 自动提炼写入 + pgvector 检索,让 agent 真正跨会话变聪明。可与 P1 部分并行(记忆不依赖鉴权)。</li>
+    <li><b>装上仪表盘(P3 成本/可观测)</b> —— 一旦多用户在用,成本与排障立刻成为刚需;与 P1 配额天然互补。</li>
+    <li><b>按需扩容(P4)</b> —— 当并发/负载成为瓶颈时再上队列派发与池化;过早做是过度工程。</li>
+    <li><b>深化体验(P5)</b> —— 核心稳固后,按产品差异化需要选做 steering / 分支 / 原生端。</li>
+  </ol>
+  <div class="note">
+    <b>决策点:</b>如果近期目标是<b>"尽快给真实用户用"</b> → 严格 P1 优先;如果是<b>"先把 agent 做强、再考虑对外"</b> →
+    可把 P2(记忆 + 工具)提到 P1 之前,鉴权延后。两者都成立,取决于你要先要"可托管"还是先要"更聪明"。
+  </div>
+
+  <!-- ===================== PRINCIPLES ===================== -->
+  <h2 id="principles"><span class="num">4</span>贯穿性原则(每个阶段都遵守)</h2>
+  <ul class="principles">
+    <li><b>brainstorm → spec → plan → TDD 实现 → 对抗审查</b>:沿用至今的工作流,每个功能先出设计/计划文档再动手。</li>
+    <li><b>无状态边界不破</b>:新能力优先放进后端(有状态)或保持 worker/sandbox 无状态、可替换;DB 仍后端独占。</li>
+    <li><b>尽力而为 + 可恢复</b>:失败要么透明自愈(已做),要么给用户清晰、可执行的提示;绝不静默坏掉成功的回合。</li>
+    <li><b>安全分层</b>:Key 只在 worker;沙箱不可信、能力最小化;新工具/出网默认收紧。</li>
+    <li><b>测试是基线</b>:后端 testcontainer 集成 + worker 单测 + 前端 vitest;回归全绿才提交。</li>
+  </ul>
+
+  <footer>
+    生成于 2026-06-08 · 基于仓库实际代码与 <span class="mono">docs/superpowers/specs|plans/</span> 盘点 ·
+    本文件:<span class="mono">docs/roadmap.html</span>(可直接浏览器打开)。
+    工作量标注 S/M/L 为相对粗估,非绝对工期。
+  </footer>
+
+</div>
+</body>
+</html>
