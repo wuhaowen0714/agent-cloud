@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     auth_cookie_name: str = "ac_refresh"  # refresh 的 httpOnly cookie 名
     auth_cookie_secure: bool = False  # 本地 http=false;prod(https)必须 true
 
+    # BYO-Key:凭据 AES-GCM 主密钥(base64 编码的 32 字节);空 = 凭据功能不可用。
+    # 生成:python -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())"
+    credential_key: str = ""
+
     def compaction_threshold_for(self, model: str) -> int:
         """该模型的压缩阈值:优先 per-model 覆盖,否则回退全局默认。"""
         return self.compaction_token_thresholds.get(model, self.compaction_token_threshold)
