@@ -46,7 +46,7 @@ async def stack(engine, tmp_path):
     maker = async_sessionmaker(engine, expire_on_commit=False)
     providers = {}
 
-    def factory(model, provider, key_ref):
+    def factory(model, provider, api_key, base_url):
         # provider name carries which script to use (test wires it via agent.provider)
         return providers[provider]
 

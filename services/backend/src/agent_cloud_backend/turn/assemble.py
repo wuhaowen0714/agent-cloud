@@ -6,6 +6,7 @@ from agent_cloud.v1 import worker_pb2
 from agent_cloud_common.codec import msg_to_proto
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agent_cloud_backend.config import get_settings
 from agent_cloud_backend.models.session import Session
 from agent_cloud_backend.models.skill import Skill
 from agent_cloud_backend.repositories.agent_config import AgentConfigRepository
@@ -13,6 +14,7 @@ from agent_cloud_backend.repositories.context_document import ContextDocumentRep
 from agent_cloud_backend.repositories.memory_entry import MemoryEntryRepository
 from agent_cloud_backend.repositories.message import MessageRepository
 from agent_cloud_backend.skills.materialize import skill_location
+from agent_cloud_backend.turn.credentials import resolve_agent_key
 from agent_cloud_backend.turn.messages import orm_to_common, strip_unanswered_user_messages
 
 
@@ -43,6 +45,11 @@ async def build_run_turn_request(
     ]
     history = strip_unanswered_user_messages(history)
 
+    # BYO-Key:按 agent.key_ref 取本人凭据解密;无/不属本人 → ("",""),worker 回退全局。
+    api_key, base_url = await resolve_agent_key(
+        db, agent.key_ref or "", session.user_id, get_settings()
+    )
+
     return worker_pb2.RunTurnRequest(
         session_id=str(session.id),
         user_id=str(session.user_id),
@@ -52,6 +59,8 @@ async def build_run_turn_request(
             thinking_level=agent.thinking_level or "",
             enabled_tools=list(agent.enabled_tools),
             key_ref=agent.key_ref or "",
+            api_key=api_key,
+            base_url=base_url,
         ),
         documents=[
             worker_pb2.Doc(scope=d.scope, type=d.type, content=d.content)

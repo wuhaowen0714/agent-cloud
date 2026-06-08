@@ -11,6 +11,7 @@ from agent_cloud_backend.db import get_sessionmaker
 from agent_cloud_backend.repositories.agent_config import AgentConfigRepository
 from agent_cloud_backend.repositories.message import MessageRepository
 from agent_cloud_backend.repositories.session import SessionRepository
+from agent_cloud_backend.turn.credentials import resolve_agent_key
 from agent_cloud_backend.turn.messages import orm_to_common, strip_unanswered_user_messages
 from agent_cloud_backend.turn.worker_client import summarize_via_worker
 
@@ -25,7 +26,9 @@ def _fold_boundary(history_after: list, keep_recent: int):
     return fold, fold[-1].seq
 
 
-async def compact(session_id: uuid.UUID, *, worker_endpoint: str, keep_recent: int) -> bool:
+async def compact(
+    session_id: uuid.UUID, *, worker_endpoint: str, keep_recent: int, settings: Settings
+) -> bool:
     """把 summary_through_seq 之后、最近 keep_recent 条之前的历史折叠进 session.summary(增量)。"""
     async with get_sessionmaker()() as db:
         session = await SessionRepository(db).get(session_id)
@@ -48,9 +51,17 @@ async def compact(session_id: uuid.UUID, *, worker_endpoint: str, keep_recent: i
             session.summary_through_seq = boundary_seq
             await db.commit()
             return True
+        # BYO-Key:摘要也用本人凭据(无/不属本人 → 回退全局)。
+        api_key, base_url = await resolve_agent_key(
+            db, agent.key_ref or "", session.user_id, settings
+        )
         req = worker_pb2.SummarizeRequest(
             agent=worker_pb2.Agent(
-                model=agent.model, provider=agent.provider, key_ref=agent.key_ref or ""
+                model=agent.model,
+                provider=agent.provider,
+                key_ref=agent.key_ref or "",
+                api_key=api_key,
+                base_url=base_url,
             ),
             prior_summary=session.summary,
             messages=[msg_to_proto(orm_to_common(m)) for m in fold_msgs],
@@ -74,6 +85,7 @@ async def maybe_compact_after_turn(
             session_id,
             worker_endpoint=settings.worker_endpoint,
             keep_recent=settings.compaction_keep_recent,
+            settings=settings,
         )
     except Exception:
         logger.exception("post-turn compaction failed for session %s", session_id)
@@ -85,7 +97,9 @@ async def force_compact(session_id: uuid.UUID, *, settings: Settings) -> bool:
     返回是否取得进展(True=折叠了内容/推进了边界)。无进展(已无可折叠 —— 仅剩最近一条
     + 摘要仍超窗)时返回 False,调用方据此把错误改判为**不可恢复**,避免用户陷入永久重试。"""
     try:
-        return await compact(session_id, worker_endpoint=settings.worker_endpoint, keep_recent=1)
+        return await compact(
+            session_id, worker_endpoint=settings.worker_endpoint, keep_recent=1, settings=settings
+        )
     except Exception:
         logger.exception("force compaction failed for session %s", session_id)
         return False
