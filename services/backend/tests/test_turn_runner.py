@@ -340,8 +340,53 @@ async def test_runner_resource_exhausted_force_compacts_and_recoverable(engine, 
     )
 
     assert active.events[-1]["type"] == "error"
-    assert active.events[-1]["recoverable"] is True  # RESOURCE_EXHAUSTED 归为可恢复
+    assert active.events[-1]["recoverable"] is True  # RESOURCE_EXHAUSTED + 有进展 → 可恢复
     assert called["n"] == 1  # force_compact 跑了
     summary, _ = await _summary(engine, sid)
     assert summary == "FORCED"
+    assert await _status(engine, sid) == "idle"  # 锁仍被释放
+
+
+async def test_runner_resource_exhausted_no_progress_is_non_recoverable(engine, monkeypatch):
+    # 仅剩最近一条仍超窗(无可折叠)→ force_compact 无进展 → 末事件不可恢复,别让用户白重试。
+    from agent_cloud_backend.config import Settings
+    from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub
+    from agent_cloud_backend.turn.runner import run_turn
+
+    _patch_global_sessionmaker(monkeypatch, engine)
+    sid = await _make_session_row(engine)
+    await _acquire(engine, sid)
+    await _seed_messages(engine, sid, 1)  # 只有 1 条 → keep_recent=1 无法折叠
+
+    async def _gen(endpoint, request):
+        raise grpc.aio.AioRpcError(
+            grpc.StatusCode.RESOURCE_EXHAUSTED,
+            initial_metadata=grpc.aio.Metadata(),
+            trailing_metadata=grpc.aio.Metadata(),
+        )
+        yield  # pragma: no cover — 使其成为 async generator
+
+    _fake_worker(monkeypatch, _gen)
+
+    called = {"n": 0}
+
+    async def _fake_summarize(endpoint, req):
+        called["n"] += 1
+        return "X"
+
+    monkeypatch.setattr(
+        "agent_cloud_backend.turn.compaction.summarize_via_worker", _fake_summarize
+    )
+
+    hub = TurnHub()
+    active = ActiveTurn(session_id=sid)
+    hub.register(active)
+    await run_turn(
+        hub, active, worker_endpoint="x", request=object(), session_id=sid,
+        heartbeat_interval=999, settings=Settings(),
+    )
+
+    assert active.events[-1]["type"] == "error"
+    assert active.events[-1]["recoverable"] is False  # 无进展 → 不可恢复
+    assert called["n"] == 0  # 没东西可折叠,未调 summarize
     assert await _status(engine, sid) == "idle"  # 锁仍被释放

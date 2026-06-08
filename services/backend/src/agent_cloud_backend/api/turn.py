@@ -102,10 +102,17 @@ async def run_turn_endpoint(
                 response = await run_turn_via_worker(settings.worker_endpoint, request)
         except grpc.aio.AioRpcError as exc:
             if exc.code() == grpc.StatusCode.RESOURCE_EXHAUSTED:
-                # 上下文超窗:兜底 force-compact 后,返回可重试信号(503),让前端重发即可。
-                await force_compact(session_id, settings=settings)
+                # 上下文超窗:兜底 force-compact(自起一段心跳续租,折叠量大可能慢)。
+                # 有进展 → 503 可重试;无进展(仅剩最近一条 + 摘要仍超窗)→ 413,别让用户白重试。
+                async with session_heartbeat(session_id, settings.session_heartbeat_seconds):
+                    progressed = await force_compact(session_id, settings=settings)
+                if progressed:
+                    raise HTTPException(
+                        status_code=503, detail="context exceeded, compacted — please retry"
+                    ) from exc
                 raise HTTPException(
-                    status_code=503, detail="context exceeded, compacted — please retry"
+                    status_code=413,
+                    detail="context too large to compact; please start a new session",
                 ) from exc
             raise HTTPException(
                 status_code=502, detail=f"worker unavailable: {exc.code().name}"
@@ -127,8 +134,10 @@ async def run_turn_endpoint(
             persisted.append(row)
         await db.commit()
 
-        # 回合后主动压缩(用真实 context_tokens 判阈值)。best-effort,仍在会话锁内。
-        await maybe_compact_after_turn(session_id, response.context_tokens, settings=settings)
+        # 回合后主动压缩(用真实 context_tokens 判阈值)。仍在会话锁内;自起一段心跳续租,
+        # 因大历史 Summarize 可能较慢。best-effort(内部吞异常)。
+        async with session_heartbeat(session_id, settings.session_heartbeat_seconds):
+            await maybe_compact_after_turn(session_id, response.context_tokens, settings=settings)
 
         return TurnResponse(
             messages=persisted,

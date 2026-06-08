@@ -32,6 +32,25 @@ async def _session_summary(engine, sid):
         return (await db.execute(stmt)).scalar_one()
 
 
+async def _seed_messages(engine, sid, n):
+    from agent_cloud_backend.models.message import Message as M
+    from agent_cloud_backend.repositories.message import MessageRepository
+
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        for i in range(n):
+            await MessageRepository(db).append(
+                uuid.UUID(sid),
+                M(
+                    session_id=uuid.UUID(sid),
+                    seq=0,
+                    role="user" if i % 2 == 0 else "assistant",
+                    content={"text": f"m{i}", "tool_calls": [], "tool_results": []},
+                ),
+            )
+        await db.commit()
+
+
 @pytest.fixture
 def fake_worker(monkeypatch):
     """让端点不真正连 worker:返回脚本化的 RunTurnResponse。"""
@@ -232,8 +251,10 @@ def _install_fake_worker(monkeypatch):
 # --- Plan 12b: compaction (non-streaming endpoint) ---
 
 
-async def test_turn_resource_exhausted_returns_503_and_releases_lock(client, engine, monkeypatch):
-    # worker 报 RESOURCE_EXHAUSTED(上下文超窗)→ 兜底 force-compact + 返回可重试的 503;锁释放。
+async def test_turn_resource_exhausted_progresses_returns_503_and_releases_lock(
+    client, engine, monkeypatch
+):
+    # worker 报 RESOURCE_EXHAUSTED + 有历史可折叠 → force-compact 有进展 → 可重试 503;锁释放。
     _patch_global_sessionmaker(monkeypatch, engine)
     from agent_cloud_backend.api import turn as turn_module
 
@@ -255,8 +276,45 @@ async def test_turn_resource_exhausted_returns_503_and_releases_lock(client, eng
     )
 
     sid = await _make_session(client)
+    await _seed_messages(engine, sid, 3)  # + 端点本回合的 user 消息 = 4 条;keep_recent=1 可折叠
     r = await client.post(f"/sessions/{sid}/turn", json={"content": "go"})
     assert r.status_code == 503, r.text
+
+    # 锁已释放:后续正常回合成功
+    _install_fake_worker(monkeypatch)
+    r2 = await client.post(f"/sessions/{sid}/turn", json={"content": "again"})
+    assert r2.status_code == 200, r2.text
+
+
+async def test_turn_resource_exhausted_no_progress_returns_413(client, engine, monkeypatch):
+    # RESOURCE_EXHAUSTED 但无历史可折叠(仅当前 user 消息)→ force-compact 无进展 → 413 不可重试。
+    _patch_global_sessionmaker(monkeypatch, engine)
+    from agent_cloud_backend.api import turn as turn_module
+
+    async def _exhausted(worker_endpoint, request):
+        raise grpc.aio.AioRpcError(
+            code=grpc.StatusCode.RESOURCE_EXHAUSTED,
+            initial_metadata=grpc.aio.Metadata(),
+            trailing_metadata=grpc.aio.Metadata(),
+            details="context window exceeded",
+        )
+
+    monkeypatch.setattr(turn_module, "run_turn_via_worker", _exhausted)
+
+    called = {"n": 0}
+
+    async def _fake_summarize(endpoint, req):
+        called["n"] += 1
+        return "S"
+
+    monkeypatch.setattr(
+        "agent_cloud_backend.turn.compaction.summarize_via_worker", _fake_summarize
+    )
+
+    sid = await _make_session(client)  # 不预置历史:只有本回合 user 消息
+    r = await client.post(f"/sessions/{sid}/turn", json={"content": "go"})
+    assert r.status_code == 413, r.text
+    assert called["n"] == 0  # 无可折叠,未调 summarize
 
     # 锁已释放:后续正常回合成功
     _install_fake_worker(monkeypatch)

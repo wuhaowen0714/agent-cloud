@@ -200,21 +200,21 @@ def _ns(role: str):
 
 
 def test_strip_unanswered_user_messages_drops_cancelled_turns():
-    from agent_cloud_backend.turn.assemble import _strip_unanswered_user_messages
+    from agent_cloud_backend.turn.messages import strip_unanswered_user_messages
 
     h = [
         _ns("user"), _ns("assistant"), _ns("tool"), _ns("assistant"),  # 完整轮 → 保留
         _ns("user"),  # 取消轮(后跟 user)→ 丢
         _ns("user"), _ns("assistant"),  # 完整轮 → 保留
     ]
-    assert [m.role for m in _strip_unanswered_user_messages(h)] == [
+    assert [m.role for m in strip_unanswered_user_messages(h)] == [
         "user", "assistant", "tool", "assistant", "user", "assistant",
     ]
 
 
 def test_strip_drops_trailing_unanswered_user_and_handles_empty():
-    from agent_cloud_backend.turn.assemble import _strip_unanswered_user_messages
+    from agent_cloud_backend.turn.messages import strip_unanswered_user_messages
 
     h = [_ns("user"), _ns("assistant"), _ns("user")]  # 末尾 user 无回复 → 丢
-    assert [m.role for m in _strip_unanswered_user_messages(h)] == ["user", "assistant"]
-    assert _strip_unanswered_user_messages([]) == []
+    assert [m.role for m in strip_unanswered_user_messages(h)] == ["user", "assistant"]
+    assert strip_unanswered_user_messages([]) == []

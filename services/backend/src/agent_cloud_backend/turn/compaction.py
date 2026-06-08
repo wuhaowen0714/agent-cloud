@@ -11,7 +11,7 @@ from agent_cloud_backend.db import get_sessionmaker
 from agent_cloud_backend.repositories.agent_config import AgentConfigRepository
 from agent_cloud_backend.repositories.message import MessageRepository
 from agent_cloud_backend.repositories.session import SessionRepository
-from agent_cloud_backend.turn.messages import orm_to_common
+from agent_cloud_backend.turn.messages import orm_to_common, strip_unanswered_user_messages
 from agent_cloud_backend.turn.worker_client import summarize_via_worker
 
 logger = logging.getLogger(__name__)
@@ -32,12 +32,22 @@ async def compact(session_id: uuid.UUID, *, worker_endpoint: str, keep_recent: i
         if session is None:
             return False
         agent = await AgentConfigRepository(db).get(session.agent_config_id)
+        if agent is None:  # FK 是 RESTRICT,正常不可能;防御性,与 session 检查对齐
+            return False
         history = await MessageRepository(db).list_by_session(session_id)
         history_after = [m for m in history if m.seq > session.summary_through_seq]
         folded = _fold_boundary(history_after, keep_recent)
         if folded is None:
             return False
         fold_msgs, boundary_seq = folded
+        # boundary 用未清洗的 fold[-1].seq(已折叠位置都要推进,清洗掉的也不再回看);
+        # 但发给 Summarizer 的内容与 assemble 发给模型的一致(去掉被取消回合的未答 user 消息)。
+        fold_msgs = strip_unanswered_user_messages(fold_msgs)
+        if not fold_msgs:
+            # 折叠窗口里全是被取消回合的未答 user 消息:无内容可摘要,直接推进边界跳过它们。
+            session.summary_through_seq = boundary_seq
+            await db.commit()
+            return True
         req = worker_pb2.SummarizeRequest(
             agent=worker_pb2.Agent(
                 model=agent.model, provider=agent.provider, key_ref=agent.key_ref or ""
@@ -69,9 +79,13 @@ async def maybe_compact_after_turn(
         logger.exception("post-turn compaction failed for session %s", session_id)
 
 
-async def force_compact(session_id: uuid.UUID, *, settings: Settings) -> None:
-    """撞 400 兜底:更激进(只留最近 2 条)。best-effort。"""
+async def force_compact(session_id: uuid.UUID, *, settings: Settings) -> bool:
+    """撞 400 兜底:最大化折叠(只留最近 1 条)。best-effort。
+
+    返回是否取得进展(True=折叠了内容/推进了边界)。无进展(已无可折叠 —— 仅剩最近一条
+    + 摘要仍超窗)时返回 False,调用方据此把错误改判为**不可恢复**,避免用户陷入永久重试。"""
     try:
-        await compact(session_id, worker_endpoint=settings.worker_endpoint, keep_recent=2)
+        return await compact(session_id, worker_endpoint=settings.worker_endpoint, keep_recent=1)
     except Exception:
         logger.exception("force compaction failed for session %s", session_id)
+        return False

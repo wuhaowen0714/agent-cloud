@@ -6,6 +6,22 @@ from agent_cloud_common import Role, ToolCall, ToolResult
 from agent_cloud_backend.models.message import Message as OrmMessage
 
 
+def strip_unanswered_user_messages(history: list) -> list:
+    """丢弃没有助手回复的 user 消息——被取消/出错的回合只在库里留下了 user 消息
+    (助手消息仅在 TurnDone 成功时才落库)。否则模型会把上一轮没答完的问题也一并
+    回答,或这些消息被折叠进摘要造成污染。判定:某 user 消息之后紧跟的不是助手/工具
+    消息(是另一个 user,或已到末尾)。assemble(发给模型)与 compaction(折叠进摘要)
+    共用此清洗,保证两条路径看到的历史一致。"""
+    kept = []
+    for i, m in enumerate(history):
+        if m.role == "user":
+            nxt = history[i + 1] if i + 1 < len(history) else None
+            if nxt is None or nxt.role == "user":
+                continue
+        kept.append(m)
+    return kept
+
+
 def orm_to_common(message: OrmMessage) -> CommonMessage:
     content = message.content or {}
     return CommonMessage(

@@ -102,18 +102,32 @@ async def run_turn(
                     )
                 else:
                     await active.emit(turn_event_to_sse(event))
-        # 回合成功收尾后主动压缩(用模型返回的真实 context_tokens 判阈值)。
-        # best-effort(内部吞异常),且仍在会话锁内(_finalize 释放锁在 finally,晚于此)。
-        await maybe_compact_after_turn(session_id, ctx_tokens, settings=settings)
+            # 回合成功收尾后主动压缩(用模型返回的真实 context_tokens 判阈值)。仍在心跳
+            # 上下文内 —— 大历史 Summarize 可能较慢,期间继续续租,避免锁被判过期抢走。
+            # best-effort(内部吞异常),且仍在会话锁内(_finalize 释放锁在 finally,晚于此)。
+            await maybe_compact_after_turn(session_id, ctx_tokens, settings=settings)
     except asyncio.CancelledError:
         # 主动取消 → 转成干净的终止事件,让 finally 收尾(不再 re-raise)
         await active.emit({"type": "error", "message": "turn cancelled", "recoverable": False})
     except grpc.aio.AioRpcError as exc:
-        # 上下文超窗(worker → RESOURCE_EXHAUSTED):兜底 force-compact 后,作为可恢复错误
-        # 提示重试(error_sse 已把 RESOURCE_EXHAUSTED 归为 recoverable)。仍在锁内。
         if exc.code() == grpc.StatusCode.RESOURCE_EXHAUSTED:
-            await force_compact(session_id, settings=settings)
-        await active.emit(error_sse(exc.code()))
+            # 上下文超窗:兜底 force-compact(自起一段心跳续租,因 force_compact 折叠量大、
+            # Summarize 可能慢)。有进展 → 可恢复(重试通常装得下);无进展(仅剩最近一条
+            # + 摘要仍超窗)→ 不可恢复,别让用户白重试。
+            async with session_heartbeat(session_id, heartbeat_interval):
+                progressed = await force_compact(session_id, settings=settings)
+            if progressed:
+                await active.emit(error_sse(exc.code()))
+            else:
+                await active.emit(
+                    {
+                        "type": "error",
+                        "message": "context too large to compact; please start a new session",
+                        "recoverable": False,
+                    }
+                )
+        else:
+            await active.emit(error_sse(exc.code()))
     except Exception:
         logger.exception("turn run failed for session %s", session_id)
         await active.emit({"type": "error", "message": "the turn failed", "recoverable": False})
