@@ -134,10 +134,12 @@ async def run_turn_endpoint(
             persisted.append(row)
         await db.commit()
 
-        # 回合后主动压缩(用真实 context_tokens 判阈值)。仍在会话锁内;自起一段心跳续租,
-        # 因大历史 Summarize 可能较慢。best-effort(内部吞异常)。
+        # 回合后主动压缩(用真实 context_tokens 判阈值,阈值按模型解析)。仍在会话锁内;
+        # 自起一段心跳续租,因大历史 Summarize 可能较慢。best-effort(内部吞异常)。
         async with session_heartbeat(session_id, settings.session_heartbeat_seconds):
-            await maybe_compact_after_turn(session_id, response.context_tokens, settings=settings)
+            await maybe_compact_after_turn(
+                session_id, response.context_tokens, model=request.agent.model, settings=settings
+            )
 
         return TurnResponse(
             messages=persisted,

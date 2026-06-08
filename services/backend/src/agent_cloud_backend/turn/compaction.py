@@ -63,11 +63,11 @@ async def compact(session_id: uuid.UUID, *, worker_endpoint: str, keep_recent: i
 
 
 async def maybe_compact_after_turn(
-    session_id: uuid.UUID, context_tokens: int, *, settings: Settings
+    session_id: uuid.UUID, context_tokens: int, *, model: str, settings: Settings
 ) -> None:
-    """回合后主动压缩:用模型返回的真实 context_tokens 判阈值。
-    best-effort——绝不因压缩失败坏掉已成功的回合。"""
-    if context_tokens <= settings.compaction_token_threshold:
+    """回合后主动压缩:用模型返回的真实 context_tokens 判阈值(阈值按模型解析,可 per-model
+    覆盖)。best-effort——绝不因压缩失败坏掉已成功的回合。"""
+    if context_tokens <= settings.compaction_threshold_for(model):
         return
     try:
         await compact(

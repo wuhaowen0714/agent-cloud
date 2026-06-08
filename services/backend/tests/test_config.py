@@ -23,3 +23,29 @@ def test_sandbox_provisioner_env_override(monkeypatch):
     s = Settings()
     assert s.sandbox_provisioner == "docker"
     assert s.effective_sandbox_host_root == "/srv/ac/sandboxes"
+
+
+def test_compaction_threshold_default_is_128k():
+    s = Settings(_env_file=None)
+    assert s.compaction_token_threshold == 128000
+    assert s.compaction_token_thresholds == {}
+
+
+def test_compaction_threshold_for_falls_back_to_default():
+    s = Settings(_env_file=None)
+    # 未配 per-model override → 回退全局默认
+    assert s.compaction_threshold_for("DeepSeek-V4-Pro") == 128000
+    assert s.compaction_threshold_for("") == 128000
+
+
+def test_compaction_threshold_for_uses_per_model_override():
+    s = Settings(_env_file=None, compaction_token_thresholds={"DeepSeek-V4-Pro": 200000})
+    assert s.compaction_threshold_for("DeepSeek-V4-Pro") == 200000  # 命中 override
+    assert s.compaction_threshold_for("other-model") == 128000  # 未列出 → 默认
+
+
+def test_compaction_thresholds_parsed_from_env_json(monkeypatch):
+    # 预留接口:可经环境变量(JSON)按模型配阈值,无需改代码
+    monkeypatch.setenv("AGENT_CLOUD_COMPACTION_TOKEN_THRESHOLDS", '{"m-small": 8000}')
+    s = Settings()
+    assert s.compaction_threshold_for("m-small") == 8000

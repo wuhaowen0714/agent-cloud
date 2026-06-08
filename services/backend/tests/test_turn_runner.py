@@ -1,11 +1,15 @@
 import asyncio
 import uuid
+from types import SimpleNamespace
 
 import grpc
 from agent_cloud_common import Message, Role, TextDelta, TurnDone, Usage
 from agent_cloud_common.codec import turn_event_to_proto
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
+
+# run_turn 只读 request.agent.model;faked worker stream 忽略 request 其余部分。
+_REQ = SimpleNamespace(agent=SimpleNamespace(model="m"))
 
 
 def _patch_global_sessionmaker(monkeypatch, engine):
@@ -136,7 +140,7 @@ async def test_runner_persists_and_releases_without_any_subscriber(engine, monke
     active = ActiveTurn(session_id=sid)
     hub.register(active)
     await run_turn(
-        hub, active, worker_endpoint="x", request=object(), session_id=sid,
+        hub, active, worker_endpoint="x", request=_REQ, session_id=sid,
         heartbeat_interval=999, settings=Settings(),
     )
 
@@ -172,7 +176,7 @@ async def test_runner_cancel_emits_cancelled_and_releases(engine, monkeypatch):
             hub,
             active,
             worker_endpoint="x",
-            request=object(),
+            request=_REQ,
             session_id=sid,
             heartbeat_interval=999,
             settings=Settings(),
@@ -242,7 +246,7 @@ async def test_runner_post_turn_compaction_when_over_threshold(engine, monkeypat
     active = ActiveTurn(session_id=sid)
     hub.register(active)
     await run_turn(
-        hub, active, worker_endpoint="x", request=object(), session_id=sid,
+        hub, active, worker_endpoint="x", request=_REQ, session_id=sid,
         heartbeat_interval=999, settings=settings,
     )
 
@@ -290,11 +294,64 @@ async def test_runner_no_compaction_when_under_threshold(engine, monkeypatch):
     active = ActiveTurn(session_id=sid)
     hub.register(active)
     await run_turn(
-        hub, active, worker_endpoint="x", request=object(), session_id=sid,
+        hub, active, worker_endpoint="x", request=_REQ, session_id=sid,
         heartbeat_interval=999, settings=settings,
     )
 
     assert called["n"] == 0  # 5 <= 10,未压缩
+    summary, through = await _summary(engine, sid)
+    assert summary == "" and through == -1
+
+
+async def test_runner_per_model_threshold_override_suppresses_compaction(engine, monkeypatch):
+    # per-model 覆盖:request 的 model("m")阈值被覆盖成很高 → 即便 ctx 超过全局默认也不压缩。
+    # 这验证 model 确实从 request.agent.model 一路传到阈值解析。
+    from agent_cloud_backend.config import Settings
+    from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub
+    from agent_cloud_backend.turn.runner import run_turn
+
+    _patch_global_sessionmaker(monkeypatch, engine)
+    sid = await _make_session_row(engine)
+    await _acquire(engine, sid)
+    await _seed_messages(engine, sid, 3)
+
+    async def _gen(endpoint, request):
+        yield turn_event_to_proto(
+            TurnDone(
+                new_messages=[Message(role=Role.ASSISTANT, text="done")],
+                usage=Usage(input_tokens=1, output_tokens=2),
+                stop_reason="end_turn",
+                context_tokens=500,  # > 全局默认 100,但 < "m" 的 override 10000
+            )
+        )
+
+    _fake_worker(monkeypatch, _gen)
+
+    called = {"n": 0}
+
+    async def _fake_summarize(endpoint, req):
+        called["n"] += 1
+        return "S"
+
+    monkeypatch.setattr(
+        "agent_cloud_backend.turn.compaction.summarize_via_worker", _fake_summarize
+    )
+
+    settings = Settings(
+        compaction_token_threshold=100,
+        compaction_token_thresholds={"m": 10000},
+        compaction_keep_recent=2,
+    )
+    hub = TurnHub()
+    active = ActiveTurn(session_id=sid)
+    hub.register(active)
+    await run_turn(
+        hub, active, worker_endpoint="x",
+        request=_REQ,
+        session_id=sid, heartbeat_interval=999, settings=settings,
+    )
+
+    assert called["n"] == 0  # "m" override=10000 > ctx 500 → 不压缩
     summary, through = await _summary(engine, sid)
     assert summary == "" and through == -1
 
@@ -335,7 +392,7 @@ async def test_runner_resource_exhausted_force_compacts_and_recoverable(engine, 
     active = ActiveTurn(session_id=sid)
     hub.register(active)
     await run_turn(
-        hub, active, worker_endpoint="x", request=object(), session_id=sid,
+        hub, active, worker_endpoint="x", request=_REQ, session_id=sid,
         heartbeat_interval=999, settings=Settings(),
     )
 
@@ -382,7 +439,7 @@ async def test_runner_resource_exhausted_no_progress_is_non_recoverable(engine, 
     active = ActiveTurn(session_id=sid)
     hub.register(active)
     await run_turn(
-        hub, active, worker_endpoint="x", request=object(), session_id=sid,
+        hub, active, worker_endpoint="x", request=_REQ, session_id=sid,
         heartbeat_interval=999, settings=Settings(),
     )
 

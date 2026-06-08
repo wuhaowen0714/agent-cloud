@@ -102,10 +102,12 @@ async def run_turn(
                     )
                 else:
                     await active.emit(turn_event_to_sse(event))
-            # 回合成功收尾后主动压缩(用模型返回的真实 context_tokens 判阈值)。仍在心跳
-            # 上下文内 —— 大历史 Summarize 可能较慢,期间继续续租,避免锁被判过期抢走。
+            # 回合成功收尾后主动压缩(用模型返回的真实 context_tokens 判阈值,阈值按模型解析)。
+            # 仍在心跳上下文内 —— 大历史 Summarize 可能较慢,期间继续续租,避免锁被判过期抢走。
             # best-effort(内部吞异常),且仍在会话锁内(_finalize 释放锁在 finally,晚于此)。
-            await maybe_compact_after_turn(session_id, ctx_tokens, settings=settings)
+            await maybe_compact_after_turn(
+                session_id, ctx_tokens, model=request.agent.model, settings=settings
+            )
     except asyncio.CancelledError:
         # 主动取消 → 转成干净的终止事件,让 finally 收尾(不再 re-raise)
         await active.emit({"type": "error", "message": "turn cancelled", "recoverable": False})
