@@ -64,6 +64,7 @@ async def build_run_turn_request(
         documents=[
             worker_pb2.Doc(scope=d.scope, type=d.type, content=d.content)
             for d in [*user_docs, *agent_docs]
+            if d.content.strip()  # 跳过空文档(如被清空的 AGENTS),不往 prompt 里塞空段
         ],
         memory=[worker_pb2.Mem(scope=e.scope, content=e.content) for e in [*user_mem, *agent_mem]],
         skills=[

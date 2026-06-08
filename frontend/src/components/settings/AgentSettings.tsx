@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { BUILTIN_TOOLS, checkedToEnabled, enabledToChecked } from "../../agentConfig"
 import { api } from "../../api/client"
 import { useStore } from "../../store"
@@ -50,23 +50,12 @@ export function AgentSettings() {
 
 function AgentEditor({ agentId, userId }: { agentId: string; userId: string }) {
   const qc = useQueryClient()
-  const { data: agents = [] } = useQuery({
-    queryKey: ["agents", userId],
-    queryFn: () => api.listAgents(userId),
-  })
-  const agent = agents.find((a) => a.id === agentId)
-  const { data: docs = [] } = useQuery({
-    queryKey: ["docs", "agent", agentId],
-    queryFn: () => api.listDocs("agent", agentId),
-  })
-  const { data: pool = [] } = useQuery({
-    queryKey: ["skills", userId],
-    queryFn: () => api.listSkills(userId),
-  })
-  const { data: enabled = [] } = useQuery({
-    queryKey: ["agentSkills", agentId],
-    queryFn: () => api.getAgentSkills(agentId),
-  })
+  const agentsQ = useQuery({ queryKey: ["agents", userId], queryFn: () => api.listAgents(userId) })
+  const agent = (agentsQ.data ?? []).find((a) => a.id === agentId)
+  const docsQ = useQuery({ queryKey: ["docs", "agent", agentId], queryFn: () => api.listDocs("agent", agentId) })
+  const docs = docsQ.data ?? []
+  const { data: pool = [] } = useQuery({ queryKey: ["skills", userId], queryFn: () => api.listSkills(userId) })
+  const enabledQ = useQuery({ queryKey: ["agentSkills", agentId], queryFn: () => api.getAgentSkills(agentId) })
 
   const [form, setForm] = useState({ name: "", model: "", provider: "", thinking_level: "" })
   const [tools, setTools] = useState<Set<string>>(new Set())
@@ -74,28 +63,29 @@ function AgentEditor({ agentId, userId }: { agentId: string; userId: string }) {
   const [skillIds, setSkillIds] = useState<Set<string>>(new Set())
   const [saved, setSaved] = useState(false)
 
+  // 仅在三组数据【首次加载完成】时灌一次本地草稿;之后的 refetch(如保存后失效)
+  // 不再覆盖用户正在编辑的内容(避免清空指令"复活"/保存窗口内输入被冲掉)。
+  const inited = useRef(false)
   useEffect(() => {
-    if (agent) {
-      setForm({
-        name: agent.name,
-        model: agent.model,
-        provider: agent.provider,
-        thinking_level: agent.thinking_level ?? "",
-      })
-      setTools(enabledToChecked(agent.enabled_tools))
-    }
-  }, [agent])
-  useEffect(() => {
+    if (inited.current || !agent || !docsQ.isSuccess || !enabledQ.isSuccess) return
+    setForm({
+      name: agent.name,
+      model: agent.model,
+      provider: agent.provider,
+      thinking_level: agent.thinking_level ?? "",
+    })
+    setTools(enabledToChecked(agent.enabled_tools))
     setInstructions(docs.find((d) => d.type === "AGENTS")?.content ?? "")
-  }, [docs])
-  useEffect(() => {
-    setSkillIds(new Set(enabled.map((s) => s.id)))
-  }, [enabled])
+    setSkillIds(new Set((enabledQ.data ?? []).map((s) => s.id)))
+    inited.current = true
+  }, [agent, docs, docsQ.isSuccess, enabledQ.isSuccess, enabledQ.data])
 
+  const hadAgentsDoc = docs.some((d) => d.type === "AGENTS")
   const save = useMutation({
     mutationFn: async () => {
       await api.patchAgent(agentId, { ...form, enabled_tools: checkedToEnabled(tools) })
-      if (instructions.trim()) await api.putDoc("agent", "AGENTS", agentId, instructions)
+      // 非空则写入;若原本有 AGENTS 文档则即使清空也写入(以持久化"清空"),否则不创建空文档。
+      if (instructions.trim() || hadAgentsDoc) await api.putDoc("agent", "AGENTS", agentId, instructions)
       await api.setAgentSkills(agentId, [...skillIds])
     },
     onSuccess: () => {
@@ -114,6 +104,7 @@ function AgentEditor({ agentId, userId }: { agentId: string; userId: string }) {
     return n
   }
   const field = "w-full rounded border border-slate-300 px-2 py-1 text-sm"
+  const invalid = !form.name || !form.model || !form.provider
 
   return (
     <div className="space-y-4 text-sm">
@@ -168,7 +159,8 @@ function AgentEditor({ agentId, userId }: { agentId: string; userId: string }) {
       <div className="flex items-center gap-2">
         <button
           className="rounded bg-brand-600 px-4 py-1.5 text-sm text-white hover:bg-brand-700 disabled:opacity-40"
-          disabled={save.isPending}
+          disabled={save.isPending || invalid}
+          title={invalid ? "名称/模型/provider 不能为空" : ""}
           onClick={() => save.mutate()}
         >
           {save.isPending ? "保存中…" : "保存"}
