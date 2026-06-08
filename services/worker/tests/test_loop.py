@@ -345,3 +345,28 @@ async def test_stream_thinking_delta_forwarded(tmp_path):
     assert kinds.index("ThinkingDelta") < kinds.index("TextDelta")
     assert kinds.index("TextDelta") < kinds.index("TurnDone")
     assert isinstance(events[-1], TurnDone) and events[-1].stop_reason == "end_turn"
+
+
+async def test_context_tokens_is_last_call_input_not_sum(tmp_path):
+    # 两次 LLM 调用:第一次带工具调用(input 100),第二次收尾(input 250)。
+    # context_tokens 应 = 250(最后一次,真实上下文大小),usage.input_tokens = 350(累加)。
+    provider = FakeProvider(
+        [
+            CompletionResult(
+                message=Message(
+                    role=Role.ASSISTANT,
+                    tool_calls=[ToolCall(id="c1", name="bash", arguments={"command": "echo hi"})],
+                ),
+                usage=Usage(input_tokens=100, output_tokens=10),
+            ),
+            CompletionResult(
+                message=Message(role=Role.ASSISTANT, text="done"),
+                usage=Usage(input_tokens=250, output_tokens=20),
+            ),
+        ]
+    )
+    result = await run_turn(
+        provider, _executor(tmp_path), system="", history=[], user_message="go"
+    )
+    assert result.usage.input_tokens == 350
+    assert result.context_tokens == 250

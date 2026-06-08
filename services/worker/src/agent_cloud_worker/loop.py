@@ -31,6 +31,7 @@ class TurnResult:
     new_messages: list[Message]  # 本回合新增的 assistant/tool 消息(不含用户消息)
     usage: Usage
     stop_reason: str  # "end_turn" | "max_iterations"
+    context_tokens: int = 0  # 最后一次 LLM 调用的 input_tokens(真实上下文大小,供压缩判阈值)
 
 
 async def run_turn(
@@ -62,6 +63,7 @@ async def run_turn(
     working: list[Message] = [*history, Message(role=Role.USER, text=user_message)]
     new_messages: list[Message] = []
     usage = Usage()
+    last_input = 0  # 最后一次调用的 input_tokens = 真实上下文大小(usage 是累加,不能用于压缩判阈)
 
     for _ in range(max_iterations):
         result = await provider.complete(
@@ -69,20 +71,27 @@ async def run_turn(
         )
         usage.input_tokens += result.usage.input_tokens
         usage.output_tokens += result.usage.output_tokens
+        last_input = result.usage.input_tokens
 
         assistant = result.message
         working.append(assistant)
         new_messages.append(assistant)
 
         if not assistant.tool_calls:
-            return TurnResult(new_messages=new_messages, usage=usage, stop_reason="end_turn")
+            return TurnResult(
+                new_messages=new_messages, usage=usage, stop_reason="end_turn",
+                context_tokens=last_input,
+            )
 
         tool_results = [await executor.execute(call) for call in assistant.tool_calls]
         tool_message = Message(role=Role.TOOL, tool_results=tool_results)
         working.append(tool_message)
         new_messages.append(tool_message)
 
-    return TurnResult(new_messages=new_messages, usage=usage, stop_reason="max_iterations")
+    return TurnResult(
+        new_messages=new_messages, usage=usage, stop_reason="max_iterations",
+        context_tokens=last_input,
+    )
 
 
 async def run_turn_stream(
@@ -105,6 +114,7 @@ async def run_turn_stream(
     working: list[Message] = [*history, Message(role=Role.USER, text=user_message)]
     new_messages: list[Message] = []
     usage = Usage()
+    last_input = 0  # 最后一次调用的 input_tokens = 真实上下文大小(供压缩判阈值)
 
     for _ in range(max_iterations):
         completed: ProviderCompleted | None = None
@@ -122,12 +132,16 @@ async def run_turn_stream(
 
         usage.input_tokens += completed.usage.input_tokens
         usage.output_tokens += completed.usage.output_tokens
+        last_input = completed.usage.input_tokens
         assistant = completed.message
         working.append(assistant)
         new_messages.append(assistant)
 
         if not assistant.tool_calls:
-            yield TurnDone(new_messages=new_messages, usage=usage, stop_reason="end_turn")
+            yield TurnDone(
+                new_messages=new_messages, usage=usage, stop_reason="end_turn",
+                context_tokens=last_input,
+            )
             return
 
         tool_results = []
@@ -142,4 +156,7 @@ async def run_turn_stream(
         working.append(tool_message)
         new_messages.append(tool_message)
 
-    yield TurnDone(new_messages=new_messages, usage=usage, stop_reason="max_iterations")
+    yield TurnDone(
+        new_messages=new_messages, usage=usage, stop_reason="max_iterations",
+        context_tokens=last_input,
+    )
