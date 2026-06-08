@@ -48,7 +48,13 @@ export function ChatView() {
     else if (e.type === "turn_done") setLive((t) => ({ ...t, status: "done" }))
     else if (e.type === "reset")
       // 透明自动重试:清掉本回合已显示内容,从头重来(状态保持 streaming)
-      setLive((t) => ({ ...t, blocks: [], status: "streaming", errorMessage: undefined }))
+      setLive((t) => ({
+        ...t,
+        blocks: [],
+        status: "streaming",
+        errorMessage: undefined,
+        recoverable: undefined,
+      }))
     else if (e.type === "error")
       setLive((t) => ({
         ...t,
