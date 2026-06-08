@@ -10,7 +10,7 @@ export function SkillsPanel() {
 
   const { data: pool = [] } = useQuery({
     queryKey: ["skills", userId],
-    queryFn: () => api.listSkills(userId),
+    queryFn: () => api.listSkills(),
   })
   const { data: registry = [] } = useQuery({ queryKey: ["registry"], queryFn: () => api.listRegistry() })
 
@@ -19,7 +19,7 @@ export function SkillsPanel() {
     qc.invalidateQueries({ queryKey: ["agentSkills"] })
   }
   const install = useMutation({
-    mutationFn: (name: string) => api.installSkill(userId, name),
+    mutationFn: (name: string) => api.installSkill(name),
     onSuccess: () => {
       setPick("")
       refresh()

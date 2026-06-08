@@ -53,6 +53,9 @@ describe("cancelTurn", () => {
     const f = vi.fn(async () => new Response(null, { status: 204 }))
     vi.stubGlobal("fetch", f)
     await cancelTurn("s1")
-    expect(f).toHaveBeenCalledWith("/api/sessions/s1/turn/cancel", { method: "POST" })
+    expect(f).toHaveBeenCalledWith(
+      "/api/sessions/s1/turn/cancel",
+      expect.objectContaining({ method: "POST" }),
+    )
   })
 })

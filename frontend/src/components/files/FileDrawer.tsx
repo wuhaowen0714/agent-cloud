@@ -19,7 +19,7 @@ export function FileDrawer() {
 
   const { data: entries = [] } = useQuery({
     queryKey: ["files", userId, path],
-    queryFn: () => api.listFiles(userId!, path),
+    queryFn: () => api.listFiles(path),
     enabled: open && !!userId,
   })
 
@@ -34,7 +34,7 @@ export function FileDrawer() {
           e.preventDefault()
           const files = Array.from(e.dataTransfer.files)
           if (files.length) {
-            await api.uploadFiles(userId, path, files)
+            await api.uploadFiles(path, files)
             refresh()
           }
         }}
@@ -46,10 +46,9 @@ export function FileDrawer() {
           </button>
         </header>
         <FileBreadcrumb path={path} onNavigate={setPath} />
-        <FileToolbar userId={userId} path={path} onChanged={refresh} />
+        <FileToolbar path={path} onChanged={refresh} />
         <FileList
           entries={entries}
-          userId={userId}
           onOpenDir={(e) => setPath(e.path)}
           onPreview={setPreview}
           onChanged={refresh}
@@ -58,7 +57,7 @@ export function FileDrawer() {
           拖拽文件到此处上传
         </div>
       </aside>
-      {preview && <FilePreview userId={userId} entry={preview} onClose={() => setPreview(null)} />}
+      {preview && <FilePreview entry={preview} onClose={() => setPreview(null)} />}
     </>
   )
 }

@@ -1,42 +1,21 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 import { api } from "../api/client"
 import { useStore } from "../store"
 
 export function SessionList() {
   const userId = useStore((s) => s.userId)
-  const agentId = useStore((s) => s.agentId)
   const sessionId = useStore((s) => s.sessionId)
   const setSession = useStore((s) => s.setSession)
-  const qc = useQueryClient()
 
   const { data: sessions = [] } = useQuery({
     queryKey: ["sessions", userId],
-    queryFn: () => api.listSessions(userId!),
+    queryFn: () => api.listSessions(),
     enabled: !!userId,
   })
 
-  const create = useMutation({
-    mutationFn: () => api.createSession({ user_id: userId!, agent_config_id: agentId! }),
-    onSuccess: (s) => {
-      qc.invalidateQueries({ queryKey: ["sessions", userId] })
-      setSession(s.id)
-    },
-  })
-
-  if (!userId) return null
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="mb-1.5 flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wide text-slate-400">会话</span>
-        <button
-          className="rounded px-1.5 py-0.5 text-xs text-brand-700 enabled:hover:bg-brand-50 disabled:opacity-40"
-          disabled={!agentId}
-          title={agentId ? "" : "先选/建一个 agent"}
-          onClick={() => create.mutate()}
-        >
-          ＋ 新会话
-        </button>
-      </div>
+      <div className="mb-1.5 px-1 text-xs font-medium uppercase tracking-wide text-slate-400">对话</div>
       <ul className="min-h-0 flex-1 space-y-0.5 overflow-auto">
         {sessions.map((s) => (
           <li key={s.id}>
@@ -53,7 +32,7 @@ export function SessionList() {
           </li>
         ))}
         {sessions.length === 0 && (
-          <li className="px-2 py-1 text-xs text-slate-400">还没有会话</li>
+          <li className="px-2 py-6 text-center text-xs text-slate-400">还没有对话</li>
         )}
       </ul>
     </div>

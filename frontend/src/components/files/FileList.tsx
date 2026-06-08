@@ -3,18 +3,29 @@ import { api } from "../../api/client"
 import { formatSize } from "../../files"
 import type { FileEntry } from "../../types"
 
+// 下载:fetch(带 Bearer)→ blob URL → 触发 <a download> → 释放。<a href> 直链带不了 token。
+async function downloadFile(e: FileEntry) {
+  const url = await api.downloadUrl(e.path)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = e.name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 export function FileList({
-  entries, userId, onOpenDir, onPreview, onChanged,
+  entries, onOpenDir, onPreview, onChanged,
 }: {
   entries: FileEntry[]
-  userId: string
   onOpenDir: (e: FileEntry) => void
   onPreview: (e: FileEntry) => void
   onChanged: () => void
 }) {
-  const del = useMutation({ mutationFn: (e: FileEntry) => api.deleteFile(userId, e.path), onSuccess: onChanged })
+  const del = useMutation({ mutationFn: (e: FileEntry) => api.deleteFile(e.path), onSuccess: onChanged })
   const rename = useMutation({
-    mutationFn: ({ e, dst }: { e: FileEntry; dst: string }) => api.moveFile(userId, e.path, dst),
+    mutationFn: ({ e, dst }: { e: FileEntry; dst: string }) => api.moveFile(e.path, dst),
     onSuccess: onChanged,
   })
 
@@ -36,9 +47,9 @@ export function FileList({
           {!e.is_dir && <span className="shrink-0 text-xs text-slate-400">{formatSize(e.size)}</span>}
           <span className="flex shrink-0 gap-1.5 text-xs opacity-0 group-hover:opacity-100">
             {!e.is_dir && (
-              <a className="text-slate-400 hover:text-brand-600" href={api.fileRawUrl(userId, e.path, true)}>
+              <button className="text-slate-400 hover:text-brand-600" onClick={() => downloadFile(e)}>
                 下载
-              </a>
+              </button>
             )}
             <button
               className="text-slate-400 hover:text-brand-600"

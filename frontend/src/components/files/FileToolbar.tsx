@@ -2,14 +2,14 @@ import { useMutation } from "@tanstack/react-query"
 import { useRef } from "react"
 import { api } from "../../api/client"
 
-export function FileToolbar({ userId, path, onChanged }: { userId: string; path: string; onChanged: () => void }) {
+export function FileToolbar({ path, onChanged }: { path: string; onChanged: () => void }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const upload = useMutation({
-    mutationFn: (files: File[]) => api.uploadFiles(userId, path, files),
+    mutationFn: (files: File[]) => api.uploadFiles(path, files),
     onSuccess: onChanged,
   })
   const mkdir = useMutation({
-    mutationFn: (name: string) => api.mkdir(userId, path ? `${path}/${name}` : name),
+    mutationFn: (name: string) => api.mkdir(path ? `${path}/${name}` : name),
     onSuccess: onChanged,
   })
   return (

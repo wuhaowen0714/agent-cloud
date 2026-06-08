@@ -13,7 +13,7 @@ export function AgentSettings() {
   // 新建模式:没有选中 agent
   const [draft, setDraft] = useState({ name: "", model: "", provider: "openai" })
   const createAgent = useMutation({
-    mutationFn: () => api.createAgent({ user_id: userId, ...draft }),
+    mutationFn: () => api.createAgent({ ...draft }),
     onSuccess: (a) => {
       qc.invalidateQueries({ queryKey: ["agents", userId] })
       setAgent(a.id)
@@ -50,11 +50,11 @@ export function AgentSettings() {
 
 function AgentEditor({ agentId, userId }: { agentId: string; userId: string }) {
   const qc = useQueryClient()
-  const agentsQ = useQuery({ queryKey: ["agents", userId], queryFn: () => api.listAgents(userId) })
+  const agentsQ = useQuery({ queryKey: ["agents", userId], queryFn: () => api.listAgents() })
   const agent = (agentsQ.data ?? []).find((a) => a.id === agentId)
   const docsQ = useQuery({ queryKey: ["docs", "agent", agentId], queryFn: () => api.listDocs("agent", agentId) })
   const docs = docsQ.data ?? []
-  const { data: pool = [] } = useQuery({ queryKey: ["skills", userId], queryFn: () => api.listSkills(userId) })
+  const { data: pool = [] } = useQuery({ queryKey: ["skills", userId], queryFn: () => api.listSkills() })
   const enabledQ = useQuery({ queryKey: ["agentSkills", agentId], queryFn: () => api.getAgentSkills(agentId) })
 
   const [form, setForm] = useState({ name: "", model: "", provider: "", thinking_level: "" })
@@ -85,7 +85,7 @@ function AgentEditor({ agentId, userId }: { agentId: string; userId: string }) {
     mutationFn: async () => {
       await api.patchAgent(agentId, { ...form, enabled_tools: checkedToEnabled(tools) })
       // 非空则写入;若原本有 AGENTS 文档则即使清空也写入(以持久化"清空"),否则不创建空文档。
-      if (instructions.trim() || hadAgentsDoc) await api.putDoc("agent", "AGENTS", agentId, instructions)
+      if (instructions.trim() || hadAgentsDoc) await api.putDoc("agent", "AGENTS", instructions, agentId)
       await api.setAgentSkills(agentId, [...skillIds])
     },
     onSuccess: () => {

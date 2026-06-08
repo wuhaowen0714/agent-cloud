@@ -1,4 +1,19 @@
 import type { TurnEvent } from "../types"
+import { authHeader, refreshAccess } from "./auth"
+
+/** 带 Bearer 的 fetch;401 → 静默刷新一次再重试(刷新失败则原样返回 401 让调用方抛)。 */
+async function authedFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const withAuth = (): RequestInit => ({
+    ...init,
+    headers: { ...(init.headers ?? {}), ...authHeader() },
+  })
+  let res = await fetch(url, withAuth())
+  if (res.status === 401) {
+    const tok = await refreshAccess()
+    if (tok) res = await fetch(url, withAuth())
+  }
+  return res
+}
 
 /** 把任意切分的 SSE 文本喂进来,逐个 data: 事件回调。返回一个 feed(chunk) 函数。 */
 export function parseSSE(onEvent: (e: TurnEvent) => void): (chunk: string) => void {
@@ -35,7 +50,7 @@ export function streamTurn(
 ): { done: Promise<void>; abort: () => void } {
   const ctrl = new AbortController()
   const done = (async () => {
-    const res = await fetch(`/api/sessions/${sessionId}/turn/stream`, {
+    const res = await authedFetch(`/api/sessions/${sessionId}/turn/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content }),
@@ -63,7 +78,7 @@ export async function resumeTurn(
   onEvent: (e: TurnEvent) => void,
 ): Promise<{ done: Promise<void>; abort: () => void } | null> {
   const ctrl = new AbortController()
-  const res = await fetch(`/api/sessions/${sessionId}/turn/stream`, { signal: ctrl.signal })
+  const res = await authedFetch(`/api/sessions/${sessionId}/turn/stream`, { signal: ctrl.signal })
   if (res.status === 204 || !res.body) return null
   if (!res.ok) throw new Error(`resume failed: ${res.status}`)
   const reader = res.body.getReader()
@@ -81,5 +96,5 @@ export async function resumeTurn(
 
 /** 主动停止服务端正在跑的回合(幂等)。 */
 export async function cancelTurn(sessionId: string): Promise<void> {
-  await fetch(`/api/sessions/${sessionId}/turn/cancel`, { method: "POST" })
+  await authedFetch(`/api/sessions/${sessionId}/turn/cancel`, { method: "POST" })
 }

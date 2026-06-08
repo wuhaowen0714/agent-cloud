@@ -1,10 +1,18 @@
 import type { AgentConfig, ContextDocument, FileEntry, Message, Session, Skill, User } from "../types"
+import { authHeader, onUnauth, refreshAccess, setAccess } from "./auth"
 
-async function http<T>(path: string, init?: RequestInit): Promise<T> {
+async function http<T>(path: string, init?: RequestInit, retry = true): Promise<T> {
   const res = await fetch(`/api${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers: { "Content-Type": "application/json", ...authHeader(), ...(init?.headers ?? {}) },
   })
+  if (res.status === 401 && retry) {
+    // access 过期 → 用 refresh cookie 静默换一枚,重试一次;再失败 → 登出。
+    const tok = await refreshAccess()
+    if (tok) return http<T>(path, init, false)
+    onUnauth()
+    throw new Error("unauthorized")
+  }
   if (!res.ok) {
     const body = await res.text().catch(() => "")
     throw new Error(`${res.status} ${res.statusText}: ${body}`)
@@ -12,52 +20,91 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
   return res.status === 204 ? (undefined as T) : ((await res.json()) as T)
 }
 
+interface AuthResp {
+  access_token: string
+  user: User
+}
+
+async function _blobUrl(path: string, attachment = false): Promise<string> {
+  // <img>/<a> 带不了 Authorization header,故下载/预览改 fetch(带 token)→ blob URL。
+  const q = `path=${encodeURIComponent(path)}${attachment ? "&attachment=true" : ""}`
+  const res = await fetch(`/api/files/raw?${q}`, { headers: authHeader() })
+  if (!res.ok) throw new Error(`file fetch failed: ${res.status}`)
+  return URL.createObjectURL(await res.blob())
+}
+
 export const api = {
-  createUser: (email: string) => http<User>("/users", { method: "POST", body: JSON.stringify({ email }) }),
-  getUser: (id: string) => http<User>(`/users/${id}`),
-  listAgents: (userId: string) => http<AgentConfig[]>(`/agent-configs?user_id=${userId}`),
-  createAgent: (body: { user_id: string; name: string; model: string; provider: string }) =>
+  // ── auth ──
+  register: async (email: string, password: string) => {
+    const r = await http<AuthResp>("/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    })
+    setAccess(r.access_token)
+    return r.user
+  },
+  login: async (email: string, password: string) => {
+    const r = await http<AuthResp>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    })
+    setAccess(r.access_token)
+    return r.user
+  },
+  logout: () => http<void>("/auth/logout", { method: "POST" }),
+  me: () => http<User>("/auth/me"),
+
+  // ── agents / sessions(user 由 token 推导)──
+  listAgents: () => http<AgentConfig[]>("/agent-configs"),
+  createAgent: (body: { name: string; model: string; provider: string }) =>
     http<AgentConfig>("/agent-configs", { method: "POST", body: JSON.stringify(body) }),
-  listSessions: (userId: string) => http<Session[]>(`/sessions?user_id=${userId}`),
-  createSession: (body: { user_id: string; agent_config_id: string; title?: string }) =>
+  listSessions: () => http<Session[]>("/sessions"),
+  createSession: (body: { agent_config_id: string; title?: string }) =>
     http<Session>("/sessions", { method: "POST", body: JSON.stringify(body) }),
   listMessages: (sessionId: string) => http<Message[]>(`/sessions/${sessionId}/messages`),
-  listFiles: (userId: string, path: string) =>
-    http<FileEntry[]>(`/files?user_id=${userId}&path=${encodeURIComponent(path)}`),
-  // 直接给 DOM 用的 URL(<img src> / 下载 <a href>);走 vite 代理的 /api 前缀
-  fileRawUrl: (userId: string, path: string, attachment = false) =>
-    `/api/files/raw?user_id=${userId}&path=${encodeURIComponent(path)}${attachment ? "&attachment=true" : ""}`,
-  uploadFiles: async (userId: string, path: string, files: File[]) => {
+
+  // ── files ──
+  listFiles: (path: string) => http<FileEntry[]>(`/files?path=${encodeURIComponent(path)}`),
+  previewUrl: (path: string) => _blobUrl(path, false),
+  downloadUrl: (path: string) => _blobUrl(path, true),
+  uploadFiles: async (path: string, files: File[]) => {
     const fd = new FormData()
     for (const f of files) fd.append("files", f)
-    const res = await fetch(`/api/files/upload?user_id=${userId}&path=${encodeURIComponent(path)}`, {
+    const res = await fetch(`/api/files/upload?path=${encodeURIComponent(path)}`, {
       method: "POST",
-      body: fd, // 不设 Content-Type,浏览器自动带 multipart boundary
+      headers: authHeader(), // 不设 Content-Type,浏览器自动带 multipart boundary
+      body: fd,
     })
     if (!res.ok) throw new Error(`upload failed: ${res.status} ${await res.text().catch(() => "")}`)
     return (await res.json()) as FileEntry[]
   },
-  mkdir: (userId: string, path: string) =>
-    http<FileEntry>("/files/mkdir", { method: "POST", body: JSON.stringify({ user_id: userId, path }) }),
-  moveFile: (userId: string, src: string, dst: string) =>
-    http<FileEntry>("/files/move", { method: "POST", body: JSON.stringify({ user_id: userId, src, dst }) }),
-  deleteFile: (userId: string, path: string) =>
-    http<void>(`/files?user_id=${userId}&path=${encodeURIComponent(path)}`, { method: "DELETE" }),
+  mkdir: (path: string) =>
+    http<FileEntry>("/files/mkdir", { method: "POST", body: JSON.stringify({ path }) }),
+  moveFile: (src: string, dst: string) =>
+    http<FileEntry>("/files/move", { method: "POST", body: JSON.stringify({ src, dst }) }),
+  deleteFile: (path: string) =>
+    http<void>(`/files?path=${encodeURIComponent(path)}`, { method: "DELETE" }),
+
+  // ── agent config edit / docs / skills ──
   patchAgent: (
     id: string,
-    body: Partial<Pick<AgentConfig, "name" | "model" | "provider" | "thinking_level" | "enabled_tools">>,
+    body: Partial<
+      Pick<AgentConfig, "name" | "model" | "provider" | "thinking_level" | "enabled_tools">
+    >,
   ) => http<AgentConfig>(`/agent-configs/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
-  listDocs: (scope: string, ownerId: string) =>
-    http<ContextDocument[]>(`/context-documents?scope=${scope}&owner_id=${ownerId}`),
-  putDoc: (scope: string, type: string, ownerId: string, content: string) =>
+  listDocs: (scope: string, agentId?: string) =>
+    http<ContextDocument[]>(
+      `/context-documents?scope=${scope}${agentId ? `&agent_id=${agentId}` : ""}`,
+    ),
+  putDoc: (scope: string, type: string, content: string, agentId?: string) =>
     http<ContextDocument>("/context-documents", {
       method: "PUT",
-      body: JSON.stringify({ scope, type, owner_id: ownerId, content }),
+      body: JSON.stringify({ scope, type, content, ...(agentId ? { agent_id: agentId } : {}) }),
     }),
-  listSkills: (userId: string) => http<Skill[]>(`/skills?user_id=${userId}`),
+  listSkills: () => http<Skill[]>("/skills"),
   listRegistry: () => http<string[]>("/skills/registry"),
-  installSkill: (userId: string, name: string) =>
-    http<Skill>("/skills/install", { method: "POST", body: JSON.stringify({ user_id: userId, name }) }),
+  installSkill: (name: string) =>
+    http<Skill>("/skills/install", { method: "POST", body: JSON.stringify({ name }) }),
   deleteSkill: (id: string) => http<void>(`/skills/${id}`, { method: "DELETE" }),
   getAgentSkills: (agentId: string) => http<Skill[]>(`/agent-configs/${agentId}/skills`),
   setAgentSkills: (agentId: string, skillIds: string[]) =>

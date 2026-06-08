@@ -17,7 +17,6 @@ describe("FileList", () => {
       wrap(
         <FileList
           entries={[dir, file]}
-          userId="u1"
           onOpenDir={onOpenDir}
           onPreview={onPreview}
           onChanged={() => {}}
@@ -33,7 +32,7 @@ describe("FileList", () => {
 
   it("shows empty state", () => {
     render(
-      wrap(<FileList entries={[]} userId="u1" onOpenDir={() => {}} onPreview={() => {}} onChanged={() => {}} />),
+      wrap(<FileList entries={[]} onOpenDir={() => {}} onPreview={() => {}} onChanged={() => {}} />),
     )
     expect(screen.getByText("空目录")).toBeInTheDocument()
   })

@@ -18,8 +18,10 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def _set_refresh_cookie(resp: Response, plain: str, settings: Settings) -> None:
-    # 不变量:cookie path 必须覆盖 refresh/logout 的实际路径。当前路由无全局前缀,故 "/auth"
-    # 恰好匹配 /auth/refresh、/auth/logout。若将来给 router 加全局前缀(如 /api),这里要同步改。
+    # cookie path = "/":浏览器按【请求 URL 的 path】做 cookie 匹配,而前端经代理访问
+    # /api/auth/refresh(代理再 rewrite 去掉 /api 才打到后端 /auth/refresh)。若把 path 收窄成
+    # "/auth",浏览器对 /api/auth/* 的请求就不会带上该 cookie → refresh/logout 静默失效。
+    # 故用 "/"(配合 httpOnly + SameSite=Lax 仍安全),对前端的代理布局解耦。
     resp.set_cookie(
         key=settings.auth_cookie_name,
         value=plain,
@@ -27,7 +29,7 @@ def _set_refresh_cookie(resp: Response, plain: str, settings: Settings) -> None:
         httponly=True,
         secure=settings.auth_cookie_secure,
         samesite="lax",
-        path="/auth",
+        path="/",
     )
 
 
@@ -114,7 +116,7 @@ async def logout(
         if row is not None and row.revoked_at is None:
             await repo.revoke(row.id)
             await db.commit()
-    response.delete_cookie(settings.auth_cookie_name, path="/auth")
+    response.delete_cookie(settings.auth_cookie_name, path="/")
 
 
 @router.get("/me", response_model=UserRead)
