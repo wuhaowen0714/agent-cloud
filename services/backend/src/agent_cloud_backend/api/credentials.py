@@ -3,12 +3,14 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, status
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_cloud_backend import crypto
 from agent_cloud_backend.api.deps import get_current_user, get_session
 from agent_cloud_backend.api.ownership import owned_credential
 from agent_cloud_backend.config import Settings, get_settings
+from agent_cloud_backend.models.agent_config import AgentConfig
 from agent_cloud_backend.models.user import User
 from agent_cloud_backend.repositories.provider_credential import ProviderCredentialRepository
 from agent_cloud_backend.schemas.credential import CredentialCreate, CredentialRead
@@ -50,5 +52,11 @@ async def delete_credential(
     db: AsyncSession = Depends(get_session),
 ):
     row = await owned_credential(cred_id, user.id, db)
+    # 把指向该凭据的 agent.key_ref 置空,避免删除后回合静默回退全局 Key(用户无感)。
+    await db.execute(
+        update(AgentConfig)
+        .where(AgentConfig.user_id == user.id, AgentConfig.key_ref == str(cred_id))
+        .values(key_ref=None)
+    )
     await db.delete(row)
     await db.commit()

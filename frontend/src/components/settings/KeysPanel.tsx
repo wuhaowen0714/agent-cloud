@@ -69,7 +69,7 @@ export function KeysPanel() {
         />
         <input
           className={field}
-          placeholder="base_url(可选,留空用默认)"
+          placeholder="base_url(可选;留空 = 用平台默认端点)"
           value={form.base_url}
           onChange={(e) => setForm({ ...form, base_url: e.target.value })}
         />

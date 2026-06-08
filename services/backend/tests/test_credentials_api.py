@@ -47,3 +47,48 @@ async def test_cross_user_delete_404(client):
     assert (await client.delete(f"/credentials/{cid}", headers=h2)).status_code == 404
     # 本人删成功
     assert (await client.delete(f"/credentials/{cid}", headers=h1)).status_code == 204
+
+
+async def _mk_cred(client, headers, api_key="sk-abcd1234"):
+    return (
+        await client.post(
+            "/credentials", json={"name": "c", "base_url": "", "api_key": api_key}, headers=headers
+        )
+    ).json()["id"]
+
+
+async def test_agent_key_ref_must_be_owned(client):
+    h = await _auth_headers(client)
+    base = {"name": "a", "model": "m", "provider": "openai"}
+    # 非法 uuid → 422
+    r = await client.post("/agent-configs", json={**base, "key_ref": "not-a-uuid"}, headers=h)
+    assert r.status_code == 422
+    # 他人的 credential id → 404(不泄漏存在性)
+    h2 = await _auth_headers(client)
+    foreign = await _mk_cred(client, h2)
+    r2 = await client.post("/agent-configs", json={**base, "key_ref": foreign}, headers=h)
+    assert r2.status_code == 404
+    # 本人的 credential → 201
+    own = await _mk_cred(client, h)
+    r3 = await client.post("/agent-configs", json={**base, "key_ref": own}, headers=h)
+    assert r3.status_code == 201 and r3.json()["key_ref"] == own
+    # PATCH 同样校验:他人的 → 404
+    aid = r3.json()["id"]
+    r4 = await client.patch(f"/agent-configs/{aid}", json={"key_ref": foreign}, headers=h)
+    assert r4.status_code == 404
+
+
+async def test_deleting_credential_nulls_agent_key_ref(client):
+    h = await _auth_headers(client)
+    cid = await _mk_cred(client, h)
+    aid = (
+        await client.post(
+            "/agent-configs",
+            json={"name": "a", "model": "m", "provider": "openai", "key_ref": cid},
+            headers=h,
+        )
+    ).json()["id"]
+    assert (await client.delete(f"/credentials/{cid}", headers=h)).status_code == 204
+    agents = (await client.get("/agent-configs", headers=h)).json()
+    agent = next(x for x in agents if x["id"] == aid)
+    assert agent["key_ref"] is None  # 删除凭据后 agent 的 key_ref 被置空
