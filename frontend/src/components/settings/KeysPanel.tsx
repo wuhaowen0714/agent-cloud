@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { api } from "../../api/client"
 import { useStore } from "../../store"
-import { Button, Input } from "../ui"
+import { Button, Field, Input } from "../ui"
 
 export function KeysPanel() {
   const userId = useStore((s) => s.userId)
@@ -61,22 +61,28 @@ export function KeysPanel() {
         }}
       >
         <div className="text-sm font-semibold text-slate-800">添加凭据</div>
-        <Input
-          placeholder="名称(如 openrouter)"
-          value={form.name}
-          onChange={(e) => setForm({ ...form, name: e.target.value })}
-        />
-        <Input
-          placeholder="base_url(可选;留空 = 用平台默认端点)"
-          value={form.base_url}
-          onChange={(e) => setForm({ ...form, base_url: e.target.value })}
-        />
-        <Input
-          type="password"
-          placeholder="API Key"
-          value={form.api_key}
-          onChange={(e) => setForm({ ...form, api_key: e.target.value })}
-        />
+        <Field label="名称">
+          <Input
+            placeholder="如 openrouter"
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+          />
+        </Field>
+        <Field label="Base URL" hint="可选 · 留空则用平台默认端点">
+          <Input
+            placeholder="https://…/v1"
+            value={form.base_url}
+            onChange={(e) => setForm({ ...form, base_url: e.target.value })}
+          />
+        </Field>
+        <Field label="API Key">
+          <Input
+            type="password"
+            placeholder="sk-…"
+            value={form.api_key}
+            onChange={(e) => setForm({ ...form, api_key: e.target.value })}
+          />
+        </Field>
         <Button type="submit" disabled={!form.name || !form.api_key || create.isPending}>
           {create.isPending ? "保存中…" : "保存"}
         </Button>

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react"
 import { BUILTIN_TOOLS, checkedToEnabled, enabledToChecked } from "../../agentConfig"
 import { api } from "../../api/client"
 import { useStore } from "../../store"
-import { Button, Field, Input, Select, Textarea } from "../ui"
+import { Button, Field, Input, Segmented, SelectMenu, Switch, Textarea } from "../ui"
 
 function SectionTitle({ children }: { children: string }) {
   return <div className="text-sm font-semibold text-slate-800">{children}</div>
@@ -49,14 +49,6 @@ export function AgentSettings() {
   }
   return <AgentEditor key={agentId} agentId={agentId} userId={userId} />
 }
-
-// 可选卡片行:选中时 teal 浅底 + 描边,比裸 checkbox 更有结构感。
-const rowCls = (on: boolean) =>
-  `flex cursor-pointer items-center gap-2.5 rounded-xl border px-3 py-2 transition ${
-    on
-      ? "border-brand-200 bg-brand-50/60"
-      : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
-  }`
 
 function AgentEditor({ agentId, userId }: { agentId: string; userId: string }) {
   const qc = useQueryClient()
@@ -122,7 +114,7 @@ function AgentEditor({ agentId, userId }: { agentId: string; userId: string }) {
   const invalid = !form.name || !form.model || !form.provider
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <div className="space-y-3">
         <Field label="名称">
           <Input value={form.name} placeholder="名称" onChange={(e) => setForm({ ...form, name: e.target.value })} />
@@ -133,40 +125,52 @@ function AgentEditor({ agentId, userId }: { agentId: string; userId: string }) {
         <Field label="Provider">
           <Input value={form.provider} placeholder="provider" onChange={(e) => setForm({ ...form, provider: e.target.value })} />
         </Field>
-        <Field label="思考档位">
-          <Select value={form.thinking_level} onChange={(e) => setForm({ ...form, thinking_level: e.target.value })}>
-            <option value="">默认</option>
-            <option value="low">low</option>
-            <option value="medium">medium</option>
-            <option value="high">high</option>
-          </Select>
-        </Field>
-        <Field label="凭据" hint="空 = 用平台全局共享 Key">
-          <Select value={form.key_ref} onChange={(e) => setForm({ ...form, key_ref: e.target.value })}>
-            <option value="">全局共享 Key</option>
-            {creds.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} · {c.masked}
-              </option>
-            ))}
-          </Select>
-        </Field>
       </div>
 
-      <div className="space-y-1">
+      <Field label="思考档位">
+        <Segmented
+          value={form.thinking_level}
+          onChange={(v) => setForm({ ...form, thinking_level: v })}
+          options={[
+            { value: "", label: "默认" },
+            { value: "low", label: "Low" },
+            { value: "medium", label: "Medium" },
+            { value: "high", label: "High" },
+          ]}
+        />
+      </Field>
+
+      <Field label="凭据" hint="空 = 用平台全局共享 Key">
+        <SelectMenu
+          value={form.key_ref}
+          onChange={(v) => setForm({ ...form, key_ref: v })}
+          options={[
+            { value: "", label: "全局共享 Key" },
+            ...creds.map((c) => ({ value: c.id, label: c.name, hint: c.masked })),
+          ]}
+        />
+      </Field>
+
+      <div className="space-y-1.5">
         <SectionTitle>工具</SectionTitle>
-        {BUILTIN_TOOLS.map((t) => (
-          <label key={t.name} className={rowCls(tools.has(t.name))}>
-            <input
-              type="checkbox"
-              className="h-4 w-4 accent-brand-600"
-              checked={tools.has(t.name)}
-              onChange={() => setTools((s) => toggle(s, t.name))}
-            />
-            <span className="font-mono text-xs text-slate-700">{t.name}</span>
-            <span className="truncate text-xs text-slate-400">{t.desc}</span>
-          </label>
-        ))}
+        <div className="overflow-hidden rounded-xl border border-slate-200">
+          {BUILTIN_TOOLS.map((t, i) => (
+            <div
+              key={t.name}
+              className={`flex items-center gap-3 px-3 py-2.5 ${i > 0 ? "border-t border-slate-100" : ""}`}
+            >
+              <span className="min-w-0 flex-1">
+                <span className="font-mono text-xs text-slate-700">{t.name}</span>
+                <span className="ml-2 text-xs text-slate-400">{t.desc}</span>
+              </span>
+              <Switch
+                checked={tools.has(t.name)}
+                onChange={() => setTools((s) => toggle(s, t.name))}
+                label={t.name}
+              />
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="space-y-1.5">
@@ -179,23 +183,31 @@ function AgentEditor({ agentId, userId }: { agentId: string; userId: string }) {
         />
       </div>
 
-      <div className="space-y-1">
+      <div className="space-y-1.5">
         <SectionTitle>启用技能</SectionTitle>
         {pool.length === 0 ? (
-          <div className="px-2 text-xs text-slate-400">技能池为空 — 去"技能"页安装</div>
+          <div className="rounded-xl border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-400">
+            技能池为空 — 去"技能"页安装
+          </div>
         ) : (
-          pool.map((sk) => (
-            <label key={sk.id} className={rowCls(skillIds.has(sk.id))}>
-              <input
-                type="checkbox"
-                className="h-4 w-4 accent-brand-600"
-                checked={skillIds.has(sk.id)}
-                onChange={() => setSkillIds((s) => toggle(s, sk.id))}
-              />
-              <span className="text-xs text-slate-700">{sk.name}</span>
-              <span className="truncate text-xs text-slate-400">{sk.description}</span>
-            </label>
-          ))
+          <div className="overflow-hidden rounded-xl border border-slate-200">
+            {pool.map((sk, i) => (
+              <div
+                key={sk.id}
+                className={`flex items-center gap-3 px-3 py-2.5 ${i > 0 ? "border-t border-slate-100" : ""}`}
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="text-xs text-slate-700">{sk.name}</span>
+                  <span className="ml-2 text-xs text-slate-400">{sk.description}</span>
+                </span>
+                <Switch
+                  checked={skillIds.has(sk.id)}
+                  onChange={() => setSkillIds((s) => toggle(s, sk.id))}
+                  label={sk.name}
+                />
+              </div>
+            ))}
+          </div>
         )}
       </div>
 

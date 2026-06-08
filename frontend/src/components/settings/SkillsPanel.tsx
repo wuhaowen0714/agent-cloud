@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { api } from "../../api/client"
 import { useStore } from "../../store"
-import { Button, Select } from "../ui"
+import { Button, SelectMenu } from "../ui"
 
 export function SkillsPanel() {
   const userId = useStore((s) => s.userId)!
@@ -58,14 +58,12 @@ export function SkillsPanel() {
         <div className="text-sm font-semibold text-slate-800">从 registry 安装</div>
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
-            <Select value={pick} onChange={(e) => setPick(e.target.value)}>
-              <option value="">选择技能…</option>
-              {available.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </Select>
+            <SelectMenu
+              value={pick}
+              onChange={setPick}
+              placeholder="选择技能…"
+              options={available.map((n) => ({ value: n, label: n }))}
+            />
           </div>
           <Button onClick={() => install.mutate(pick)} disabled={!pick || install.isPending}>
             安装

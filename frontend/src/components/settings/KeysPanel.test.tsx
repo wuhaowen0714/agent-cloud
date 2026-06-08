@@ -33,8 +33,8 @@ describe("KeysPanel", () => {
   it("submits a new credential", async () => {
     const { api } = await import("../../api/client")
     render(wrap(<KeysPanel />))
-    fireEvent.change(screen.getByPlaceholderText("名称(如 openrouter)"), { target: { value: "x" } })
-    fireEvent.change(screen.getByPlaceholderText("API Key"), { target: { value: "sk-9999" } })
+    fireEvent.change(screen.getByPlaceholderText("如 openrouter"), { target: { value: "x" } })
+    fireEvent.change(screen.getByPlaceholderText("sk-…"), { target: { value: "sk-9999" } })
     fireEvent.click(screen.getByRole("button", { name: "保存" }))
     await waitFor(() =>
       expect(api.createCredential).toHaveBeenCalledWith({
