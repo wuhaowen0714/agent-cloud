@@ -32,7 +32,12 @@ def create_access_token(user_id: str, *, secret: str, ttl_seconds: int) -> str:
 def decode_access_token(token: str, *, secret: str) -> str | None:
     """验签 + 验期;成功返回 sub(user_id),失败返回 None。"""
     try:
-        payload = jwt.decode(token, secret, algorithms=["HS256"])
+        payload = jwt.decode(
+            token,
+            secret,
+            algorithms=["HS256"],  # 白名单算法:防 alg=none / RS256↔HS256 混淆
+            options={"require": ["exp", "sub"], "verify_exp": True},
+        )
     except jwt.PyJWTError:
         return None
     sub = payload.get("sub")

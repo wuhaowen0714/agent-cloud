@@ -18,6 +18,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def _set_refresh_cookie(resp: Response, plain: str, settings: Settings) -> None:
+    # 不变量:cookie path 必须覆盖 refresh/logout 的实际路径。当前路由无全局前缀,故 "/auth"
+    # 恰好匹配 /auth/refresh、/auth/logout。若将来给 router 加全局前缀(如 /api),这里要同步改。
     resp.set_cookie(
         key=settings.auth_cookie_name,
         value=plain,
@@ -85,12 +87,12 @@ async def refresh(
     row = await repo.get_by_hash(security.hash_refresh(plain))
     if row is None or row.expires_at <= datetime.now(UTC):
         raise HTTPException(status_code=401, detail="invalid refresh token")
-    if row.revoked_at is not None:
-        # 收到已吊销的 refresh = 疑似泄露/重用 → 吊销该用户全部 refresh(强制重新登录)
+    # 原子轮换:并发/重放下只有一个请求能赢得吊销;已吊销 或 抢不到吊销(竞态败者)=
+    # 同一 refresh 被重用 → 吊销该用户全部 refresh(强制重新登录),堵住"双花"(I-1)。
+    if row.revoked_at is not None or not await repo.revoke(row.id):
         await repo.revoke_all_for_user(row.user_id)
         await db.commit()
         raise HTTPException(status_code=401, detail="refresh token reuse detected")
-    await repo.revoke(row.id)  # 轮换:旧的作废
     user = await UserRepository(db).get(row.user_id)
     if user is None:
         await db.commit()

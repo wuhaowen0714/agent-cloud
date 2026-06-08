@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 
 
@@ -72,6 +73,18 @@ async def test_refresh_rotates_and_reuse_detected(client):
     # 新的也被连带吊销 → 也 401
     r3 = await client.post("/auth/refresh", cookies={"ac_refresh": new})
     assert r3.status_code == 401
+
+
+async def test_concurrent_refresh_no_double_spend(client):
+    # I-1:同一 refresh 并发提交 → 恰一个成功(原子轮换),另一个判重用 401,无"双花"。
+    reg = await _register(client)
+    tok = reg.cookies.get("ac_refresh")
+    client.cookies.clear()
+    r1, r2 = await asyncio.gather(
+        client.post("/auth/refresh", cookies={"ac_refresh": tok}),
+        client.post("/auth/refresh", cookies={"ac_refresh": tok}),
+    )
+    assert sorted([r1.status_code, r2.status_code]) == [200, 401]
 
 
 async def test_refresh_without_cookie_401(client):

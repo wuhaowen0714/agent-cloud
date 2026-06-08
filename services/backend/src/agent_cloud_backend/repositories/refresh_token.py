@@ -25,12 +25,19 @@ class RefreshTokenRepository(BaseRepository[RefreshToken]):
         )
         return res.scalar_one_or_none()
 
-    async def revoke(self, token_id: uuid.UUID) -> None:
-        await self.session.execute(
+    async def revoke(self, token_id: uuid.UUID) -> bool:
+        """原子吊销:仅当该行尚未吊销时置 revoked_at,返回是否本次赢得吊销(rowcount==1)。
+
+        条件 UPDATE + rowcount 判定让并发刷新只有一个赢家(行锁串行化),据此识别"重用"
+        (败者读到的是未吊销、却抢不到吊销 → 视为同一 refresh 被并发双花)。参照
+        repositories/session.py:try_acquire 的原子加锁范式。
+        """
+        res = await self.session.execute(
             update(RefreshToken)
-            .where(RefreshToken.id == token_id)
+            .where(RefreshToken.id == token_id, RefreshToken.revoked_at.is_(None))
             .values(revoked_at=datetime.now(UTC))
         )
+        return res.rowcount == 1
 
     async def revoke_all_for_user(self, user_id: uuid.UUID) -> None:
         await self.session.execute(
