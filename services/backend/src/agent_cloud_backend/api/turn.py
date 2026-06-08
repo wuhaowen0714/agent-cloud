@@ -25,6 +25,7 @@ from agent_cloud_backend.skills.deps import get_object_store
 from agent_cloud_backend.skills.materialize import materialize_enabled_skills
 from agent_cloud_backend.skills.store import ObjectStore
 from agent_cloud_backend.turn.assemble import build_run_turn_request
+from agent_cloud_backend.turn.compaction import force_compact, maybe_compact_after_turn
 from agent_cloud_backend.turn.heartbeat import session_heartbeat
 from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub, get_turn_hub, subscribe
 from agent_cloud_backend.turn.messages import common_to_content
@@ -100,6 +101,12 @@ async def run_turn_endpoint(
             async with session_heartbeat(session_id, settings.session_heartbeat_seconds):
                 response = await run_turn_via_worker(settings.worker_endpoint, request)
         except grpc.aio.AioRpcError as exc:
+            if exc.code() == grpc.StatusCode.RESOURCE_EXHAUSTED:
+                # 上下文超窗:兜底 force-compact 后,返回可重试信号(503),让前端重发即可。
+                await force_compact(session_id, settings=settings)
+                raise HTTPException(
+                    status_code=503, detail="context exceeded, compacted — please retry"
+                ) from exc
             raise HTTPException(
                 status_code=502, detail=f"worker unavailable: {exc.code().name}"
             ) from exc
@@ -119,6 +126,9 @@ async def run_turn_endpoint(
             )
             persisted.append(row)
         await db.commit()
+
+        # 回合后主动压缩(用真实 context_tokens 判阈值)。best-effort,仍在会话锁内。
+        await maybe_compact_after_turn(session_id, response.context_tokens, settings=settings)
 
         return TurnResponse(
             messages=persisted,
@@ -209,6 +219,7 @@ async def stream_turn_endpoint(
             request=request,
             session_id=session_id,
             heartbeat_interval=settings.session_heartbeat_seconds,
+            settings=settings,
         )
     )
     return StreamingResponse(subscribe(active), media_type="text/event-stream")

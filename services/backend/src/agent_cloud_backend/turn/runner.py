@@ -8,11 +8,13 @@ import grpc
 from agent_cloud_common import TurnDone
 from agent_cloud_common.codec import turn_event_from_proto
 
+from agent_cloud_backend.config import Settings
 from agent_cloud_backend.db import get_sessionmaker
 from agent_cloud_backend.models.message import Message
 from agent_cloud_backend.repositories.message import MessageRepository
 from agent_cloud_backend.repositories.session import SessionRepository
 from agent_cloud_backend.turn import worker_client
+from agent_cloud_backend.turn.compaction import force_compact, maybe_compact_after_turn
 from agent_cloud_backend.turn.heartbeat import session_heartbeat
 from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub
 from agent_cloud_backend.turn.messages import common_to_content
@@ -76,14 +78,17 @@ async def run_turn(
     request,
     session_id: uuid.UUID,
     heartbeat_interval: float,
+    settings: Settings,
 ) -> None:
     """独立任务:消费 worker 流 → 缓冲 + 落库;断连不取消它(由 asyncio.create_task 起)。"""
+    ctx_tokens = 0
     try:
         async with session_heartbeat(session_id, heartbeat_interval):
             async for proto_event in worker_client.stream_turn_via_worker(worker_endpoint, request):
                 event = turn_event_from_proto(proto_event)
                 if isinstance(event, TurnDone):
                     message_ids = await _persist(session_id, event.new_messages)
+                    ctx_tokens = event.context_tokens
                     await active.emit(
                         {
                             "type": "turn_done",
@@ -97,10 +102,17 @@ async def run_turn(
                     )
                 else:
                     await active.emit(turn_event_to_sse(event))
+        # 回合成功收尾后主动压缩(用模型返回的真实 context_tokens 判阈值)。
+        # best-effort(内部吞异常),且仍在会话锁内(_finalize 释放锁在 finally,晚于此)。
+        await maybe_compact_after_turn(session_id, ctx_tokens, settings=settings)
     except asyncio.CancelledError:
         # 主动取消 → 转成干净的终止事件,让 finally 收尾(不再 re-raise)
         await active.emit({"type": "error", "message": "turn cancelled", "recoverable": False})
     except grpc.aio.AioRpcError as exc:
+        # 上下文超窗(worker → RESOURCE_EXHAUSTED):兜底 force-compact 后,作为可恢复错误
+        # 提示重试(error_sse 已把 RESOURCE_EXHAUSTED 归为 recoverable)。仍在锁内。
+        if exc.code() == grpc.StatusCode.RESOURCE_EXHAUSTED:
+            await force_compact(session_id, settings=settings)
         await active.emit(error_sse(exc.code()))
     except Exception:
         logger.exception("turn run failed for session %s", session_id)

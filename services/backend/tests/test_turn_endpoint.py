@@ -5,7 +5,31 @@ import grpc
 import pytest
 from agent_cloud.v1 import worker_pb2
 from agent_cloud_backend.turn.messages import common_to_content as _real_common_to_content
+from sqlalchemy import select
 from sqlalchemy import text as sa_text
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+
+def _patch_global_sessionmaker(monkeypatch, engine):
+    """compaction 经 db.get_sessionmaker()(非 DI session)读写;指向测试引擎。"""
+    import agent_cloud_backend.db as db_module
+
+    monkeypatch.setattr(
+        db_module, "_sessionmaker", async_sessionmaker(engine, expire_on_commit=False)
+    )
+
+
+async def _session_summary(engine, sid):
+    from agent_cloud_backend.models.session import Session
+
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        stmt = (
+            select(Session.summary)
+            .where(Session.id == uuid.UUID(sid))
+            .execution_options(populate_existing=True)
+        )
+        return (await db.execute(stmt)).scalar_one()
 
 
 @pytest.fixture
@@ -203,3 +227,74 @@ def _install_fake_worker(monkeypatch):
     from agent_cloud_backend.api import turn as turn_module
 
     monkeypatch.setattr(turn_module, "run_turn_via_worker", _fake)
+
+
+# --- Plan 12b: compaction (non-streaming endpoint) ---
+
+
+async def test_turn_resource_exhausted_returns_503_and_releases_lock(client, engine, monkeypatch):
+    # worker 报 RESOURCE_EXHAUSTED(上下文超窗)→ 兜底 force-compact + 返回可重试的 503;锁释放。
+    _patch_global_sessionmaker(monkeypatch, engine)
+    from agent_cloud_backend.api import turn as turn_module
+
+    async def _exhausted(worker_endpoint, request):
+        raise grpc.aio.AioRpcError(
+            code=grpc.StatusCode.RESOURCE_EXHAUSTED,
+            initial_metadata=grpc.aio.Metadata(),
+            trailing_metadata=grpc.aio.Metadata(),
+            details="context window exceeded",
+        )
+
+    monkeypatch.setattr(turn_module, "run_turn_via_worker", _exhausted)
+
+    async def _fake_summarize(endpoint, req):
+        return "S"
+
+    monkeypatch.setattr(
+        "agent_cloud_backend.turn.compaction.summarize_via_worker", _fake_summarize
+    )
+
+    sid = await _make_session(client)
+    r = await client.post(f"/sessions/{sid}/turn", json={"content": "go"})
+    assert r.status_code == 503, r.text
+
+    # 锁已释放:后续正常回合成功
+    _install_fake_worker(monkeypatch)
+    r2 = await client.post(f"/sessions/{sid}/turn", json={"content": "again"})
+    assert r2.status_code == 200, r2.text
+
+
+async def test_turn_post_compaction_when_over_threshold(client, engine, monkeypatch):
+    # 回合后 context_tokens 超阈值 → 主动压缩,session.summary 被填。
+    _patch_global_sessionmaker(monkeypatch, engine)
+    monkeypatch.setenv("AGENT_CLOUD_COMPACTION_TOKEN_THRESHOLD", "10")
+    monkeypatch.setenv("AGENT_CLOUD_COMPACTION_KEEP_RECENT", "2")
+    from agent_cloud_backend.api import turn as turn_module
+
+    async def _fake(worker_endpoint, request):
+        # user + 3 新消息 = 4 条;keep_recent=2 → 折叠前 2
+        return worker_pb2.RunTurnResponse(
+            new_messages=[
+                worker_pb2.Msg(role="assistant", text="a"),
+                worker_pb2.Msg(role="assistant", text="b"),
+                worker_pb2.Msg(role="assistant", text="done"),
+            ],
+            input_tokens=5,
+            output_tokens=7,
+            stop_reason="end_turn",
+            context_tokens=999,
+        )
+
+    monkeypatch.setattr(turn_module, "run_turn_via_worker", _fake)
+
+    async def _fake_summarize(endpoint, req):
+        return "S"
+
+    monkeypatch.setattr(
+        "agent_cloud_backend.turn.compaction.summarize_via_worker", _fake_summarize
+    )
+
+    sid = await _make_session(client)
+    r = await client.post(f"/sessions/{sid}/turn", json={"content": "go"})
+    assert r.status_code == 200, r.text
+    assert await _session_summary(engine, sid) == "S"

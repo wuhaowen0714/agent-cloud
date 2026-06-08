@@ -9,6 +9,8 @@ _RECOVERABLE = {
     grpc.StatusCode.UNAVAILABLE,
     grpc.StatusCode.INTERNAL,
     grpc.StatusCode.DEADLINE_EXCEEDED,
+    # 上下文超窗:后端已 force-compact,重试通常就能装下 → 标记可恢复,提示用户重试。
+    grpc.StatusCode.RESOURCE_EXHAUSTED,
 }
 
 
