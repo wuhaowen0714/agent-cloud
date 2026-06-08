@@ -16,9 +16,13 @@ export function UserBar() {
 
   if (userId) {
     return (
-      <div className="flex items-center justify-between text-sm">
-        <span className="truncate text-slate-600">{user?.email ?? userId}</span>
-        <button className="text-slate-400 hover:text-slate-700" onClick={() => setUser(null)}>
+      <div className="flex items-center gap-2 text-sm">
+        <span className="h-2 w-2 shrink-0 rounded-full bg-brand-500" />
+        <span className="min-w-0 flex-1 truncate text-slate-600">{user?.email ?? userId}</span>
+        <button
+          className="shrink-0 text-xs text-slate-400 hover:text-slate-700"
+          onClick={() => setUser(null)}
+        >
           切换
         </button>
       </div>

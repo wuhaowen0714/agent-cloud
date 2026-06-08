@@ -26,27 +26,35 @@ export function SessionList() {
   if (!userId) return null
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <button
-        className="mb-2 rounded border border-brand-600 px-2 py-1 text-sm text-brand-700 enabled:hover:bg-brand-50 disabled:opacity-40"
-        disabled={!agentId}
-        title={agentId ? "" : "先选/建一个 agent"}
-        onClick={() => create.mutate()}
-      >
-        + 新会话
-      </button>
-      <ul className="min-h-0 flex-1 space-y-1 overflow-auto">
+      <div className="mb-1.5 flex items-center justify-between">
+        <span className="text-xs font-medium uppercase tracking-wide text-slate-400">会话</span>
+        <button
+          className="rounded px-1.5 py-0.5 text-xs text-brand-700 enabled:hover:bg-brand-50 disabled:opacity-40"
+          disabled={!agentId}
+          title={agentId ? "" : "先选/建一个 agent"}
+          onClick={() => create.mutate()}
+        >
+          ＋ 新会话
+        </button>
+      </div>
+      <ul className="min-h-0 flex-1 space-y-0.5 overflow-auto">
         {sessions.map((s) => (
           <li key={s.id}>
             <button
-              className={`w-full truncate rounded px-2 py-1 text-left text-sm ${
-                s.id === sessionId ? "bg-brand-100 text-brand-800" : "text-slate-600 hover:bg-slate-100"
+              className={`w-full truncate rounded-md px-2 py-1.5 text-left text-sm ${
+                s.id === sessionId
+                  ? "bg-brand-50 font-medium text-brand-800 ring-1 ring-brand-100"
+                  : "text-slate-600 hover:bg-slate-100"
               }`}
               onClick={() => setSession(s.id)}
             >
-              {s.title ?? s.id.slice(0, 8)}
+              {s.title ?? `会话 ${s.id.slice(0, 6)}`}
             </button>
           </li>
         ))}
+        {sessions.length === 0 && (
+          <li className="px-2 py-1 text-xs text-slate-400">还没有会话</li>
+        )}
       </ul>
     </div>
   )
