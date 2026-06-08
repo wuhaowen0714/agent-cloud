@@ -225,8 +225,40 @@ def test_is_context_window_error_by_code():
     assert _is_context_window_error(exc) is True
 
 
+def test_is_context_window_error_by_structured_body_code():
+    # 真实上游:错误码嵌在 body.error.code,而 .code 属性为 None、message 仅 "Error code: 400"。
+    # 这是最经典的 OpenAI 超窗形态 —— 必须能识别,否则会漏判。
+    exc = _bad_request(
+        "Error code: 400",
+        body={"error": {"code": "context_length_exceeded", "message": "ctx too big"}},
+    )
+    assert _is_context_window_error(exc) is True
+
+
+def test_is_context_window_error_by_structured_body_message():
+    exc = _bad_request(
+        "Error code: 400",
+        body={"error": {"message": "This model's maximum context length is 8192 tokens"}},
+    )
+    assert _is_context_window_error(exc) is True
+
+
 def test_is_context_window_error_false_for_other_400():
     assert _is_context_window_error(_bad_request("invalid value for 'temperature'")) is False
+
+
+def test_is_context_window_error_false_for_param_too_long():
+    # 守住 C1:某参数过长的无关 400,绝不能误判成超窗(否则后端会误触发压缩 → 压缩抖动)。
+    exc = _bad_request(
+        "Error code: 400",
+        body={
+            "error": {
+                "code": "invalid_request_error",
+                "message": "Invalid 'stop': string too long",
+            }
+        },
+    )
+    assert _is_context_window_error(exc) is False
 
 
 def test_is_context_window_error_false_for_non_badrequest():

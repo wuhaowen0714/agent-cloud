@@ -147,8 +147,10 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                 ):
                     yield turn_event_to_proto(event)
             except ContextWindowExceeded:
-                # 上下文超窗:可恢复 → RESOURCE_EXHAUSTED(超窗发生在首个 LLM 调用,
-                # 通常尚未 yield 任何增量),后端据此触发压缩并提示重试。
+                # 上下文超窗:可恢复 → RESOURCE_EXHAUSTED,后端据此触发压缩并提示重试。
+                # 注意:多轮工具循环下,超窗可能发生在本 RPC **已 yield 过前几轮增量之后**
+                # (第 2+ 次 provider.stream 才超)。客户端收到 RESOURCE_EXHAUSTED 时必须丢弃
+                # 本回合所有已收增量,整回合作废(assistant 消息仅成功收尾后才落库,故无半成品)。
                 logger.info("RunTurnStream context window exceeded")
                 await context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, "context window exceeded")
                 return
@@ -166,6 +168,17 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
         except (ValueError, json.JSONDecodeError) as exc:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
             return
+
+        # 空请求短路,不白烧一次上游调用:
+        if not history and not request.prior_summary:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "nothing to summarize")
+            return
+        if not history:
+            # 只有已有摘要、没有新历史可合并:原样回显,省一次 LLM 调用。
+            return worker_pb2.SummarizeResponse(
+                summary=request.prior_summary, input_tokens=0, output_tokens=0
+            )
+
         try:
             provider = self._provider_factory(
                 request.agent.model, request.agent.provider, request.agent.key_ref
@@ -174,18 +187,19 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, f"provider unavailable: {exc}")
             return
 
+        # 已有摘要放进 system(它是"系统提供的已有产物"),而非塞进末尾 user 消息 ——
+        # 否则模型容易把它误读成"用户在对话末尾贴的新指令",与历史里的真实 user 指令混淆。
+        system = _SUMMARIZE_SYSTEM
         if request.prior_summary:
-            instruction = (
-                "已有摘要(把它与下面的新对话合并,更新成一份完整的要点摘要):\n"
-                f"{request.prior_summary}\n\n请输出合并后的完整要点。"
-            )
+            system = f"{_SUMMARIZE_SYSTEM}\n\n# 已有摘要(需与下面对话合并)\n{request.prior_summary}"
+            instruction = "请把【已有摘要】与以上对话合并,输出一份完整、自洽的要点摘要。"
         else:
             instruction = "请将以上对话压缩成简明要点。"
         messages = [*history, Message(role=Role.USER, text=instruction)]
 
         try:
             result = await provider.complete(
-                CompletionRequest(system=_SUMMARIZE_SYSTEM, messages=messages, tools=[])
+                CompletionRequest(system=system, messages=messages, tools=[])
             )
         except ContextWindowExceeded:
             # 连摘要请求都超窗:可恢复,交给后端用更激进的折叠边界重试(spec §6/§8)。

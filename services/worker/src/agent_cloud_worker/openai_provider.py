@@ -23,23 +23,39 @@ from agent_cloud_worker.provider import (
 )
 
 # 上游对“超出上下文窗口”没有统一表示:OpenAI 用 code=context_length_exceeded,
-# 其它兼容端点常只在 message 里写。两者都查,且仅针对 400(BadRequest)以免误伤别的错误。
+# 其它兼容端点常只在 message 里写。markers 只保留**高度专指上下文窗口**的词:像
+# "too long"/"reduce the length" 这类宽词会把"某参数过长"之类无关 400 也误判成超窗,
+# 进而让后端误触发压缩(压缩抖动)。宁可漏报(退化为普通 INTERNAL,回合失败)也不假阳性。
 _CONTEXT_LEN_MARKERS = (
     "context length",
     "maximum context",
     "context window",
-    "too long",
-    "reduce the length",
-    "reduce your prompt",
+    "context_length_exceeded",
 )
+_CONTEXT_LEN_CODE = "context_length_exceeded"
 
 
 def _is_context_window_error(exc: Exception) -> bool:
     if not isinstance(exc, openai.BadRequestError):
         return False
-    if getattr(exc, "code", None) == "context_length_exceeded":
+    # 真实的 openai.BadRequestError 把上游文案/错误码嵌在 .body 的 error 子对象里;
+    # .code/.message 在带结构化 body 时往往拿不到(.code=None、.message 仅是 "Error code: 400")。
+    # 不同兼容端点/SDK 版本填充位置不一,故从 .code、.body(含 error 子对象)、str(exc) 全都收集。
+    codes: list[str] = []
+    texts: list[str] = [str(exc)]
+    if code := getattr(exc, "code", None):
+        codes.append(str(code))
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        err = body.get("error") if isinstance(body.get("error"), dict) else body
+        for key in ("code", "type"):
+            if err.get(key):
+                codes.append(str(err[key]))
+        if err.get("message"):
+            texts.append(str(err["message"]))
+    if _CONTEXT_LEN_CODE in codes:
         return True
-    text = str(getattr(exc, "message", "") or exc).lower()
+    text = " ".join(texts).lower()
     return any(marker in text for marker in _CONTEXT_LEN_MARKERS)
 
 

@@ -402,6 +402,83 @@ async def test_summarize_returns_summary_and_usage():
     assert resp.input_tokens == 3 and resp.output_tokens == 4
 
 
+class _CapturingProvider:
+    def __init__(self, result):
+        self._result = result
+        self.last_request = None
+
+    async def complete(self, request):
+        self.last_request = request
+        return self._result
+
+
+async def test_summarize_puts_prior_summary_in_system_not_user_message():
+    # I3:已有摘要应进入 system(系统提供的已有产物),而非塞进末尾 user 消息(会被当成新指令)。
+    provider = _CapturingProvider(
+        CompletionResult(
+            message=Message(role=Role.ASSISTANT, text="merged"),
+            usage=Usage(input_tokens=1, output_tokens=1),
+        )
+    )
+    worker_server, wport = await create_worker_server(provider_factory=lambda *a: provider, port=0)
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            resp = await stub.Summarize(
+                worker_pb2.SummarizeRequest(
+                    agent=worker_pb2.Agent(model="m", provider="fake"),
+                    prior_summary="OLD_SUMMARY_TEXT",
+                    messages=[worker_pb2.Msg(role="user", text="新消息")],
+                )
+            )
+    finally:
+        await worker_server.stop(None)
+    assert resp.summary == "merged"
+    assert "OLD_SUMMARY_TEXT" in provider.last_request.system
+    assert provider.last_request.messages[-1].role == Role.USER
+    assert "OLD_SUMMARY_TEXT" not in provider.last_request.messages[-1].text
+
+
+async def test_summarize_only_prior_summary_echoes_without_llm():
+    # I4:无新历史、只有已有摘要 → 原样回显,不调用 provider(空脚本被调用会 IndexError→INTERNAL)。
+    provider = FakeProvider([])
+    worker_server, wport = await create_worker_server(provider_factory=lambda *a: provider, port=0)
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            resp = await stub.Summarize(
+                worker_pb2.SummarizeRequest(
+                    agent=worker_pb2.Agent(model="m", provider="fake"),
+                    prior_summary="只有这段摘要",
+                    messages=[],
+                )
+            )
+    finally:
+        await worker_server.stop(None)
+    assert resp.summary == "只有这段摘要"
+    assert resp.input_tokens == 0 and resp.output_tokens == 0
+
+
+async def test_summarize_empty_request_returns_invalid_argument():
+    # I4:既无历史又无已有摘要 → INVALID_ARGUMENT,不白烧一次上游调用。
+    provider = FakeProvider([])
+    worker_server, wport = await create_worker_server(provider_factory=lambda *a: provider, port=0)
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            with pytest.raises(grpc.aio.AioRpcError) as ei:
+                await stub.Summarize(
+                    worker_pb2.SummarizeRequest(
+                        agent=worker_pb2.Agent(model="m", provider="fake"),
+                        prior_summary="",
+                        messages=[],
+                    )
+                )
+    finally:
+        await worker_server.stop(None)
+    assert ei.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+
 async def test_summarize_invalid_role_returns_invalid_argument():
     provider = FakeProvider([_final("x")])
     worker_server, wport = await create_worker_server(provider_factory=lambda *a: provider, port=0)
