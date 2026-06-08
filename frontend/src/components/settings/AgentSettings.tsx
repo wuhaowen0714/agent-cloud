@@ -50,7 +50,13 @@ export function AgentSettings() {
   return <AgentEditor key={agentId} agentId={agentId} userId={userId} />
 }
 
-const toolRow = "flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-slate-50"
+// 可选卡片行:选中时 teal 浅底 + 描边,比裸 checkbox 更有结构感。
+const rowCls = (on: boolean) =>
+  `flex cursor-pointer items-center gap-2.5 rounded-xl border px-3 py-2 transition ${
+    on
+      ? "border-brand-200 bg-brand-50/60"
+      : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
+  }`
 
 function AgentEditor({ agentId, userId }: { agentId: string; userId: string }) {
   const qc = useQueryClient()
@@ -150,7 +156,7 @@ function AgentEditor({ agentId, userId }: { agentId: string; userId: string }) {
       <div className="space-y-1">
         <SectionTitle>工具</SectionTitle>
         {BUILTIN_TOOLS.map((t) => (
-          <label key={t.name} className={toolRow}>
+          <label key={t.name} className={rowCls(tools.has(t.name))}>
             <input
               type="checkbox"
               className="h-4 w-4 accent-brand-600"
@@ -179,7 +185,7 @@ function AgentEditor({ agentId, userId }: { agentId: string; userId: string }) {
           <div className="px-2 text-xs text-slate-400">技能池为空 — 去"技能"页安装</div>
         ) : (
           pool.map((sk) => (
-            <label key={sk.id} className={toolRow}>
+            <label key={sk.id} className={rowCls(skillIds.has(sk.id))}>
               <input
                 type="checkbox"
                 className="h-4 w-4 accent-brand-600"
