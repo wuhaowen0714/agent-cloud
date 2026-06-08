@@ -44,6 +44,13 @@ class Settings(BaseSettings):
     turn_max_total_attempts: int = 6  # 1 首发 + 两类上限之和;纯兜底
     turn_retry_backoff_base_seconds: float = 0.5  # 第 i 次重试等 base*2**i 秒,单步封顶 8s
 
+    # 鉴权(spec: auth-multitenancy)
+    auth_secret: str = "dev-insecure-change-me"  # HS256 签名密钥;prod 必须经 env 覆盖
+    access_token_ttl_seconds: int = 900  # access JWT 有效期 15min
+    refresh_token_ttl_seconds: int = 2592000  # refresh 有效期 30d
+    auth_cookie_name: str = "ac_refresh"  # refresh 的 httpOnly cookie 名
+    auth_cookie_secure: bool = False  # 本地 http=false;prod(https)必须 true
+
     def compaction_threshold_for(self, model: str) -> int:
         """该模型的压缩阈值:优先 per-model 覆盖,否则回退全局默认。"""
         return self.compaction_token_thresholds.get(model, self.compaction_token_threshold)
