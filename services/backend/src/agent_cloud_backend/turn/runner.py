@@ -18,7 +18,7 @@ from agent_cloud_backend.turn.compaction import force_compact, maybe_compact_aft
 from agent_cloud_backend.turn.heartbeat import session_heartbeat
 from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub
 from agent_cloud_backend.turn.messages import common_to_content
-from agent_cloud_backend.turn.retry import RetryAction, RetryPolicy
+from agent_cloud_backend.turn.retry import RetryAction, RetryPolicy, classify
 from agent_cloud_backend.turn.sse import error_sse, turn_event_to_sse
 
 logger = logging.getLogger(__name__)
@@ -151,8 +151,19 @@ async def run_turn(
                         await active.emit({"type": "reset"})
                         current = await reassemble()
                         continue
-                    # GIVE_UP:瞬时耗尽 → recoverable(code 在 _RECOVERABLE);fatal → 不可恢复。
-                    await active.emit(error_sse(exc.code()))
+                    # GIVE_UP:超窗到上限(压缩多轮仍超窗)→ 与"无进展"一致地不可恢复;
+                    # 瞬时耗尽 → recoverable(code 在 _RECOVERABLE);fatal → 不可恢复。
+                    if classify(exc.code()) == "overflow":
+                        await active.emit(
+                            {
+                                "type": "error",
+                                "message": "context too large to compact; "
+                                "please start a new session",
+                                "recoverable": False,
+                            }
+                        )
+                    else:
+                        await active.emit(error_sse(exc.code()))
                     return
     except asyncio.CancelledError:
         # 主动取消(含退避/重试间隙)→ 转成干净的终止事件,让 finally 收尾(不再 re-raise)

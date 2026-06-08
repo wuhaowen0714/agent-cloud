@@ -29,6 +29,7 @@ from agent_cloud_backend.turn.compaction import force_compact, maybe_compact_aft
 from agent_cloud_backend.turn.heartbeat import session_heartbeat
 from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub, get_turn_hub, subscribe
 from agent_cloud_backend.turn.messages import common_to_content
+from agent_cloud_backend.turn.retry import RetryAction, RetryPolicy, classify
 from agent_cloud_backend.turn.runner import run_turn
 from agent_cloud_backend.turn.worker_client import run_turn_via_worker
 
@@ -97,26 +98,60 @@ async def run_turn_endpoint(
             enabled_skills=enabled_skills,
             work_subdir=req_work_subdir,
         )
-        try:
-            async with session_heartbeat(session_id, settings.session_heartbeat_seconds):
-                response = await run_turn_via_worker(settings.worker_endpoint, request)
-        except grpc.aio.AioRpcError as exc:
-            if exc.code() == grpc.StatusCode.RESOURCE_EXHAUSTED:
-                # 上下文超窗:兜底 force-compact(自起一段心跳续租,折叠量大可能慢)。
-                # 有进展 → 503 可重试;无进展(仅剩最近一条 + 摘要仍超窗)→ 413,别让用户白重试。
-                async with session_heartbeat(session_id, settings.session_heartbeat_seconds):
-                    progressed = await force_compact(session_id, settings=settings)
-                if progressed:
+        # 可恢复失败在回合内透明自动重试(spec: turn-recovery)。整个循环在心跳内续租。
+        policy = RetryPolicy.from_settings(settings)
+        overflow_used = transient_used = total_used = 0
+        current = request
+        async with session_heartbeat(session_id, settings.session_heartbeat_seconds):
+            while True:
+                total_used += 1
+                try:
+                    response = await run_turn_via_worker(settings.worker_endpoint, current)
+                    break
+                except grpc.aio.AioRpcError as exc:
+                    action = policy.decide(
+                        exc.code(),
+                        overflow_used=overflow_used,
+                        transient_used=transient_used,
+                        total_used=total_used,
+                    )
+                    if action == RetryAction.COMPACT_RETRY:
+                        progressed = await force_compact(session_id, settings=settings)
+                        if not progressed:
+                            raise HTTPException(
+                                status_code=413,
+                                detail="context too large to compact; please start a new session",
+                            ) from exc
+                        overflow_used += 1
+                        await db.refresh(s)  # 读到压缩后的新摘要/边界
+                        current = await build_run_turn_request(
+                            db,
+                            s,
+                            sandbox_endpoint=sandbox_endpoint,
+                            user_message=body.content,
+                            exclude_message_id=user_msg.id,
+                            enabled_skills=enabled_skills,
+                            work_subdir=req_work_subdir,
+                        )
+                        continue
+                    if action == RetryAction.BACKOFF_RETRY:
+                        await asyncio.sleep(policy.backoff_seconds(transient_used))
+                        transient_used += 1
+                        continue  # 复用 current(同一请求)
+                    # GIVE_UP:超窗到上限 → 413;瞬时耗尽 → 503;fatal → 502。
+                    kind = classify(exc.code())
+                    if kind == "overflow":
+                        raise HTTPException(
+                            status_code=413,
+                            detail="context too large to compact; please start a new session",
+                        ) from exc
+                    if kind == "transient":
+                        raise HTTPException(
+                            status_code=503, detail="service unavailable, please retry"
+                        ) from exc
                     raise HTTPException(
-                        status_code=503, detail="context exceeded, compacted — please retry"
+                        status_code=502, detail=f"worker unavailable: {exc.code().name}"
                     ) from exc
-                raise HTTPException(
-                    status_code=413,
-                    detail="context too large to compact; please start a new session",
-                ) from exc
-            raise HTTPException(
-                status_code=502, detail=f"worker unavailable: {exc.code().name}"
-            ) from exc
 
         # 4. 落库新消息
         persisted = []

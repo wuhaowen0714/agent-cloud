@@ -207,10 +207,12 @@ async def test_concurrent_same_session_turns_one_200_one_409(client, monkeypatch
     assert {r1.status_code, r2.status_code} == {200, 409}, (r1.text, r2.text)
 
 
-async def test_worker_failure_502_releases_lock(client, monkeypatch):
-    """A gRPC worker failure -> 502, and the lock must be released so a
-    subsequent normal turn succeeds."""
+async def test_worker_unavailable_exhausts_to_503_releases_lock(client, monkeypatch):
+    """瞬时 worker 失败重试耗尽 -> 503(可重试),且锁释放,后续回合成功。"""
     from agent_cloud_backend.api import turn as turn_module
+    from agent_cloud_backend.turn import retry as retry_mod
+
+    monkeypatch.setattr(retry_mod.RetryPolicy, "backoff_seconds", lambda self, i: 0.0)
 
     async def _failing_worker(worker_endpoint, request):
         raise grpc.aio.AioRpcError(
@@ -223,9 +225,32 @@ async def test_worker_failure_502_releases_lock(client, monkeypatch):
     monkeypatch.setattr(turn_module, "run_turn_via_worker", _failing_worker)
     sid = await _make_session(client)
     r = await client.post(f"/sessions/{sid}/turn", json={"content": "one"})
-    assert r.status_code == 502, r.text
+    assert r.status_code == 503, r.text
 
     # lock released: a subsequent normal turn works
+    monkeypatch.undo()
+    _install_fake_worker(monkeypatch)
+    r2 = await client.post(f"/sessions/{sid}/turn", json={"content": "two"})
+    assert r2.status_code == 200, r2.text
+
+
+async def test_worker_fatal_code_returns_502_releases_lock(client, monkeypatch):
+    """非可恢复 gRPC code(fatal,如 INVALID_ARGUMENT)不重试 -> 502,锁释放。"""
+    from agent_cloud_backend.api import turn as turn_module
+
+    async def _failing_worker(worker_endpoint, request):
+        raise grpc.aio.AioRpcError(
+            code=grpc.StatusCode.INVALID_ARGUMENT,
+            initial_metadata=grpc.aio.Metadata(),
+            trailing_metadata=grpc.aio.Metadata(),
+            details="bad request",
+        )
+
+    monkeypatch.setattr(turn_module, "run_turn_via_worker", _failing_worker)
+    sid = await _make_session(client)
+    r = await client.post(f"/sessions/{sid}/turn", json={"content": "one"})
+    assert r.status_code == 502, r.text
+
     monkeypatch.undo()
     _install_fake_worker(monkeypatch)
     r2 = await client.post(f"/sessions/{sid}/turn", json={"content": "two"})
@@ -251,22 +276,27 @@ def _install_fake_worker(monkeypatch):
 # --- Plan 12b: compaction (non-streaming endpoint) ---
 
 
-async def test_turn_resource_exhausted_progresses_returns_503_and_releases_lock(
-    client, engine, monkeypatch
-):
-    # worker 报 RESOURCE_EXHAUSTED + 有历史可折叠 → force-compact 有进展 → 可重试 503;锁释放。
+async def test_turn_overflow_auto_retries_then_200(client, engine, monkeypatch):
+    # 超窗一次 → force_compact 有进展 → 自动重试成功 → 200(用户无感)。
     _patch_global_sessionmaker(monkeypatch, engine)
     from agent_cloud_backend.api import turn as turn_module
 
-    async def _exhausted(worker_endpoint, request):
-        raise grpc.aio.AioRpcError(
-            code=grpc.StatusCode.RESOURCE_EXHAUSTED,
-            initial_metadata=grpc.aio.Metadata(),
-            trailing_metadata=grpc.aio.Metadata(),
-            details="context window exceeded",
+    calls = {"n": 0}
+
+    async def _worker(worker_endpoint, request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise grpc.aio.AioRpcError(
+                code=grpc.StatusCode.RESOURCE_EXHAUSTED,
+                initial_metadata=grpc.aio.Metadata(),
+                trailing_metadata=grpc.aio.Metadata(),
+            )
+        return worker_pb2.RunTurnResponse(
+            new_messages=[worker_pb2.Msg(role="assistant", text="done")],
+            input_tokens=1, output_tokens=1, stop_reason="end_turn",
         )
 
-    monkeypatch.setattr(turn_module, "run_turn_via_worker", _exhausted)
+    monkeypatch.setattr(turn_module, "run_turn_via_worker", _worker)
 
     async def _fake_summarize(endpoint, req):
         return "S"
@@ -274,16 +304,61 @@ async def test_turn_resource_exhausted_progresses_returns_503_and_releases_lock(
     monkeypatch.setattr(
         "agent_cloud_backend.turn.compaction.summarize_via_worker", _fake_summarize
     )
-
     sid = await _make_session(client)
-    await _seed_messages(engine, sid, 3)  # + 端点本回合的 user 消息 = 4 条;keep_recent=1 可折叠
+    await _seed_messages(engine, sid, 3)
+    r = await client.post(f"/sessions/{sid}/turn", json={"content": "go"})
+    assert r.status_code == 200, r.text
+    assert calls["n"] == 2  # 失败 1 + 重试 1
+
+
+async def test_turn_transient_auto_retries_then_200(client, engine, monkeypatch):
+    # 瞬时 UNAVAILABLE 一次 → 退避后自动重试成功 → 200。
+    _patch_global_sessionmaker(monkeypatch, engine)
+    from agent_cloud_backend.api import turn as turn_module
+    from agent_cloud_backend.turn import retry as retry_mod
+
+    monkeypatch.setattr(retry_mod.RetryPolicy, "backoff_seconds", lambda self, i: 0.0)
+    calls = {"n": 0}
+
+    async def _worker(worker_endpoint, request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise grpc.aio.AioRpcError(
+                code=grpc.StatusCode.UNAVAILABLE,
+                initial_metadata=grpc.aio.Metadata(),
+                trailing_metadata=grpc.aio.Metadata(),
+            )
+        return worker_pb2.RunTurnResponse(
+            new_messages=[worker_pb2.Msg(role="assistant", text="ok")],
+            input_tokens=1, output_tokens=1, stop_reason="end_turn",
+        )
+
+    monkeypatch.setattr(turn_module, "run_turn_via_worker", _worker)
+    sid = await _make_session(client)
+    r = await client.post(f"/sessions/{sid}/turn", json={"content": "go"})
+    assert r.status_code == 200, r.text
+    assert calls["n"] == 2
+
+
+async def test_turn_transient_exhausted_returns_503(client, engine, monkeypatch):
+    # 瞬时错误一直失败 → 退避重试耗尽 → 503(可重试)。
+    _patch_global_sessionmaker(monkeypatch, engine)
+    from agent_cloud_backend.api import turn as turn_module
+    from agent_cloud_backend.turn import retry as retry_mod
+
+    monkeypatch.setattr(retry_mod.RetryPolicy, "backoff_seconds", lambda self, i: 0.0)
+
+    async def _worker(worker_endpoint, request):
+        raise grpc.aio.AioRpcError(
+            code=grpc.StatusCode.UNAVAILABLE,
+            initial_metadata=grpc.aio.Metadata(),
+            trailing_metadata=grpc.aio.Metadata(),
+        )
+
+    monkeypatch.setattr(turn_module, "run_turn_via_worker", _worker)
+    sid = await _make_session(client)
     r = await client.post(f"/sessions/{sid}/turn", json={"content": "go"})
     assert r.status_code == 503, r.text
-
-    # 锁已释放:后续正常回合成功
-    _install_fake_worker(monkeypatch)
-    r2 = await client.post(f"/sessions/{sid}/turn", json={"content": "again"})
-    assert r2.status_code == 200, r2.text
 
 
 async def test_turn_resource_exhausted_no_progress_returns_413(client, engine, monkeypatch):
