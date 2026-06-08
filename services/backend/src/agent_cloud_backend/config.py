@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     # 文件管理:单文件上传上限(字节)。超出 → 413。
     file_upload_max_bytes: int = 100 * 1024 * 1024
 
+    # 会话压缩(spec §11):回合后用模型返回的真实 context_tokens 判阈值,超此则折叠历史。
+    compaction_token_threshold: int = 32000  # ~模型 window 的 70-80%
+    compaction_keep_recent: int = 8  # 压缩时保留逐字的最近消息条数
+
     @property
     def effective_sandbox_host_root(self) -> str:
         return self.sandbox_host_root or self.sandbox_base_root
