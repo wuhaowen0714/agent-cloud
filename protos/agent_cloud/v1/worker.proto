@@ -6,6 +6,7 @@ package agent_cloud.v1;
 service Worker {
   rpc RunTurn(RunTurnRequest) returns (RunTurnResponse);
   rpc RunTurnStream(RunTurnRequest) returns (stream TurnEvent);
+  rpc Summarize(SummarizeRequest) returns (SummarizeResponse);
 }
 
 message ToolCall {
@@ -63,6 +64,7 @@ message RunTurnRequest {
   string user_message = 8;
   string sandbox_endpoint = 9;
   string work_subdir = 10;
+  string history_summary = 11;  // 此前历史的摘要,worker 拼进 system
 }
 
 message RunTurnResponse {
@@ -70,6 +72,7 @@ message RunTurnResponse {
   int64 input_tokens = 2;
   int64 output_tokens = 3;
   string stop_reason = 4;
+  int64 context_tokens = 5;  // 最后一次 LLM 调用的 input_tokens(真实上下文大小)
 }
 
 message TextDelta { string text = 1; }
@@ -89,6 +92,7 @@ message TurnDone {
   int64 input_tokens = 2;
   int64 output_tokens = 3;
   string stop_reason = 4;
+  int64 context_tokens = 5;  // 最后一次 LLM 调用的 input_tokens(真实上下文大小)
 }
 message TurnEvent {
   oneof event {
@@ -98,4 +102,15 @@ message TurnEvent {
     ToolResultEvent tool_result = 4;
     TurnDone turn_done = 5;
   }
+}
+
+message SummarizeRequest {
+  Agent agent = 1;
+  string prior_summary = 2;
+  repeated Msg messages = 3;
+}
+message SummarizeResponse {
+  string summary = 1;
+  int64 input_tokens = 2;
+  int64 output_tokens = 3;
 }

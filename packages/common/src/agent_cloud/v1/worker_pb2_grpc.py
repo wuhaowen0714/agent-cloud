@@ -45,6 +45,11 @@ class WorkerStub:
                 request_serializer=agent__cloud_dot_v1_dot_worker__pb2.RunTurnRequest.SerializeToString,
                 response_deserializer=agent__cloud_dot_v1_dot_worker__pb2.TurnEvent.FromString,
                 _registered_method=True)
+        self.Summarize = channel.unary_unary(
+                '/agent_cloud.v1.Worker/Summarize',
+                request_serializer=agent__cloud_dot_v1_dot_worker__pb2.SummarizeRequest.SerializeToString,
+                response_deserializer=agent__cloud_dot_v1_dot_worker__pb2.SummarizeResponse.FromString,
+                _registered_method=True)
 
 
 class WorkerServicer:
@@ -63,6 +68,12 @@ class WorkerServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def Summarize(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_WorkerServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -75,6 +86,11 @@ def add_WorkerServicer_to_server(servicer, server):
                     servicer.RunTurnStream,
                     request_deserializer=agent__cloud_dot_v1_dot_worker__pb2.RunTurnRequest.FromString,
                     response_serializer=agent__cloud_dot_v1_dot_worker__pb2.TurnEvent.SerializeToString,
+            ),
+            'Summarize': grpc.unary_unary_rpc_method_handler(
+                    servicer.Summarize,
+                    request_deserializer=agent__cloud_dot_v1_dot_worker__pb2.SummarizeRequest.FromString,
+                    response_serializer=agent__cloud_dot_v1_dot_worker__pb2.SummarizeResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -132,6 +148,33 @@ class Worker:
             '/agent_cloud.v1.Worker/RunTurnStream',
             agent__cloud_dot_v1_dot_worker__pb2.RunTurnRequest.SerializeToString,
             agent__cloud_dot_v1_dot_worker__pb2.TurnEvent.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Summarize(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/agent_cloud.v1.Worker/Summarize',
+            agent__cloud_dot_v1_dot_worker__pb2.SummarizeRequest.SerializeToString,
+            agent__cloud_dot_v1_dot_worker__pb2.SummarizeResponse.FromString,
             options,
             channel_credentials,
             insecure,
