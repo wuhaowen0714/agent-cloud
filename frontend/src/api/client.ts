@@ -1,4 +1,13 @@
-import type { AgentConfig, ContextDocument, FileEntry, Message, Session, Skill, User } from "../types"
+import type {
+  AgentConfig,
+  ContextDocument,
+  FileEntry,
+  Message,
+  ProviderCredential,
+  Session,
+  Skill,
+  User,
+} from "../types"
 import { authedFetch, setAccess } from "./auth"
 
 // 带 HTTP 状态码的错误,便于上层(如 AuthGate)按 status 分支,而不是脆弱地 match 错误文案。
@@ -96,7 +105,10 @@ export const api = {
   patchAgent: (
     id: string,
     body: Partial<
-      Pick<AgentConfig, "name" | "model" | "provider" | "thinking_level" | "enabled_tools">
+      Pick<
+        AgentConfig,
+        "name" | "model" | "provider" | "thinking_level" | "enabled_tools" | "key_ref"
+      >
     >,
   ) => http<AgentConfig>(`/agent-configs/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   listDocs: (scope: string, agentId?: string) =>
@@ -119,4 +131,10 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ skill_ids: skillIds }),
     }),
+
+  // ── provider credentials(BYO-Key)──
+  listCredentials: () => http<ProviderCredential[]>("/credentials"),
+  createCredential: (body: { name: string; base_url: string; api_key: string }) =>
+    http<ProviderCredential>("/credentials", { method: "POST", body: JSON.stringify(body) }),
+  deleteCredential: (id: string) => http<void>(`/credentials/${id}`, { method: "DELETE" }),
 }

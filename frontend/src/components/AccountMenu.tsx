@@ -7,6 +7,7 @@ export function AccountMenu() {
   const user = useStore((s) => s.user)
   const logout = useStore((s) => s.logout)
   const toggleFileDrawer = useStore((s) => s.toggleFileDrawer)
+  const openSettings = useStore((s) => s.openSettings)
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -42,6 +43,16 @@ export function AccountMenu() {
           >
             <span className="w-3.5 shrink-0 text-center">📁</span>
             <span>工作区文件</span>
+          </button>
+          <button
+            className={item}
+            onClick={() => {
+              openSettings("keys")
+              setOpen(false)
+            }}
+          >
+            <span className="w-3.5 shrink-0 text-center">🔑</span>
+            <span>Provider Keys</span>
           </button>
           <button className={`${item} hover:text-red-600`} onClick={doLogout}>
             <span className="w-3.5 shrink-0 text-center">⏻</span>

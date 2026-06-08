@@ -55,9 +55,10 @@ function AgentEditor({ agentId, userId }: { agentId: string; userId: string }) {
   const docsQ = useQuery({ queryKey: ["docs", "agent", agentId], queryFn: () => api.listDocs("agent", agentId) })
   const docs = docsQ.data ?? []
   const { data: pool = [] } = useQuery({ queryKey: ["skills", userId], queryFn: () => api.listSkills() })
+  const { data: creds = [] } = useQuery({ queryKey: ["credentials", userId], queryFn: () => api.listCredentials() })
   const enabledQ = useQuery({ queryKey: ["agentSkills", agentId], queryFn: () => api.getAgentSkills(agentId) })
 
-  const [form, setForm] = useState({ name: "", model: "", provider: "", thinking_level: "" })
+  const [form, setForm] = useState({ name: "", model: "", provider: "", thinking_level: "", key_ref: "" })
   const [tools, setTools] = useState<Set<string>>(new Set())
   const [instructions, setInstructions] = useState("")
   const [skillIds, setSkillIds] = useState<Set<string>>(new Set())
@@ -73,6 +74,7 @@ function AgentEditor({ agentId, userId }: { agentId: string; userId: string }) {
       model: agent.model,
       provider: agent.provider,
       thinking_level: agent.thinking_level ?? "",
+      key_ref: agent.key_ref ?? "",
     })
     setTools(enabledToChecked(agent.enabled_tools))
     setInstructions(docs.find((d) => d.type === "AGENTS")?.content ?? "")
@@ -83,7 +85,11 @@ function AgentEditor({ agentId, userId }: { agentId: string; userId: string }) {
   const hadAgentsDoc = docs.some((d) => d.type === "AGENTS")
   const save = useMutation({
     mutationFn: async () => {
-      await api.patchAgent(agentId, { ...form, enabled_tools: checkedToEnabled(tools) })
+      await api.patchAgent(agentId, {
+        ...form,
+        key_ref: form.key_ref || null, // 空 = 用全局共享 Key
+        enabled_tools: checkedToEnabled(tools),
+      })
       // 非空则写入;若原本有 AGENTS 文档则即使清空也写入(以持久化"清空"),否则不创建空文档。
       if (instructions.trim() || hadAgentsDoc) await api.putDoc("agent", "AGENTS", instructions, agentId)
       await api.setAgentSkills(agentId, [...skillIds])
@@ -117,6 +123,14 @@ function AgentEditor({ agentId, userId }: { agentId: string; userId: string }) {
           <option value="low">low</option>
           <option value="medium">medium</option>
           <option value="high">high</option>
+        </select>
+        <select className={field} value={form.key_ref} onChange={(e) => setForm({ ...form, key_ref: e.target.value })}>
+          <option value="">凭据:全局共享 Key</option>
+          {creds.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name} · {c.masked}
+            </option>
+          ))}
         </select>
       </div>
 

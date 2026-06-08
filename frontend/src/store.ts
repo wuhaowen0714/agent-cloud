@@ -22,6 +22,7 @@ interface AppState {
   live: LiveTurn | null
   fileDrawerOpen: boolean
   settingsOpen: boolean
+  settingsTab: "agent" | "skills" | "keys"
   setAuth: (user: User | null) => void
   logout: () => void
   setAgent: (id: string | null) => void
@@ -30,7 +31,7 @@ interface AppState {
   setLive: (fn: (t: LiveTurn) => LiveTurn) => void
   clearLive: () => void
   toggleFileDrawer: () => void
-  openSettings: () => void
+  openSettings: (tab?: "agent" | "skills" | "keys") => void
   closeSettings: () => void
 }
 
@@ -45,6 +46,7 @@ export const useStore = create<AppState>((set, get) => ({
   live: null,
   fileDrawerOpen: false,
   settingsOpen: false,
+  settingsTab: "agent",
   setAuth: (user) => {
     const uid = user?.id ?? null
     const prev = get().userId
@@ -84,7 +86,7 @@ export const useStore = create<AppState>((set, get) => ({
   setLive: (fn) => set((s) => (s.live ? { live: fn(s.live) } : {})),
   clearLive: () => set({ live: null }),
   toggleFileDrawer: () => set((s) => ({ fileDrawerOpen: !s.fileDrawerOpen })),
-  openSettings: () => set({ settingsOpen: true }),
+  openSettings: (tab = "agent") => set({ settingsOpen: true, settingsTab: tab }),
   closeSettings: () => set({ settingsOpen: false }),
 }))
 

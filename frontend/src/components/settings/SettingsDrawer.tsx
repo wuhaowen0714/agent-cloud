@@ -1,13 +1,14 @@
-import { useState } from "react"
 import { useStore } from "../../store"
 import { AgentSettings } from "./AgentSettings"
+import { KeysPanel } from "./KeysPanel"
 import { SkillsPanel } from "./SkillsPanel"
 
 export function SettingsDrawer() {
   const open = useStore((s) => s.settingsOpen)
   const close = useStore((s) => s.closeSettings)
   const userId = useStore((s) => s.userId)
-  const [tab, setTab] = useState<"agent" | "skills">("agent")
+  const tab = useStore((s) => s.settingsTab)
+  const setTab = (t: "agent" | "skills" | "keys") => useStore.setState({ settingsTab: t })
   if (!open || !userId) return null
   const tabCls = (t: string) =>
     `px-3 py-1.5 text-sm ${
@@ -32,9 +33,14 @@ export function SettingsDrawer() {
           <button className={tabCls("skills")} onClick={() => setTab("skills")}>
             技能
           </button>
+          <button className={tabCls("keys")} onClick={() => setTab("keys")}>
+            Provider Keys
+          </button>
         </div>
         <div className="flex-1 overflow-auto p-3">
-          {tab === "agent" ? <AgentSettings /> : <SkillsPanel />}
+          {tab === "agent" && <AgentSettings />}
+          {tab === "skills" && <SkillsPanel />}
+          {tab === "keys" && <KeysPanel />}
         </div>
       </aside>
     </>

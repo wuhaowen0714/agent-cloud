@@ -2,7 +2,9 @@ export interface User { id: string; email: string }
 export interface AgentConfig {
   id: string; user_id: string; name: string; model: string; provider: string
   thinking_level: string | null; enabled_tools: string[]; permissions: Record<string, unknown>
+  key_ref: string | null
 }
+export interface ProviderCredential { id: string; name: string; base_url: string; masked: string; created_at: string }
 export interface Session { id: string; user_id: string; agent_config_id: string; title: string | null; work_subdir: string }
 
 export interface ToolCall { id: string; name: string; arguments: Record<string, unknown> }
