@@ -1,14 +1,15 @@
 import mimetypes
-import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 
+from agent_cloud_backend.api.deps import get_current_user
 from agent_cloud_backend.config import Settings, get_settings
 from agent_cloud_backend.files.deps import get_file_store
 from agent_cloud_backend.files.errors import FileConflict, FileTooLarge, PathEscape
 from agent_cloud_backend.files.store import FileStore
+from agent_cloud_backend.models.user import User
 from agent_cloud_backend.schemas.file import FileEntryRead, MkdirRequest, MoveRequest
 
 router = APIRouter(prefix="/files", tags=["files"])
@@ -38,24 +39,24 @@ def _cd_filename(name: str) -> str:
 
 @router.get("", response_model=list[FileEntryRead])
 def list_files(
-    user_id: uuid.UUID,
     path: str = "",
     store: FileStore = Depends(get_file_store),
+    user: User = Depends(get_current_user),
 ):
     try:
-        return store.list_dir(str(user_id), path)
+        return store.list_dir(str(user.id), path)
     except Exception as exc:
         raise _http_from(exc) from exc
 
 
 @router.get("/raw")
 def raw(
-    user_id: uuid.UUID,
     path: str,
     attachment: bool = False,
     store: FileStore = Depends(get_file_store),
+    user: User = Depends(get_current_user),
 ):
-    uid = str(user_id)
+    uid = str(user.id)
     try:
         entry = store.stat(uid, path)
     except Exception as exc:
@@ -87,46 +88,54 @@ def raw(
 
 @router.post("/upload", response_model=list[FileEntryRead], status_code=status.HTTP_201_CREATED)
 def upload(
-    user_id: uuid.UUID,
     path: str = "",
     files: list[UploadFile] = File(...),
     store: FileStore = Depends(get_file_store),
     settings: Settings = Depends(get_settings),
+    user: User = Depends(get_current_user),
 ):
     out = []
     for uf in files:
         name = Path(uf.filename or "upload").name  # 只取 basename,消毒
         dest = f"{path}/{name}" if path else name
         try:
-            out.append(store.write(str(user_id), dest, uf.file, settings.file_upload_max_bytes))
+            out.append(store.write(str(user.id), dest, uf.file, settings.file_upload_max_bytes))
         except Exception as exc:
             raise _http_from(exc) from exc
     return out
 
 
 @router.post("/mkdir", response_model=FileEntryRead)
-def mkdir(body: MkdirRequest, store: FileStore = Depends(get_file_store)):
+def mkdir(
+    body: MkdirRequest,
+    store: FileStore = Depends(get_file_store),
+    user: User = Depends(get_current_user),
+):
     try:
-        return store.mkdir(body.user_id, body.path)
+        return store.mkdir(str(user.id), body.path)
     except Exception as exc:
         raise _http_from(exc) from exc
 
 
 @router.post("/move", response_model=FileEntryRead)
-def move(body: MoveRequest, store: FileStore = Depends(get_file_store)):
+def move(
+    body: MoveRequest,
+    store: FileStore = Depends(get_file_store),
+    user: User = Depends(get_current_user),
+):
     try:
-        return store.move(body.user_id, body.src, body.dst)
+        return store.move(str(user.id), body.src, body.dst)
     except Exception as exc:
         raise _http_from(exc) from exc
 
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
 def delete(
-    user_id: uuid.UUID,
     path: str,
     store: FileStore = Depends(get_file_store),
+    user: User = Depends(get_current_user),
 ):
     try:
-        store.delete(str(user_id), path)
+        store.delete(str(user.id), path)
     except Exception as exc:
         raise _http_from(exc) from exc

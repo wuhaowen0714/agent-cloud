@@ -111,3 +111,30 @@ async def client_noraise(engine, tmp_path) -> AsyncIterator[AsyncClient]:
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
+
+
+async def register_user(client: AsyncClient, email: str | None = None) -> tuple[str, str]:
+    """注册一个新用户;返回 (access_token, user_id)。不改 client 的默认 header。"""
+    email = email or f"{_uuid.uuid4()}@e.com"
+    r = await client.post("/auth/register", json={"email": email, "password": "password123"})
+    assert r.status_code == 201, r.text
+    body = r.json()
+    return body["access_token"], body["user"]["id"]
+
+
+@pytest_asyncio.fixture
+async def auth_client(client: AsyncClient) -> AsyncClient:
+    """已登录的 client:注册一个用户并把 access token 设为默认 Authorization header。
+    需要 user_id 的测试可读 client.user_id;需要多用户的用 register_user() 另注册。"""
+    access, user_id = await register_user(client)
+    client.headers["Authorization"] = f"Bearer {access}"
+    client.user_id = user_id  # type: ignore[attr-defined]
+    return client
+
+
+@pytest_asyncio.fixture
+async def auth_client_noraise(client_noraise: AsyncClient) -> AsyncClient:
+    access, user_id = await register_user(client_noraise)
+    client_noraise.headers["Authorization"] = f"Bearer {access}"
+    client_noraise.user_id = user_id  # type: ignore[attr-defined]
+    return client_noraise

@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict
 class ContextDocumentUpsert(BaseModel):
     scope: str  # user | agent
     type: str  # USER | AGENTS | SOUL | IDENTITY | TOOLS | HEARTBEAT | BOOTSTRAP
-    owner_id: uuid.UUID
+    agent_id: uuid.UUID | None = None  # scope=="agent" 时必填(须属本人);scope=="user" 忽略
     content: str
 
 

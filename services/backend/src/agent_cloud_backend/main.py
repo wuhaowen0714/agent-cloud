@@ -17,7 +17,6 @@ from agent_cloud_backend.api import (
     sessions,
     skills,
     turn,
-    users,
 )
 
 logger = logging.getLogger(__name__)
@@ -78,7 +77,6 @@ def create_app() -> FastAPI:
 
     for module in (
         auth,
-        users,
         agent_configs,
         sessions,
         messages,

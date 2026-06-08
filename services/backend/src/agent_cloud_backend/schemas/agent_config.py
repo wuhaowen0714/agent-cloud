@@ -5,7 +5,6 @@ from pydantic import BaseModel, ConfigDict
 
 
 class AgentConfigCreate(BaseModel):
-    user_id: uuid.UUID
     name: str
     model: str
     provider: str

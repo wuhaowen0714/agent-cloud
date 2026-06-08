@@ -45,7 +45,8 @@ class Settings(BaseSettings):
     turn_retry_backoff_base_seconds: float = 0.5  # 第 i 次重试等 base*2**i 秒,单步封顶 8s
 
     # 鉴权(spec: auth-multitenancy)
-    auth_secret: str = "dev-insecure-change-me"  # HS256 签名密钥;prod 必须经 env 覆盖
+    # HS256 签名密钥;prod 必须经 env 覆盖。默认 ≥32B 仅为消除 JWT 短密钥警告,非安全值。
+    auth_secret: str = "dev-insecure-secret-change-me-in-production-0123456789"
     access_token_ttl_seconds: int = 900  # access JWT 有效期 15min
     refresh_token_ttl_seconds: int = 2592000  # refresh 有效期 30d
     auth_cookie_name: str = "ac_refresh"  # refresh 的 httpOnly cookie 名

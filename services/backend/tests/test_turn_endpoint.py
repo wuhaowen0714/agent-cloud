@@ -89,15 +89,15 @@ def fake_worker(monkeypatch):
 
 
 async def _make_session(client):
-    uid = (await client.post("/users", json={"email": "t@example.com"})).json()["id"]
+    # 注册一个用户并把 access token 设为 client 默认 header,后续创建都归属本人。
+    reg = await client.post(
+        "/auth/register", json={"email": f"{uuid.uuid4()}@e.com", "password": "password123"}
+    )
+    client.headers["Authorization"] = f"Bearer {reg.json()['access_token']}"
     aid = (
-        await client.post(
-            "/agent-configs", json={"user_id": uid, "name": "c", "model": "m", "provider": "p"}
-        )
+        await client.post("/agent-configs", json={"name": "c", "model": "m", "provider": "p"})
     ).json()["id"]
-    sid = (await client.post("/sessions", json={"user_id": uid, "agent_config_id": aid})).json()[
-        "id"
-    ]
+    sid = (await client.post("/sessions", json={"agent_config_id": aid})).json()["id"]
     return sid
 
 
@@ -123,8 +123,8 @@ async def test_turn_releases_lock_so_second_turn_works(client, fake_worker):
     assert (await client.post(f"/sessions/{sid}/turn", json={"content": "two"})).status_code == 200
 
 
-async def test_turn_on_missing_session_404(client, fake_worker):
-    r = await client.post(f"/sessions/{uuid.uuid4()}/turn", json={"content": "x"})
+async def test_turn_on_missing_session_404(auth_client, fake_worker):
+    r = await auth_client.post(f"/sessions/{uuid.uuid4()}/turn", json={"content": "x"})
     assert r.status_code == 404
 
 

@@ -13,11 +13,9 @@ class FileEntryRead(BaseModel):
 
 
 class MkdirRequest(BaseModel):
-    user_id: str
     path: str
 
 
 class MoveRequest(BaseModel):
-    user_id: str
     src: str
     dst: str

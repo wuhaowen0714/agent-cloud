@@ -4,9 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent_cloud_backend.api.deps import get_session
-from agent_cloud_backend.models.agent_config import AgentConfig
+from agent_cloud_backend.api.deps import get_current_user, get_session
+from agent_cloud_backend.api.ownership import owned_agent
 from agent_cloud_backend.models.skill import Skill
+from agent_cloud_backend.models.user import User
 from agent_cloud_backend.repositories.skill import AgentSkillEnableRepository
 from agent_cloud_backend.schemas.skill import AgentSkillsUpdate, SkillRead
 
@@ -14,7 +15,12 @@ router = APIRouter(prefix="/agent-configs", tags=["agent-skills"])
 
 
 @router.get("/{agent_id}/skills", response_model=list[SkillRead])
-async def list_agent_skills(agent_id: uuid.UUID, session: AsyncSession = Depends(get_session)):
+async def list_agent_skills(
+    agent_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    await owned_agent(agent_id, user.id, session)
     return await AgentSkillEnableRepository(session).list_enabled_for_agent(agent_id)
 
 
@@ -23,15 +29,12 @@ async def set_agent_skills(
     agent_id: uuid.UUID,
     body: AgentSkillsUpdate,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
-    agent = await session.get(AgentConfig, agent_id)
-    if agent is None:
-        raise HTTPException(status_code=404, detail="agent config not found")
+    await owned_agent(agent_id, user.id, session)
     if body.skill_ids:
         result = await session.execute(
-            select(Skill.id).where(
-                Skill.id.in_(body.skill_ids), Skill.user_id == agent.user_id
-            )
+            select(Skill.id).where(Skill.id.in_(body.skill_ids), Skill.user_id == user.id)
         )
         owned = {r[0] for r in result}
         missing = set(body.skill_ids) - owned

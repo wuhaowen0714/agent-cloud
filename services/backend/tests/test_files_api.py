@@ -1,4 +1,7 @@
+from types import SimpleNamespace
+
 import pytest
+from agent_cloud_backend.api.deps import get_current_user
 from agent_cloud_backend.files.deps import get_file_store
 from agent_cloud_backend.files.store import LocalFileStore
 from agent_cloud_backend.main import create_app
@@ -11,93 +14,96 @@ UID = "11111111-1111-1111-1111-111111111111"
 def client(tmp_path):
     app = create_app()
     app.dependency_overrides[get_file_store] = lambda: LocalFileStore(str(tmp_path))
+    # 文件端点只依赖 get_current_user(取 user.id)——桩成固定 UID,保持本测试 DB-free。
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=UID)
     return TestClient(app)
 
 
 def test_list_empty_then_upload_then_list(client):
-    assert client.get("/files", params={"user_id": UID}).json() == []
+    assert client.get("/files").json() == []
     r = client.post(
         "/files/upload",
-        params={"user_id": UID, "path": ""},
+        params={"path": ""},
         files=[("files", ("a.txt", b"hello", "text/plain"))],
     )
     assert r.status_code == 201
     assert r.json()[0]["name"] == "a.txt" and r.json()[0]["size"] == 5
-    listing = client.get("/files", params={"user_id": UID}).json()
+    listing = client.get("/files").json()
     assert [e["name"] for e in listing] == ["a.txt"]
 
 
 def test_raw_download_and_preview(client):
-    client.post("/files/upload", params={"user_id": UID},
-                files=[("files", ("a.txt", b"hello", "text/plain"))])
-    r = client.get("/files/raw", params={"user_id": UID, "path": "a.txt"})
+    client.post("/files/upload", files=[("files", ("a.txt", b"hello", "text/plain"))])
+    r = client.get("/files/raw", params={"path": "a.txt"})
     assert r.status_code == 200 and r.content == b"hello"
     assert "inline" in r.headers["content-disposition"]
-    r2 = client.get("/files/raw", params={"user_id": UID, "path": "a.txt", "attachment": True})
+    r2 = client.get("/files/raw", params={"path": "a.txt", "attachment": True})
     assert "attachment" in r2.headers["content-disposition"]
 
 
 def test_raw_directory_returns_zip(client):
-    client.post("/files/upload", params={"user_id": UID, "path": "d"},
-                files=[("files", ("a.txt", b"x", "text/plain"))])
-    r = client.get("/files/raw", params={"user_id": UID, "path": "d"})
+    client.post(
+        "/files/upload", params={"path": "d"}, files=[("files", ("a.txt", b"x", "text/plain"))]
+    )
+    r = client.get("/files/raw", params={"path": "d"})
     assert r.status_code == 200 and r.headers["content-type"] == "application/zip"
     assert "d.zip" in r.headers["content-disposition"]
 
 
 def test_mkdir_move_delete(client):
-    assert client.post("/files/mkdir", json={"user_id": UID, "path": "d"}).status_code == 200
-    client.post("/files/upload", params={"user_id": UID, "path": "d"},
-                files=[("files", ("a.txt", b"x", "text/plain"))])
-    assert client.post("/files/move",
-                       json={"user_id": UID, "src": "d/a.txt", "dst": "d/b.txt"}).status_code == 200
-    assert client.request("DELETE", "/files",
-                          params={"user_id": UID, "path": "d"}).status_code == 204
-    assert client.get("/files", params={"user_id": UID}).json() == []
+    assert client.post("/files/mkdir", json={"path": "d"}).status_code == 200
+    client.post(
+        "/files/upload", params={"path": "d"}, files=[("files", ("a.txt", b"x", "text/plain"))]
+    )
+    assert (
+        client.post("/files/move", json={"src": "d/a.txt", "dst": "d/b.txt"}).status_code == 200
+    )
+    assert client.request("DELETE", "/files", params={"path": "d"}).status_code == 204
+    assert client.get("/files").json() == []
 
 
 def test_path_jail_rejected_400(client):
-    assert client.get("/files", params={"user_id": UID, "path": "../.."}).status_code == 400
+    assert client.get("/files", params={"path": "../.."}).status_code == 400
 
 
 def test_not_found_404(client):
-    assert client.get("/files/raw", params={"user_id": UID, "path": "nope.txt"}).status_code == 404
+    assert client.get("/files/raw", params={"path": "nope.txt"}).status_code == 404
 
 
 def test_mkdir_conflict_409(client):
-    client.post("/files/mkdir", json={"user_id": UID, "path": "d"})
-    assert client.post("/files/mkdir", json={"user_id": UID, "path": "d"}).status_code == 409
+    client.post("/files/mkdir", json={"path": "d"})
+    assert client.post("/files/mkdir", json={"path": "d"}).status_code == 409
 
 
 def test_upload_too_large_413(client, monkeypatch):
     # get_settings() 每次调用现读环境变量 → 设小上限触发 413
     monkeypatch.setenv("AGENT_CLOUD_FILE_UPLOAD_MAX_BYTES", "3")
-    r = client.post("/files/upload", params={"user_id": UID},
-                    files=[("files", ("big.bin", b"toolong", "application/octet-stream"))])
+    r = client.post(
+        "/files/upload", files=[("files", ("big.bin", b"toolong", "application/octet-stream"))]
+    )
     assert r.status_code == 413
 
 
 def test_move_into_a_file_is_400_not_500(client):
     # 把文件当目录用(move 进 f/inner)→ FileExistsError 应映射成 400,而非 500(I1)
-    client.post("/files/upload", params={"user_id": UID},
-                files=[("files", ("f", b"x", "text/plain"))])
-    r = client.post("/files/move", json={"user_id": UID, "src": "f", "dst": "f/inner"})
+    client.post("/files/upload", files=[("files", ("f", b"x", "text/plain"))])
+    r = client.post("/files/move", json={"src": "f", "dst": "f/inner"})
     assert r.status_code == 400
 
 
 def test_upload_into_a_file_is_400_not_500(client):
-    client.post("/files/upload", params={"user_id": UID},
-                files=[("files", ("f", b"x", "text/plain"))])
-    r = client.post("/files/upload", params={"user_id": UID, "path": "f"},
-                    files=[("files", ("g", b"x", "text/plain"))])
+    client.post("/files/upload", files=[("files", ("f", b"x", "text/plain"))])
+    r = client.post(
+        "/files/upload", params={"path": "f"}, files=[("files", ("g", b"x", "text/plain"))]
+    )
     assert r.status_code == 400
 
 
 def test_content_disposition_filename_sanitized(client, tmp_path):
-    # 直接落一个名字含 " 的文件(multipart 自身的引号规则无法传这种名),验证下载头不被破坏(M1)
+    # 直接落一个名字含 " 的文件,验证下载头不被破坏(M1)
     ws = tmp_path / UID / "workspace"
     ws.mkdir(parents=True)
     (ws / 'a"b.txt').write_text("x")
-    r = client.get("/files/raw", params={"user_id": UID, "path": 'a"b.txt'})
+    r = client.get("/files/raw", params={"path": 'a"b.txt'})
     assert r.status_code == 200
-    assert r.headers["content-disposition"].count('"') == 2  # 仅包裹 filename 的一对引号
+    assert r.headers["content-disposition"].count('"') == 2

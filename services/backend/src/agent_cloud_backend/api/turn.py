@@ -11,10 +11,12 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent_cloud_backend.api.deps import get_session
+from agent_cloud_backend.api.deps import get_current_user, get_session
+from agent_cloud_backend.api.ownership import owned_session
 from agent_cloud_backend.config import Settings, get_settings
 from agent_cloud_backend.db import get_sessionmaker
 from agent_cloud_backend.models.message import Message
+from agent_cloud_backend.models.user import User
 from agent_cloud_backend.repositories.message import MessageRepository
 from agent_cloud_backend.repositories.session import SessionRepository
 from agent_cloud_backend.repositories.skill import AgentSkillEnableRepository
@@ -46,13 +48,12 @@ async def run_turn_endpoint(
     settings: Settings = Depends(get_settings),
     manager: SandboxManager = Depends(get_sandbox_manager),
     store: ObjectStore = Depends(get_object_store),
+    user: User = Depends(get_current_user),
 ):
     session_repo = SessionRepository(db)
     msg_repo = MessageRepository(db)
 
-    s = await session_repo.get(session_id)
-    if s is None:
-        raise HTTPException(status_code=404, detail="session not found")
+    s = await owned_session(session_id, user.id, db)  # 404 if missing or not owned
 
     # 1. 加锁(失败=并发,拒绝;不落任何东西)
     if not await session_repo.try_acquire(session_id):
@@ -204,14 +205,13 @@ async def stream_turn_endpoint(
     manager: SandboxManager = Depends(get_sandbox_manager),
     store: ObjectStore = Depends(get_object_store),
     hub: TurnHub = Depends(get_turn_hub),
+    user: User = Depends(get_current_user),
 ):
     # 用显式 DB session 做准备工作并在返回订阅流【之前】关闭:否则 Depends(get_session)
     # 的会话会被 FastAPI 持有到流结束,长回合白占一个请求 DB 连接。订阅流本身不碰 DB。
     async with get_sessionmaker()() as db:
         session_repo = SessionRepository(db)
-        s = await session_repo.get(session_id)
-        if s is None:
-            raise HTTPException(status_code=404, detail="session not found")
+        s = await owned_session(session_id, user.id, db)  # 404 if missing or not owned
         if not await session_repo.try_acquire(session_id):
             await db.rollback()
             raise HTTPException(status_code=409, detail="session is busy")
@@ -294,8 +294,11 @@ async def stream_turn_endpoint(
 async def resume_turn_endpoint(
     session_id: uuid.UUID,
     hub: TurnHub = Depends(get_turn_hub),
+    db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     """重连:该会话有进行中回合 → 补播已发事件 + 续看实时;没有 → 204。"""
+    await owned_session(session_id, user.id, db)  # 404 if missing or not owned
     active = hub.get(session_id)
     if active is None:
         return Response(status_code=204)
@@ -306,8 +309,11 @@ async def resume_turn_endpoint(
 async def cancel_turn_endpoint(
     session_id: uuid.UUID,
     hub: TurnHub = Depends(get_turn_hub),
+    db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     """主动停止正在跑的回合(幂等:无在跑回合也 204)。"""
+    await owned_session(session_id, user.id, db)  # 404 if missing or not owned
     active = hub.get(session_id)
     if active is not None and active.task is not None:
         active.task.cancel()

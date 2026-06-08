@@ -3,11 +3,12 @@ import uuid
 import zipfile
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent_cloud_backend.api.deps import get_session
+from agent_cloud_backend.api.deps import get_current_user, get_session
 from agent_cloud_backend.config import get_settings
+from agent_cloud_backend.models.user import User
 from agent_cloud_backend.repositories.skill import SkillRepository
 from agent_cloud_backend.schemas.skill import SkillInstallRequest, SkillRead
 from agent_cloud_backend.skills.deps import get_object_store, get_skill_registry_root
@@ -42,12 +43,18 @@ def _locate_skill_root(extract_dir: Path) -> Path | None:
 
 
 @router.get("", response_model=list[SkillRead])
-async def list_skills(user_id: uuid.UUID, session: AsyncSession = Depends(get_session)):
-    return await SkillRepository(session).list_by_user(user_id)
+async def list_skills(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    return await SkillRepository(session).list_by_user(user.id)
 
 
 @router.get("/registry", response_model=list[str])
-def list_registry_skills(registry_root: Path = Depends(get_skill_registry_root)):
+def list_registry_skills(
+    registry_root: Path = Depends(get_skill_registry_root),
+    user: User = Depends(get_current_user),
+):
     """列出 registry 里可安装的技能名(目录名 + 含 SKILL.md)。"""
     if not registry_root.exists():
         return []
@@ -62,6 +69,7 @@ async def install_skill(
     session: AsyncSession = Depends(get_session),
     store: ObjectStore = Depends(get_object_store),
     registry_root: Path = Depends(get_skill_registry_root),
+    user: User = Depends(get_current_user),
 ):
     if not body.name or "/" in body.name or "\\" in body.name or ".." in body.name:
         raise HTTPException(status_code=422, detail=f"invalid skill name: {body.name}")
@@ -70,7 +78,7 @@ async def install_skill(
         raise HTTPException(status_code=404, detail=f"registry skill not found: {body.name}")
     try:
         skill = await install_skill_from_dir(
-            user_id=body.user_id,
+            user_id=user.id,
             src_dir=src_dir,
             source="registry",
             repo=SkillRepository(session),
@@ -86,10 +94,10 @@ async def install_skill(
 
 @router.post("/upload", response_model=SkillRead, status_code=status.HTTP_201_CREATED)
 async def upload_skill(
-    user_id: uuid.UUID = Form(...),
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
     store: ObjectStore = Depends(get_object_store),
+    user: User = Depends(get_current_user),
 ):
     if not get_settings().allow_uploaded_archives:
         raise HTTPException(status_code=403, detail="uploaded skill archives are disabled")
@@ -105,7 +113,7 @@ async def upload_skill(
             raise HTTPException(status_code=422, detail="archive missing SKILL.md")
         try:
             skill = await install_skill_from_dir(
-                user_id=user_id,
+                user_id=user.id,
                 src_dir=root,
                 source="uploaded",
                 repo=SkillRepository(session),
@@ -124,10 +132,11 @@ async def uninstall_skill(
     skill_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     store: ObjectStore = Depends(get_object_store),
+    user: User = Depends(get_current_user),
 ):
     repo = SkillRepository(session)
     skill = await repo.get(skill_id)
-    if skill is None:
+    if skill is None or skill.user_id != user.id:
         raise HTTPException(status_code=404, detail="skill not found")
     prefix = skill.package_ref
     await repo.delete(skill)

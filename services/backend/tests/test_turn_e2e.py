@@ -63,16 +63,19 @@ async def stack(engine, tmp_path):
 
 async def test_full_turn_through_all_layers(stack):
     client, base = stack
-    uid = (await client.post("/users", json={"email": "e2e@example.com"})).json()["id"]
+    reg = (
+        await client.post(
+            "/auth/register", json={"email": "e2e@example.com", "password": "password123"}
+        )
+    ).json()
+    uid = reg["user"]["id"]
+    client.headers["Authorization"] = f"Bearer {reg['access_token']}"
     aid = (
         await client.post(
-            "/agent-configs",
-            json={"user_id": uid, "name": "coder", "model": "m", "provider": "fake"},
+            "/agent-configs", json={"name": "coder", "model": "m", "provider": "fake"}
         )
     ).json()["id"]
-    sid = (await client.post("/sessions", json={"user_id": uid, "agent_config_id": aid})).json()[
-        "id"
-    ]
+    sid = (await client.post("/sessions", json={"agent_config_id": aid})).json()["id"]
 
     r = await client.post(f"/sessions/{sid}/turn", json={"content": "write the file"})
     assert r.status_code == 200, r.text

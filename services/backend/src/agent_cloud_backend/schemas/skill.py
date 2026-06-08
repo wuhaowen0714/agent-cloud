@@ -18,7 +18,6 @@ class SkillRead(BaseModel):
 
 
 class SkillInstallRequest(BaseModel):
-    user_id: uuid.UUID
     name: str  # 内置 registry 中的 skill 名
 
 

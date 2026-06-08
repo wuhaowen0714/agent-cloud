@@ -70,17 +70,20 @@ async def stack(engine, tmp_path):
 
 
 async def _user_session(client, email, provider_name):
-    uid = (await client.post("/users", json={"email": email})).json()["id"]
+    reg = (
+        await client.post("/auth/register", json={"email": email, "password": "password123"})
+    ).json()
+    uid = reg["user"]["id"]
+    h = {"Authorization": f"Bearer {reg['access_token']}"}
     aid = (
         await client.post(
             "/agent-configs",
-            json={"user_id": uid, "name": "c", "model": "m", "provider": provider_name},
+            json={"name": "c", "model": "m", "provider": provider_name},
+            headers=h,
         )
     ).json()["id"]
-    sid = (await client.post("/sessions", json={"user_id": uid, "agent_config_id": aid})).json()[
-        "id"
-    ]
-    return uid, sid
+    sid = (await client.post("/sessions", json={"agent_config_id": aid}, headers=h)).json()["id"]
+    return uid, sid, h
 
 
 async def test_two_users_get_isolated_sandboxes(stack):
@@ -88,11 +91,11 @@ async def test_two_users_get_isolated_sandboxes(stack):
     providers["pa"] = _writer_provider("a.txt", "alpha")
     providers["pb"] = _writer_provider("b.txt", "beta")
 
-    uid_a, sid_a = await _user_session(client, "a@e.com", "pa")
-    uid_b, sid_b = await _user_session(client, "b@e.com", "pb")
+    uid_a, sid_a, ha = await _user_session(client, "a@e.com", "pa")
+    uid_b, sid_b, hb = await _user_session(client, "b@e.com", "pb")
 
-    ra = await client.post(f"/sessions/{sid_a}/turn", json={"content": "write a"})
-    rb = await client.post(f"/sessions/{sid_b}/turn", json={"content": "write b"})
+    ra = await client.post(f"/sessions/{sid_a}/turn", json={"content": "write a"}, headers=ha)
+    rb = await client.post(f"/sessions/{sid_b}/turn", json={"content": "write b"}, headers=hb)
     assert ra.status_code == 200 and rb.status_code == 200
 
     # each user's file is under its OWN per-user shared workspace; not visible to the other

@@ -82,15 +82,17 @@ async def stack(engine, tmp_path):
 
 async def test_full_streaming_turn(stack):
     client, base = stack
-    uid = (await client.post("/users", json={"email": "e2e@example.com"})).json()["id"]
-    aid = (
+    reg = (
         await client.post(
-            "/agent-configs", json={"user_id": uid, "name": "c", "model": "m", "provider": "fake"}
+            "/auth/register", json={"email": "e2e@example.com", "password": "password123"}
         )
+    ).json()
+    uid = reg["user"]["id"]
+    client.headers["Authorization"] = f"Bearer {reg['access_token']}"
+    aid = (
+        await client.post("/agent-configs", json={"name": "c", "model": "m", "provider": "fake"})
     ).json()["id"]
-    sid = (await client.post("/sessions", json={"user_id": uid, "agent_config_id": aid})).json()[
-        "id"
-    ]
+    sid = (await client.post("/sessions", json={"agent_config_id": aid})).json()["id"]
 
     resp = await client.post(f"/sessions/{sid}/turn/stream", json={"content": "write it"})
     assert resp.status_code == 200

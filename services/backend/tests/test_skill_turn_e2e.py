@@ -67,23 +67,26 @@ async def skill_stack(engine, tmp_path):
 
 async def test_enabled_skill_is_materialized_and_readable(skill_stack):
     client, base = skill_stack
-    uid = (await client.post("/users", json={"email": "ske2e@example.com"})).json()["id"]
+    reg = (
+        await client.post(
+            "/auth/register", json={"email": "ske2e@example.com", "password": "password123"}
+        )
+    ).json()
+    uid = reg["user"]["id"]
+    client.headers["Authorization"] = f"Bearer {reg['access_token']}"
     aid = (
         await client.post(
-            "/agent-configs",
-            json={"user_id": uid, "name": "coder", "model": "m", "provider": "fake"},
+            "/agent-configs", json={"name": "coder", "model": "m", "provider": "fake"}
         )
     ).json()["id"]
     # 从内置 registry 安装 + 给该 agent 启用
     skill_id = (
-        await client.post("/skills/install", json={"user_id": uid, "name": "example-greeting"})
+        await client.post("/skills/install", json={"name": "example-greeting"})
     ).json()["id"]
     r = await client.put(f"/agent-configs/{aid}/skills", json={"skill_ids": [skill_id]})
     assert r.status_code == 200, r.text
 
-    sid = (await client.post("/sessions", json={"user_id": uid, "agent_config_id": aid})).json()[
-        "id"
-    ]
+    sid = (await client.post("/sessions", json={"agent_config_id": aid})).json()["id"]
     r = await client.post(f"/sessions/{sid}/turn", json={"content": "use the skill"})
     assert r.status_code == 200, r.text
     assert r.json()["stop_reason"] == "end_turn"
@@ -105,18 +108,21 @@ async def test_enabled_skill_is_materialized_and_readable(skill_stack):
 async def test_disabled_skill_not_materialized(skill_stack):
     # 装了但不给 agent 启用 → 不应物化到沙箱
     client, base = skill_stack
-    uid = (await client.post("/users", json={"email": "skoff@example.com"})).json()["id"]
+    reg = (
+        await client.post(
+            "/auth/register", json={"email": "skoff@example.com", "password": "password123"}
+        )
+    ).json()
+    uid = reg["user"]["id"]
+    client.headers["Authorization"] = f"Bearer {reg['access_token']}"
     aid = (
         await client.post(
-            "/agent-configs",
-            json={"user_id": uid, "name": "c", "model": "m", "provider": "fake"},
+            "/agent-configs", json={"name": "c", "model": "m", "provider": "fake"}
         )
     ).json()["id"]
-    await client.post("/skills/install", json={"user_id": uid, "name": "example-greeting"})
+    await client.post("/skills/install", json={"name": "example-greeting"})
     # 不调用 PUT /skills(不启用)
-    sid = (await client.post("/sessions", json={"user_id": uid, "agent_config_id": aid})).json()[
-        "id"
-    ]
+    sid = (await client.post("/sessions", json={"agent_config_id": aid})).json()["id"]
     # FakeProvider 第一轮会尝试 read_file,读不到 → is_error;第二轮收尾。回合仍 200。
     r = await client.post(f"/sessions/{sid}/turn", json={"content": "x"})
     assert r.status_code == 200, r.text

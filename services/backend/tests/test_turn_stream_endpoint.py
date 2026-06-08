@@ -37,16 +37,14 @@ def _parse_sse(text: str) -> list[dict]:
 
 
 async def _make_session(client):
-    uid = (await client.post("/users", json={"email": "s@example.com"})).json()["id"]
+    reg = await client.post(
+        "/auth/register", json={"email": f"{uuid.uuid4()}@e.com", "password": "password123"}
+    )
+    client.headers["Authorization"] = f"Bearer {reg.json()['access_token']}"
     aid = (
-        await client.post(
-            "/agent-configs",
-            json={"user_id": uid, "name": "c", "model": "m", "provider": "p"},
-        )
+        await client.post("/agent-configs", json={"name": "c", "model": "m", "provider": "p"})
     ).json()["id"]
-    return (await client.post("/sessions", json={"user_id": uid, "agent_config_id": aid})).json()[
-        "id"
-    ]
+    return (await client.post("/sessions", json={"agent_config_id": aid})).json()["id"]
 
 
 def _set_worker_stream(monkeypatch, gen):
