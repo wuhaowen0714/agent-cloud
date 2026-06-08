@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>无状态 Agent Cloud — 系统架构</title>
+<style>
+  :root{
+    --teal:#0d9488; --teal-d:#0f766e; --teal-l:#ccfbf1; --teal-bg:#f0fdfa;
+    --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --card:#ffffff; --bg:#f8fafc;
+    --green:#10b981; --amber:#f59e0b; --red:#ef4444; --blue:#3b82f6;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px 96px}
+  header.hero{background:linear-gradient(135deg,var(--teal-d),var(--teal));color:#fff;padding:48px 24px 40px}
+  header.hero .inner{max-width:1080px;margin:0 auto}
+  header.hero h1{margin:0 0 8px;font-size:30px;letter-spacing:-.5px}
+  header.hero p{margin:4px 0;opacity:.92;font-size:14px}
+  .pillrow{margin-top:16px;display:flex;gap:8px;flex-wrap:wrap}
+  .pill{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.28);border-radius:999px;padding:4px 12px;font-size:12.5px}
+  h2{font-size:21px;margin:46px 0 6px;letter-spacing:-.3px}
+  h2 .num{color:var(--teal);font-weight:800;margin-right:8px}
+  h3{font-size:16px;margin:24px 0 8px}
+  .lead{color:var(--muted);margin:0 0 18px;max-width:80ch}
+  a{color:var(--teal-d)}
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;background:#f1f5f9;border-radius:5px;padding:1px 6px}
+  .toc{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 20px;margin:24px 0 8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:6px 24px}
+  .toc a{display:block;text-decoration:none;color:var(--ink);font-size:14px;padding:3px 0}
+  .toc a:hover{color:var(--teal-d)}
+  .toc b{color:var(--teal);margin-right:8px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin:14px 0;box-shadow:0 1px 2px rgba(15,23,42,.03)}
+  .qa{background:#ecfeff;border:1px solid #a5f3fc;border-left:4px solid var(--teal);border-radius:12px;padding:16px 20px;margin:16px 0}
+  .qa h4{margin:0 0 6px;color:var(--teal-d);font-size:15px}
+  .qa p{margin:6px 0 0;font-size:14px}
+  table{width:100%;border-collapse:collapse;margin:10px 0 2px;font-size:13.5px}
+  th,td{text-align:left;padding:9px 11px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+  td.k{font-weight:600;width:18%}
+  .yes{color:var(--green);font-weight:700} .warn{color:var(--amber);font-weight:700} .no{color:var(--red);font-weight:700}
+  .why{color:var(--muted);font-size:12.5px;margin-top:3px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px;margin:12px 0}
+  .comp{border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:var(--card)}
+  .comp h4{margin:0 0 8px;font-size:14.5px;display:flex;align-items:center;gap:8px}
+  .comp .st{font-size:11px;font-weight:700;border-radius:6px;padding:1px 8px}
+  .st.stateless{background:#dcfce7;color:#15803d} .st.stateful{background:#ffedd5;color:#c2410c} .st.mixed{background:#fef9c3;color:#a16207}
+  .comp ul{margin:6px 0 0;padding-left:18px} .comp li{font-size:12.5px;color:#334155;margin:3px 0}
+  ol.flow{counter-reset:s;list-style:none;padding:0;margin:14px 0}
+  ol.flow li{position:relative;padding:10px 0 10px 40px;border-bottom:1px dashed var(--line)}
+  ol.flow li:before{counter-increment:s;content:counter(s);position:absolute;left:0;top:9px;width:25px;height:25px;border-radius:999px;background:var(--teal);color:#fff;font-weight:800;font-size:12.5px;display:grid;place-items:center}
+  ol.flow b{color:var(--teal-d)}
+  .note{background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:14px 18px;margin:14px 0;font-size:13.5px}
+  .note b{color:#b45309}
+  .diagram{background:#0f172a;color:#cbd5e1;border-radius:14px;padding:22px;margin:16px 0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.5;overflow:auto}
+  .layer{border:1px solid #334155;border-radius:10px;padding:10px 14px;margin:0}
+  .layer.sl{border-color:#065f46;background:rgba(16,185,129,.08)}
+  .layer.sf{border-color:#9a3412;background:rgba(245,158,11,.08)}
+  .layer .t{font-weight:700;color:#e2e8f0}
+  .layer .d{color:#94a3b8;font-size:11.5px;margin-top:2px}
+  .hop{text-align:center;color:#64748b;padding:6px 0;font-size:11.5px}
+  .hop b{color:#5eead4}
+  .lg{display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin:6px 0 0}
+  .sw{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:middle}
+  .sw.g{background:rgba(16,185,129,.5);border:1px solid #065f46} .sw.o{background:rgba(245,158,11,.4);border:1px solid #9a3412}
+  footer{color:var(--muted);font-size:12.5px;margin-top:44px;border-top:1px solid var(--line);padding-top:16px}
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="inner">
+    <h1>无状态 Agent Cloud · 系统架构</h1>
+    <p>有状态后端 + 无状态 agent 服务:状态放持久层,计算单元随时可替换</p>
+    <p>日期:2026-06-08 · 与代码现状对齐(services/{backend,worker,sandbox} + packages/common + protos + frontend)</p>
+    <div class="pillrow">
+      <span class="pill">前端 React + SSE/REST</span>
+      <span class="pill">Backend FastAPI(有状态)</span>
+      <span class="pill">Worker gRPC(无状态·持 Key)</span>
+      <span class="pill">Sandbox gRPC(不可信执行)</span>
+      <span class="pill">Postgres + 每用户卷</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- ===== 快速回答 ===== -->
+  <div class="qa">
+    <h4>⚡ 快速回答(本文档你最关心的两点)</h4>
+    <p><b>沙箱由哪个模块创建?</b> 由 <b>Backend</b> 创建。具体是 Backend 里的 <code>SandboxManager</code>(编排:查 <code>sandbox_registry</code> 复用健康沙箱,否则新建)+ <code>DockerProvisioner</code>(实际 <code>docker run</code> 起容器,DooD 借宿主 Docker daemon)。在<b>回合开始时</b>由 turn 端点调用 <code>manager.get_endpoint_for_user(user_id)</code> 触发。Worker 和 Sandbox 自己都不创建沙箱。</p>
+    <p style="margin-top:10px"><b>Backend 和 Worker 都能任意水平扩展吗?</b> <span class="yes">Worker 可以</span>(完全无状态,任一实例服务任一回合;只差 Backend 当前指向单一 <code>worker_endpoint</code>,前置一个负载均衡即可)。<span class="warn">Backend 不能"任意"扩</span>:加实例能提升吞吐、且 DB 会话锁保证跨实例不会重复跑同一会话(正确性 OK);但<b>可重连回合的状态(TurnHub/ActiveTurn)在进程内存里</b>,所以"续看/取消"必须路由到正在跑该回合的同一实例(<b>按会话 sticky 路由</b>),或引入 post-v1 的 pub/sub 来共享回合事件。详见 <a href="#scale">§5 水平扩展分析</a>。</p>
+  </div>
+
+  <div class="toc">
+    <a href="#overview"><b>1</b>全景架构</a>
+    <a href="#components"><b>2</b>组件职责与状态性</a>
+    <a href="#flow"><b>3</b>一次回合的完整流程</a>
+    <a href="#sandbox"><b>4</b>沙箱的创建与生命周期</a>
+    <a href="#scale"><b>5</b>水平扩展分析</a>
+    <a href="#security"><b>6</b>安全分层</a>
+    <a href="#persist"><b>7</b>持久化与状态边界</a>
+  </div>
+
+  <!-- ===== 1 全景 ===== -->
+  <h2 id="overview"><span class="num">1</span>全景架构</h2>
+  <p class="lead">自上而下四层,三条跳。<span style="color:#15803d;font-weight:600">绿 = 无状态、可弃可换</span>;<span style="color:#c2410c;font-weight:600">橙 = 有状态、需持久</span>。安全边界:Worker(脑)持 LLM Key、可信;Sandbox(手)无 Key、能力最小化、不可信。</p>
+  <div class="diagram">
+    <div class="layer sf"><span class="t">① 前端 / 客户端</span><div class="d">聊天 UI(块流渲染) + 文件管理 · localStorage 记住 user/session</div></div>
+    <div class="hop">│ &nbsp; <b>SSE + REST</b>(公网)&nbsp; 发消息/取消/文件=REST,回合输出=SSE</div>
+    <div class="layer sf"><span class="t">② Backend(FastAPI · 有状态)</span><div class="d">鉴权(待建)/ 会话与消息 / 配置文档 / 文件编排 / 会话锁 / 压缩编排 / 沙箱编排 / <b>进程内 TurnHub(可重连回合)</b> / 沙箱 reaper</div></div>
+    <div class="hop">│ &nbsp; <b>gRPC 流式</b>(内网)&nbsp; RunTurn / RunTurnStream / Summarize</div>
+    <div class="layer sl"><span class="t">③ Worker「脑」(无状态 · 持 LLM Key · 可信)</span><div class="d">agent-loop(LLM→工具→回填) · provider 抽象(OpenAI 兼容) · 拼 system 提示词 · 每次调用独立</div></div>
+    <div class="hop">│ &nbsp; <b>gRPC ExecTool</b>(内网)&nbsp; worker 按需连该用户沙箱执行工具</div>
+    <div class="layer sl"><span class="t">④ Sandbox「手」(无状态计算 · 无 Key · 不可信)</span><div class="d">bash / read_file / write_file · cap_drop=ALL · no-new-privileges · mem/cpu/pids 限额</div></div>
+    <div class="hop">│</div>
+    <div class="layer sf"><span class="t">⑤ 持久层</span><div class="d">Postgres(用户/配置/会话/消息/记忆/技能/沙箱登记)· 每用户 workspace 卷(挂进沙箱 /workspace,跨会话/跨 agent 共享)· 对象存储(上传/快照,规划中)</div></div>
+    <div class="lg">
+      <span><span class="sw g"></span>无状态(可水平扩展/随意替换)</span>
+      <span><span class="sw o"></span>有状态(持久 / 需协调)</span>
+    </div>
+  </div>
+  <p class="lead"><b>核心洞察</b>:稳定性来自"状态放在哪",而非"计算活多久"。把对话/配置/文件/记忆搬到持久层后,Worker、Sandbox 这两层计算单元即可随意替换、横向扩容、互不拖累。</p>
+
+  <!-- ===== 2 组件 ===== -->
+  <h2 id="components"><span class="num">2</span>组件职责与状态性</h2>
+  <div class="grid">
+    <div class="comp">
+      <h4>前端 <span class="st stateful">客户端态</span></h4>
+      <ul>
+        <li>React19 + Vite + TS + Tailwind(浅色 + teal)</li>
+        <li>SSE 消费回合流;块流时序渲染(思考/正文/工具)</li>
+        <li>断网/切会话用 GET 续看;停止按钮取消</li>
+        <li>状态仅本地(localStorage 当前 user/session),非权威</li>
+      </ul>
+    </div>
+    <div class="comp">
+      <h4>Backend <span class="st mixed">混合</span></h4>
+      <ul>
+        <li>FastAPI;唯一访问 Postgres 的层</li>
+        <li>会话锁(DB,租约式)保证会话内串行 + 跨实例不重复跑</li>
+        <li>编排:组装请求 / 调 Worker / 落库 / 压缩 / 沙箱路由</li>
+        <li><b>进程内 TurnHub/ActiveTurn</b>:可重连回合的事件缓冲(非共享)</li>
+        <li>后台:沙箱 reaper 循环 + 关停时 drain_hub 释放锁</li>
+      </ul>
+    </div>
+    <div class="comp">
+      <h4>Worker「脑」 <span class="st stateless">无状态</span></h4>
+      <ul>
+        <li>gRPC 服务;Servicer 仅持一个 provider_factory</li>
+        <li>持 LLM Key(可信);每次 RunTurn/Summarize 完全独立</li>
+        <li>跑 agent-loop;按需连 <code>request.sandbox_endpoint</code> 执行工具</li>
+        <li>回合间不保留任何 per-user/per-session 状态</li>
+      </ul>
+    </div>
+    <div class="comp">
+      <h4>Sandbox「手」 <span class="st stateless">计算无状态</span></h4>
+      <ul>
+        <li>gRPC 服务;只暴露 ExecTool(bash/读写文件)</li>
+        <li>无 LLM Key;cap_drop=ALL + no-new-privileges</li>
+        <li>挂载该用户 workspace 卷到 /workspace(状态在卷上)</li>
+        <li>每用户一个容器,空闲 TTL 回收</li>
+      </ul>
+    </div>
+    <div class="comp">
+      <h4>Postgres <span class="st stateful">有状态</span></h4>
+      <ul>
+        <li>系统的状态锚:user / agent_config / session / message</li>
+        <li>context_document / memory_entry / skill / sandbox_registry</li>
+        <li>会话锁、压缩摘要、沙箱登记都在这里协调</li>
+      </ul>
+    </div>
+    <div class="comp">
+      <h4>每用户 workspace 卷 <span class="st stateful">有状态</span></h4>
+      <ul>
+        <li>宿主 <code>&lt;host_root&gt;/&lt;user_id&gt;/workspace</code></li>
+        <li>跨会话、跨 agent、跨沙箱重建稳定共享</li>
+        <li>pip --user / npm -g 依赖持久于此</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ===== 3 流程 ===== -->
+  <h2 id="flow"><span class="num">3</span>一次回合(流式)的完整流程</h2>
+  <p class="lead">以前端发一条消息为例(<code>POST /sessions/{id}/turn/stream</code>):</p>
+  <ol class="flow">
+    <li><b>加锁</b>:Backend 在 DB <code>try_acquire</code> 会话锁(租约式);并发同会话直接 409。</li>
+    <li><b>落 user 消息</b>:写入 <code>messages</code> 并 commit。</li>
+    <li><b>拿沙箱</b>:调 <code>SandboxManager.get_endpoint_for_user(user_id)</code> —— 查 <code>sandbox_registry</code>,健康则复用,否则 <code>DockerProvisioner.spawn</code> 起一个并登记(见 §4)。</li>
+    <li><b>组装请求</b>:<code>build_run_turn_request</code> 拼出 system(环境+配置文档+记忆+技能+历史摘要)+ 过滤后的历史 + 本条消息 + 沙箱端点。</li>
+    <li><b>起独立 Runner</b>:<code>asyncio.create_task</code> 跑回合(断连不取消);注册到进程内 <b>TurnHub</b>;同时返回 SSE 订阅流。</li>
+    <li><b>BE→Worker 流式</b>:Backend 经 gRPC <code>RunTurnStream</code> 把请求发给 Worker。</li>
+    <li><b>Worker agent-loop</b>:调 LLM → 若有工具调用,经 gRPC <code>ExecTool</code> 连<b>该用户沙箱</b>执行 → 回填 → 再调 LLM,直到收尾。增量(思考/正文/工具)实时流回。</li>
+    <li><b>缓冲 + 落库</b>:Backend 把事件写进 ActiveTurn(供断线补播)并转 SSE;<code>TurnDone</code> 时把助手/工具消息落库(仅成功时落,无半成品)。</li>
+    <li><b>回合后压缩</b>:按真实 <code>context_tokens</code> 超阈值则折叠历史进 <code>session.summary</code>(仍持锁、心跳续租)。</li>
+    <li><b>透明自愈</b>:中途超窗→压缩重试、瞬时错误→退避重试,重试前发 <code>reset</code> 让前端清屏;耗尽才给可恢复/不可恢复提示。</li>
+    <li><b>收尾</b>:释放会话锁;从 Hub 移除。断线的客户端可用 <code>GET /turn/stream</code> 续看(补播+实时)。</li>
+  </ol>
+
+  <!-- ===== 4 沙箱 ===== -->
+  <h2 id="sandbox"><span class="num">4</span>沙箱的创建与生命周期</h2>
+  <p class="lead"><b>谁创建:Backend。</b> 编排在 <code>backend/sandbox/manager.py</code> 的 <code>SandboxManager</code>,实际起容器在 <code>backend/sandbox/docker_provisioner.py</code> 的 <code>DockerProvisioner</code>(<b>DooD</b>:借宿主 Docker daemon)。Worker / Sandbox 自身都不创建沙箱。</p>
+  <table>
+    <tr><th>阶段</th><th>发生了什么</th></tr>
+    <tr><td class="k">触发</td><td>回合开始,turn 端点调 <code>get_endpoint_for_user(user_id)</code>。<b>懒创建</b>:没有回合就没有沙箱。</td></tr>
+    <tr><td class="k">复用</td><td>查 <code>sandbox_registry</code> 是否有该用户的 active 沙箱;有且探活通过 → <code>touch</code> 续期并直接复用(一个用户一个沙箱,跨会话/跨 agent 共享)。</td></tr>
+    <tr><td class="k">探活/自愈</td><td>探活失败(沙箱崩溃/backend 重启后端点失效)→ 标记 dead、尽力停掉、落到下方重建。</td></tr>
+    <tr><td class="k">新建</td><td><code>DockerProvisioner.spawn</code>:<code>docker run</code> 一个容器,挂 <code>&lt;host_root&gt;/&lt;user_id&gt;/workspace → /workspace</code>,带 <code>cap_drop=ALL</code>、<code>no-new-privileges</code>、mem/cpu/pids 限额、<code>/tmp</code> tmpfs。在事务外起(可能慢)。</td></tr>
+    <tr><td class="k">登记/防竞态</td><td>写 <code>sandbox_registry</code>;partial unique index 处理并发抢建——输的一方停掉自己那个、路由到赢家,避免一个用户被劈成两个沙箱。</td></tr>
+    <tr><td class="k">隔离</td><td>容器只挂该用户目录,宿主其它用户目录在容器内不存在 → 跨用户越权读被堵。</td></tr>
+    <tr><td class="k">回收</td><td>Backend 后台 <code>_reaper_loop</code> 周期跑 <code>reap_idle</code>:空闲超 TTL 的沙箱先停再标 dead;<b>跳过仍有 running 会话的用户</b>,避免长回合被中途回收。</td></tr>
+  </table>
+  <div class="note"><b>provisioner 可换:</b> 配置 <code>sandbox_provisioner=docker</code>(真隔离,dev/prod)或 <code>inprocess</code>(进程内,CI/无 Docker)。两者实现同一 <code>SandboxProvisioner</code> Protocol,对上层透明。</div>
+
+  <!-- ===== 5 扩展 ===== -->
+  <h2 id="scale"><span class="num">5</span>水平扩展分析</h2>
+  <p class="lead">这是你问题的详细回答。结论:<b>Worker 可任意扩;Backend 可扩吞吐但"续看/取消"需配合 sticky 路由;Sandbox 按用户绑卷;Postgres 是状态锚走常规 DB 扩展。</b></p>
+  <table>
+    <tr><th>组件</th><th>有状态?</th><th>水平扩展?</th><th>关键约束 / 怎么扩</th></tr>
+    <tr>
+      <td class="k">Worker「脑」</td>
+      <td>无状态(仅持 Key 配置)</td>
+      <td><span class="yes">✅ 可任意</span></td>
+      <td>任一 worker 可服务任一回合;每次调用独立、按需连沙箱。<div class="why">唯一现状限制:Backend 配置指向<b>单一</b> <code>worker_endpoint</code>。多 worker 时在其前面放一个负载均衡 / 服务发现即可(或上 post-v1 的消息队列派发)。架构上无障碍。</div></td>
+    </tr>
+    <tr>
+      <td class="k">Backend</td>
+      <td>混合:权威状态在 Postgres,但<b>可重连回合的 Hub 在进程内</b></td>
+      <td><span class="warn">⚠️ 吞吐可扩,"任意"需配合</span></td>
+      <td>加实例即提升并发吞吐;DB 会话锁(租约)保证<b>跨实例不会重复跑同一会话</b>(正确性已安全)。<div class="why"><b>约束</b>:回合作为独立 asyncio 任务跑在"收到 POST 的那个实例",其 SSE 事件缓冲在该实例的进程内 TurnHub。于是 <code>GET /turn/stream</code>(续看)和 <code>POST /turn/cancel</code> 必须打到同一实例,否则别的实例 Hub 里没有这个回合 → 续看得到 204、取消变 no-op。<b>解法</b>:按会话 sticky 路由(把同一 session 的请求固定到同一实例),或引入 post-v1 的 pub/sub 共享回合事件(设计 §14)。沙箱 reaper / SandboxManager 是每实例各跑,登记在共享 DB、幂等且有防竞态,多实例并存安全。</div></td>
+    </tr>
+    <tr>
+      <td class="k">Sandbox「手」</td>
+      <td>计算无状态,但挂着该用户持久卷</td>
+      <td><span class="warn">⚠️ 加主机扩,单用户绑卷</span></td>
+      <td>每用户一个容器,懒建、空闲回收;按需加沙箱主机扩容。<div class="why">但某用户的沙箱固定在其卷所在主机,不能随意迁移(用户卷多区域 / 跨 AZ 是 post-v1)。</div></td>
+    </tr>
+    <tr>
+      <td class="k">Postgres</td>
+      <td>有状态(系统状态锚)</td>
+      <td>常规 DB 扩展</td>
+      <td>读副本 / 连接池 / 按需分片。它是"无状态计算"成立的前提,扩展方式与一般有状态 DB 相同。</td>
+    </tr>
+  </table>
+  <div class="note">
+    <b>一句话:</b> 把 Backend 做到"任意实例接任意请求"还差一步——把进程内 TurnHub 换成共享事件总线(pub/sub),这正是设计 §14 的 post-v1 项「第②跳消息队列 + pub/sub」。在那之前,多实例 Backend 用<b>会话级 sticky 路由</b>即可正确运行(发起、续看、取消都落到同一实例),吞吐随实例数线性增长。
+  </div>
+
+  <!-- ===== 6 安全 ===== -->
+  <h2 id="security"><span class="num">6</span>安全分层</h2>
+  <div class="grid">
+    <div class="comp">
+      <h4>脑 / 手 分层</h4>
+      <ul>
+        <li>Worker 持 LLM Key、可信;Sandbox 无 Key、不可信</li>
+        <li>沙箱即便被工具产出的恶意代码攻陷,也拿不到 Key</li>
+      </ul>
+    </div>
+    <div class="comp">
+      <h4>沙箱能力最小化</h4>
+      <ul>
+        <li>cap_drop=ALL + no-new-privileges(故 apt/sudo 失败,符合预期)</li>
+        <li>mem/cpu/pids 限额;/tmp 走限额 tmpfs</li>
+      </ul>
+    </div>
+    <div class="comp">
+      <h4>租户卷隔离</h4>
+      <ul>
+        <li>容器只挂该用户目录;跨用户目录在容器内不存在</li>
+        <li>文件 API 有路径越狱(path jail)防护</li>
+      </ul>
+    </div>
+    <div class="comp">
+      <h4>出网</h4>
+      <ul>
+        <li>出网默认放行(装包/抓取);<code>allow_net=False</code> 故意 fail-loud(应在部署网络层用 allowlist/代理收紧)</li>
+        <li>本机 gRPC 绕过代理(no_grpc_proxy)</li>
+      </ul>
+    </div>
+  </div>
+  <div class="note"><b>当前缺口:</b> 还没有鉴权/多租户授权(前端 localStorage 假 user、后端信任传入 user_id)。这是上线前必补的第一块,见 <a href="roadmap.html">roadmap.html · P1</a>。</div>
+
+  <!-- ===== 7 持久化 ===== -->
+  <h2 id="persist"><span class="num">7</span>持久化与状态边界</h2>
+  <table>
+    <tr><th>状态</th><th>存在哪</th><th>说明</th></tr>
+    <tr><td class="k">对话 / 配置</td><td>Postgres</td><td>session / message / agent_config / context_document;后端独占访问。</td></tr>
+    <tr><td class="k">记忆</td><td>Postgres <code>memory_entry</code></td><td>用户级 + agent 级;v1 读取+追加,向量检索预留(见 roadmap P2)。</td></tr>
+    <tr><td class="k">技能</td><td>Postgres + 对象存储 + 沙箱卷</td><td>登记在 DB,内容物化进沙箱执行。</td></tr>
+    <tr><td class="k">文件</td><td>每用户 workspace 卷</td><td>跨会话/agent 共享;沙箱挂载;文件 API 读写。</td></tr>
+    <tr><td class="k">会话锁 / 沙箱登记</td><td>Postgres</td><td>跨实例协调点:租约式锁 + 沙箱 registry(partial unique index)。</td></tr>
+    <tr><td class="k">可重连回合事件</td><td><b>Backend 进程内存</b>(TurnHub)</td><td>唯一的"非共享"运行态;助手消息成功才落 DB,故崩溃只丢当前轮(尽力而为)。是 §5 扩展约束的根源。</td></tr>
+  </table>
+
+  <footer>
+    生成于 2026-06-08 · 与仓库代码现状对齐(<code>services/backend/sandbox/{manager,docker_provisioner}.py</code>、<code>turn/{hub,runner}.py</code>、<code>worker/server.py</code> 等)· 本文件:<code>docs/architecture.html</code> · 配套:<a href="roadmap.html">roadmap.html</a>
+  </footer>
+
+</div>
+</body>
+</html>
