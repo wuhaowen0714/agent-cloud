@@ -114,3 +114,9 @@ async def test_upload_macos_zip_with_dunder_macosx(client, monkeypatch):
     )
     assert r.status_code == 201, r.text
     assert r.json()["name"] == "mac-skill"
+
+
+async def test_list_registry_skills(client):
+    r = await client.get("/skills/registry")
+    assert r.status_code == 200
+    assert "example-greeting" in r.json()  # 仓库内置 registry 技能

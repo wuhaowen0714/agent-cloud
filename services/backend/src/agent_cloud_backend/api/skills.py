@@ -46,6 +46,16 @@ async def list_skills(user_id: uuid.UUID, session: AsyncSession = Depends(get_se
     return await SkillRepository(session).list_by_user(user_id)
 
 
+@router.get("/registry", response_model=list[str])
+def list_registry_skills(registry_root: Path = Depends(get_skill_registry_root)):
+    """列出 registry 里可安装的技能名(目录名 + 含 SKILL.md)。"""
+    if not registry_root.exists():
+        return []
+    return sorted(
+        p.name for p in registry_root.iterdir() if p.is_dir() and (p / "SKILL.md").is_file()
+    )
+
+
 @router.post("/install", response_model=SkillRead, status_code=status.HTTP_201_CREATED)
 async def install_skill(
     body: SkillInstallRequest,
