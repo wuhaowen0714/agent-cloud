@@ -64,7 +64,7 @@ async def test_run_turn_over_grpc_executes_tool(sandbox):
         ]
     )
     worker_server, wport = await create_worker_server(
-        provider_factory=lambda model, provider_name, key_ref: provider,
+        provider_factory=lambda *a: provider,
         host="localhost",
         port=0,
     )

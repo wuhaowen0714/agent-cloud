@@ -24,8 +24,8 @@ from agent_cloud_worker.sandbox_executor import SandboxToolExecutor
 
 logger = logging.getLogger(__name__)
 
-# 由 agent 的 (model, provider, key_ref) 造一个 Provider。真实实现(Anthropic 等)在后续 Plan。
-ProviderFactory = Callable[[str, str, str], Provider]
+# 由 agent 的 (model, provider, api_key, base_url) 造一个 Provider。
+ProviderFactory = Callable[[str, str, str, str], Provider]
 
 # 压缩器系统提示词:把历史浓缩成简明要点,保留后续回合需要的信息(spec §6)。
 _SUMMARIZE_SYSTEM = (
@@ -64,7 +64,10 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
         # provider_factory 失败(如未知 provider)也是 client/config-fault,而非 worker bug。
         try:
             provider = self._provider_factory(
-                request.agent.model, request.agent.provider, request.agent.key_ref
+                request.agent.model,
+                request.agent.provider,
+                request.agent.api_key,
+                request.agent.base_url,
             )
         except Exception as exc:  # noqa: BLE001 — 故意把工厂的任意失败收敛为明确状态码
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, f"provider unavailable: {exc}")
@@ -120,7 +123,10 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
             return
         try:
             provider = self._provider_factory(
-                request.agent.model, request.agent.provider, request.agent.key_ref
+                request.agent.model,
+                request.agent.provider,
+                request.agent.api_key,
+                request.agent.base_url,
             )
         except Exception as exc:  # noqa: BLE001 — 故意把工厂的任意失败收敛为明确状态码
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, f"provider unavailable: {exc}")
@@ -181,7 +187,10 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
 
         try:
             provider = self._provider_factory(
-                request.agent.model, request.agent.provider, request.agent.key_ref
+                request.agent.model,
+                request.agent.provider,
+                request.agent.api_key,
+                request.agent.base_url,
             )
         except Exception as exc:  # noqa: BLE001 — 工厂任意失败收敛为明确状态码
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, f"provider unavailable: {exc}")

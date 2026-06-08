@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1b\x61gent_cloud/v1/worker.proto\x12\x0e\x61gent_cloud.v1\"<\n\x08ToolCall\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x16\n\x0e\x61rguments_json\x18\x03 \x01(\t\"@\n\nToolResult\x12\x0f\n\x07\x63\x61ll_id\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\t\x12\x10\n\x08is_error\x18\x03 \x01(\x08\"\x81\x01\n\x03Msg\x12\x0c\n\x04role\x18\x01 \x01(\t\x12\x0c\n\x04text\x18\x02 \x01(\t\x12,\n\ntool_calls\x18\x03 \x03(\x0b\x32\x18.agent_cloud.v1.ToolCall\x12\x30\n\x0ctool_results\x18\x04 \x03(\x0b\x32\x1a.agent_cloud.v1.ToolResult\"h\n\x05\x41gent\x12\r\n\x05model\x18\x01 \x01(\t\x12\x10\n\x08provider\x18\x02 \x01(\t\x12\x16\n\x0ethinking_level\x18\x03 \x01(\t\x12\x15\n\renabled_tools\x18\x04 \x03(\t\x12\x0f\n\x07key_ref\x18\x05 \x01(\t\"3\n\x03\x44oc\x12\r\n\x05scope\x18\x01 \x01(\t\x12\x0c\n\x04type\x18\x02 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x03 \x01(\t\"%\n\x03Mem\x12\r\n\x05scope\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\t\"<\n\x05Skill\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x02 \x01(\t\x12\x10\n\x08location\x18\x03 \x01(\t\"\xd4\x02\n\x0eRunTurnRequest\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12\x0f\n\x07user_id\x18\x02 \x01(\t\x12$\n\x05\x61gent\x18\x03 \x01(\x0b\x32\x15.agent_cloud.v1.Agent\x12&\n\tdocuments\x18\x04 \x03(\x0b\x32\x13.agent_cloud.v1.Doc\x12#\n\x06memory\x18\x05 \x03(\x0b\x32\x13.agent_cloud.v1.Mem\x12%\n\x06skills\x18\x06 \x03(\x0b\x32\x15.agent_cloud.v1.Skill\x12%\n\x08messages\x18\x07 \x03(\x0b\x32\x13.agent_cloud.v1.Msg\x12\x14\n\x0cuser_message\x18\x08 \x01(\t\x12\x18\n\x10sandbox_endpoint\x18\t \x01(\t\x12\x13\n\x0bwork_subdir\x18\n \x01(\t\x12\x17\n\x0fhistory_summary\x18\x0b \x01(\t\"\x96\x01\n\x0fRunTurnResponse\x12)\n\x0cnew_messages\x18\x01 \x03(\x0b\x32\x13.agent_cloud.v1.Msg\x12\x14\n\x0cinput_tokens\x18\x02 \x01(\x03\x12\x15\n\routput_tokens\x18\x03 \x01(\x03\x12\x13\n\x0bstop_reason\x18\x04 \x01(\t\x12\x16\n\x0e\x63ontext_tokens\x18\x05 \x01(\x03\"\x19\n\tTextDelta\x12\x0c\n\x04text\x18\x01 \x01(\t\"\x1d\n\rThinkingDelta\x12\x0c\n\x04text\x18\x01 \x01(\t\"H\n\x0fToolCallStarted\x12\x0f\n\x07\x63\x61ll_id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x16\n\x0e\x61rguments_json\x18\x03 \x01(\t\"E\n\x0fToolResultEvent\x12\x0f\n\x07\x63\x61ll_id\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\t\x12\x10\n\x08is_error\x18\x03 \x01(\x08\"\x8f\x01\n\x08TurnDone\x12)\n\x0cnew_messages\x18\x01 \x03(\x0b\x32\x13.agent_cloud.v1.Msg\x12\x14\n\x0cinput_tokens\x18\x02 \x01(\x03\x12\x15\n\routput_tokens\x18\x03 \x01(\x03\x12\x13\n\x0bstop_reason\x18\x04 \x01(\t\x12\x16\n\x0e\x63ontext_tokens\x18\x05 \x01(\x03\"\xa3\x02\n\tTurnEvent\x12/\n\ntext_delta\x18\x01 \x01(\x0b\x32\x19.agent_cloud.v1.TextDeltaH\x00\x12\x37\n\x0ethinking_delta\x18\x02 \x01(\x0b\x32\x1d.agent_cloud.v1.ThinkingDeltaH\x00\x12<\n\x11tool_call_started\x18\x03 \x01(\x0b\x32\x1f.agent_cloud.v1.ToolCallStartedH\x00\x12\x36\n\x0btool_result\x18\x04 \x01(\x0b\x32\x1f.agent_cloud.v1.ToolResultEventH\x00\x12-\n\tturn_done\x18\x05 \x01(\x0b\x32\x18.agent_cloud.v1.TurnDoneH\x00\x42\x07\n\x05\x65vent\"v\n\x10SummarizeRequest\x12$\n\x05\x61gent\x18\x01 \x01(\x0b\x32\x15.agent_cloud.v1.Agent\x12\x15\n\rprior_summary\x18\x02 \x01(\t\x12%\n\x08messages\x18\x03 \x03(\x0b\x32\x13.agent_cloud.v1.Msg\"Q\n\x11SummarizeResponse\x12\x0f\n\x07summary\x18\x01 \x01(\t\x12\x14\n\x0cinput_tokens\x18\x02 \x01(\x03\x12\x15\n\routput_tokens\x18\x03 \x01(\x03\x32\xf4\x01\n\x06Worker\x12J\n\x07RunTurn\x12\x1e.agent_cloud.v1.RunTurnRequest\x1a\x1f.agent_cloud.v1.RunTurnResponse\x12L\n\rRunTurnStream\x12\x1e.agent_cloud.v1.RunTurnRequest\x1a\x19.agent_cloud.v1.TurnEvent0\x01\x12P\n\tSummarize\x12 .agent_cloud.v1.SummarizeRequest\x1a!.agent_cloud.v1.SummarizeResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1b\x61gent_cloud/v1/worker.proto\x12\x0e\x61gent_cloud.v1\"<\n\x08ToolCall\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x16\n\x0e\x61rguments_json\x18\x03 \x01(\t\"@\n\nToolResult\x12\x0f\n\x07\x63\x61ll_id\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\t\x12\x10\n\x08is_error\x18\x03 \x01(\x08\"\x81\x01\n\x03Msg\x12\x0c\n\x04role\x18\x01 \x01(\t\x12\x0c\n\x04text\x18\x02 \x01(\t\x12,\n\ntool_calls\x18\x03 \x03(\x0b\x32\x18.agent_cloud.v1.ToolCall\x12\x30\n\x0ctool_results\x18\x04 \x03(\x0b\x32\x1a.agent_cloud.v1.ToolResult\"\x8b\x01\n\x05\x41gent\x12\r\n\x05model\x18\x01 \x01(\t\x12\x10\n\x08provider\x18\x02 \x01(\t\x12\x16\n\x0ethinking_level\x18\x03 \x01(\t\x12\x15\n\renabled_tools\x18\x04 \x03(\t\x12\x0f\n\x07key_ref\x18\x05 \x01(\t\x12\x0f\n\x07\x61pi_key\x18\x06 \x01(\t\x12\x10\n\x08\x62\x61se_url\x18\x07 \x01(\t\"3\n\x03\x44oc\x12\r\n\x05scope\x18\x01 \x01(\t\x12\x0c\n\x04type\x18\x02 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x03 \x01(\t\"%\n\x03Mem\x12\r\n\x05scope\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\t\"<\n\x05Skill\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x02 \x01(\t\x12\x10\n\x08location\x18\x03 \x01(\t\"\xd4\x02\n\x0eRunTurnRequest\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12\x0f\n\x07user_id\x18\x02 \x01(\t\x12$\n\x05\x61gent\x18\x03 \x01(\x0b\x32\x15.agent_cloud.v1.Agent\x12&\n\tdocuments\x18\x04 \x03(\x0b\x32\x13.agent_cloud.v1.Doc\x12#\n\x06memory\x18\x05 \x03(\x0b\x32\x13.agent_cloud.v1.Mem\x12%\n\x06skills\x18\x06 \x03(\x0b\x32\x15.agent_cloud.v1.Skill\x12%\n\x08messages\x18\x07 \x03(\x0b\x32\x13.agent_cloud.v1.Msg\x12\x14\n\x0cuser_message\x18\x08 \x01(\t\x12\x18\n\x10sandbox_endpoint\x18\t \x01(\t\x12\x13\n\x0bwork_subdir\x18\n \x01(\t\x12\x17\n\x0fhistory_summary\x18\x0b \x01(\t\"\x96\x01\n\x0fRunTurnResponse\x12)\n\x0cnew_messages\x18\x01 \x03(\x0b\x32\x13.agent_cloud.v1.Msg\x12\x14\n\x0cinput_tokens\x18\x02 \x01(\x03\x12\x15\n\routput_tokens\x18\x03 \x01(\x03\x12\x13\n\x0bstop_reason\x18\x04 \x01(\t\x12\x16\n\x0e\x63ontext_tokens\x18\x05 \x01(\x03\"\x19\n\tTextDelta\x12\x0c\n\x04text\x18\x01 \x01(\t\"\x1d\n\rThinkingDelta\x12\x0c\n\x04text\x18\x01 \x01(\t\"H\n\x0fToolCallStarted\x12\x0f\n\x07\x63\x61ll_id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x16\n\x0e\x61rguments_json\x18\x03 \x01(\t\"E\n\x0fToolResultEvent\x12\x0f\n\x07\x63\x61ll_id\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\t\x12\x10\n\x08is_error\x18\x03 \x01(\x08\"\x8f\x01\n\x08TurnDone\x12)\n\x0cnew_messages\x18\x01 \x03(\x0b\x32\x13.agent_cloud.v1.Msg\x12\x14\n\x0cinput_tokens\x18\x02 \x01(\x03\x12\x15\n\routput_tokens\x18\x03 \x01(\x03\x12\x13\n\x0bstop_reason\x18\x04 \x01(\t\x12\x16\n\x0e\x63ontext_tokens\x18\x05 \x01(\x03\"\xa3\x02\n\tTurnEvent\x12/\n\ntext_delta\x18\x01 \x01(\x0b\x32\x19.agent_cloud.v1.TextDeltaH\x00\x12\x37\n\x0ethinking_delta\x18\x02 \x01(\x0b\x32\x1d.agent_cloud.v1.ThinkingDeltaH\x00\x12<\n\x11tool_call_started\x18\x03 \x01(\x0b\x32\x1f.agent_cloud.v1.ToolCallStartedH\x00\x12\x36\n\x0btool_result\x18\x04 \x01(\x0b\x32\x1f.agent_cloud.v1.ToolResultEventH\x00\x12-\n\tturn_done\x18\x05 \x01(\x0b\x32\x18.agent_cloud.v1.TurnDoneH\x00\x42\x07\n\x05\x65vent\"v\n\x10SummarizeRequest\x12$\n\x05\x61gent\x18\x01 \x01(\x0b\x32\x15.agent_cloud.v1.Agent\x12\x15\n\rprior_summary\x18\x02 \x01(\t\x12%\n\x08messages\x18\x03 \x03(\x0b\x32\x13.agent_cloud.v1.Msg\"Q\n\x11SummarizeResponse\x12\x0f\n\x07summary\x18\x01 \x01(\t\x12\x14\n\x0cinput_tokens\x18\x02 \x01(\x03\x12\x15\n\routput_tokens\x18\x03 \x01(\x03\x32\xf4\x01\n\x06Worker\x12J\n\x07RunTurn\x12\x1e.agent_cloud.v1.RunTurnRequest\x1a\x1f.agent_cloud.v1.RunTurnResponse\x12L\n\rRunTurnStream\x12\x1e.agent_cloud.v1.RunTurnRequest\x1a\x19.agent_cloud.v1.TurnEvent0\x01\x12P\n\tSummarize\x12 .agent_cloud.v1.SummarizeRequest\x1a!.agent_cloud.v1.SummarizeResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -37,34 +37,34 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_TOOLRESULT']._serialized_end=173
   _globals['_MSG']._serialized_start=176
   _globals['_MSG']._serialized_end=305
-  _globals['_AGENT']._serialized_start=307
-  _globals['_AGENT']._serialized_end=411
-  _globals['_DOC']._serialized_start=413
-  _globals['_DOC']._serialized_end=464
-  _globals['_MEM']._serialized_start=466
-  _globals['_MEM']._serialized_end=503
-  _globals['_SKILL']._serialized_start=505
-  _globals['_SKILL']._serialized_end=565
-  _globals['_RUNTURNREQUEST']._serialized_start=568
-  _globals['_RUNTURNREQUEST']._serialized_end=908
-  _globals['_RUNTURNRESPONSE']._serialized_start=911
-  _globals['_RUNTURNRESPONSE']._serialized_end=1061
-  _globals['_TEXTDELTA']._serialized_start=1063
-  _globals['_TEXTDELTA']._serialized_end=1088
-  _globals['_THINKINGDELTA']._serialized_start=1090
-  _globals['_THINKINGDELTA']._serialized_end=1119
-  _globals['_TOOLCALLSTARTED']._serialized_start=1121
-  _globals['_TOOLCALLSTARTED']._serialized_end=1193
-  _globals['_TOOLRESULTEVENT']._serialized_start=1195
-  _globals['_TOOLRESULTEVENT']._serialized_end=1264
-  _globals['_TURNDONE']._serialized_start=1267
-  _globals['_TURNDONE']._serialized_end=1410
-  _globals['_TURNEVENT']._serialized_start=1413
-  _globals['_TURNEVENT']._serialized_end=1704
-  _globals['_SUMMARIZEREQUEST']._serialized_start=1706
-  _globals['_SUMMARIZEREQUEST']._serialized_end=1824
-  _globals['_SUMMARIZERESPONSE']._serialized_start=1826
-  _globals['_SUMMARIZERESPONSE']._serialized_end=1907
-  _globals['_WORKER']._serialized_start=1910
-  _globals['_WORKER']._serialized_end=2154
+  _globals['_AGENT']._serialized_start=308
+  _globals['_AGENT']._serialized_end=447
+  _globals['_DOC']._serialized_start=449
+  _globals['_DOC']._serialized_end=500
+  _globals['_MEM']._serialized_start=502
+  _globals['_MEM']._serialized_end=539
+  _globals['_SKILL']._serialized_start=541
+  _globals['_SKILL']._serialized_end=601
+  _globals['_RUNTURNREQUEST']._serialized_start=604
+  _globals['_RUNTURNREQUEST']._serialized_end=944
+  _globals['_RUNTURNRESPONSE']._serialized_start=947
+  _globals['_RUNTURNRESPONSE']._serialized_end=1097
+  _globals['_TEXTDELTA']._serialized_start=1099
+  _globals['_TEXTDELTA']._serialized_end=1124
+  _globals['_THINKINGDELTA']._serialized_start=1126
+  _globals['_THINKINGDELTA']._serialized_end=1155
+  _globals['_TOOLCALLSTARTED']._serialized_start=1157
+  _globals['_TOOLCALLSTARTED']._serialized_end=1229
+  _globals['_TOOLRESULTEVENT']._serialized_start=1231
+  _globals['_TOOLRESULTEVENT']._serialized_end=1300
+  _globals['_TURNDONE']._serialized_start=1303
+  _globals['_TURNDONE']._serialized_end=1446
+  _globals['_TURNEVENT']._serialized_start=1449
+  _globals['_TURNEVENT']._serialized_end=1740
+  _globals['_SUMMARIZEREQUEST']._serialized_start=1742
+  _globals['_SUMMARIZEREQUEST']._serialized_end=1860
+  _globals['_SUMMARIZERESPONSE']._serialized_start=1862
+  _globals['_SUMMARIZERESPONSE']._serialized_end=1943
+  _globals['_WORKER']._serialized_start=1946
+  _globals['_WORKER']._serialized_end=2190
 # @@protoc_insertion_point(module_scope)
