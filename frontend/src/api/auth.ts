@@ -34,3 +34,18 @@ export function refreshAccess(): Promise<string | null> {
   }
   return _refreshing
 }
+
+// 统一的带鉴权 fetch:附 Bearer;遇 401 用 refresh cookie 静默换一枚 access 重试一次;
+// 仍 401(refresh 也失效)→ 触发 onUnauth(登出)。所有需要鉴权的请求(REST/文件 blob/SSE)
+// 都走这里,确保「非自愿登出」路径处处一致。retry=false 用于 login/register —— 那里的 401/409
+// 是真实答案,不该被当成 access 过期去 refresh。
+export async function authedFetch(input: string, init: RequestInit = {}, retry = true): Promise<Response> {
+  const withAuth = (): RequestInit => ({ ...init, headers: { ...(init.headers ?? {}), ...authHeader() } })
+  let res = await fetch(input, withAuth())
+  if (res.status === 401 && retry) {
+    const tok = await refreshAccess()
+    if (tok) res = await fetch(input, withAuth())
+    if (res.status === 401) onUnauth() // 终态 401:refresh 失败或换枚后仍被拒 → 登出
+  }
+  return res
+}

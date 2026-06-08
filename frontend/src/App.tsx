@@ -8,17 +8,24 @@ import { SettingsDrawer } from "./components/settings/SettingsDrawer"
 import { Sidebar } from "./components/Sidebar"
 import { useStore } from "./store"
 
+// 模块级一次性闸:StrictMode(dev)会双跑 effect;只 bootstrap 一次,避免重复 refresh/me。
+let booted = false
+
 export default function App() {
   const [booting, setBooting] = useState(true)
   const user = useStore((s) => s.user)
 
   // 启动:用 httpOnly refresh cookie 静默换 access,再拉 me;成功则进入主界面,否则登录页。
   useEffect(() => {
+    if (booted) return
+    booted = true
     void (async () => {
       const tok = await refreshAccess()
       if (tok) {
         const u = await api.me().catch(() => null)
-        useStore.getState().setAuth(u)
+        // refresh 成功但 me 失败:别让 access 残留在内存(否则下次请求会带着上个会话的 token)。
+        if (u) useStore.getState().setAuth(u)
+        else useStore.getState().logout()
       }
       setBooting(false)
     })()

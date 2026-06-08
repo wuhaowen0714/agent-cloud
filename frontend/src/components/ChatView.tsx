@@ -18,11 +18,19 @@ export function ChatView() {
   // 在途客户端连接(POST 或 GET resume)的中断句柄 + 所属会话
   const inflight = useRef<{ abort: () => void; sessionId: string } | null>(null)
 
-  const { data: messages = [] } = useQuery({
+  const messagesQ = useQuery({
     queryKey: ["messages", sessionId],
     queryFn: () => api.listMessages(sessionId!),
     enabled: !!sessionId,
   })
+  const messages = messagesQ.data ?? []
+
+  // 选中的会话已被删 / 不属于当前用户(后端 404)→ 丢弃这个悬空选择,回到空态,
+  // 避免对着一个不存在的会话渲染聊天面板、甚至向其 POST 回合(如换用户后 localStorage 残留的会话)。
+  useEffect(() => {
+    const err = messagesQ.error as { status?: number } | null
+    if (err?.status === 404) useStore.getState().setSession(null)
+  }, [messagesQ.error])
 
   // 把一个回合事件灌进 live(仅当仍停留在该会话,丢弃切走会话的残余事件)
   const feed = (sid: string, e: TurnEvent) => {
@@ -98,7 +106,12 @@ export function ChatView() {
     let cancelledLocal = false
     let abortFn: (() => void) | null = null
     void (async () => {
-      const handle = await resumeTurn(sid, (e) => feed(sid, e))
+      let handle: Awaited<ReturnType<typeof resumeTurn>>
+      try {
+        handle = await resumeTurn(sid, (e) => feed(sid, e))
+      } catch {
+        return // 会话不存在/无权(404)等:交给 messages 查询的 404 处理来清理选择
+      }
       if (!handle) return // 204:没有在跑的回合
       if (cancelledLocal || useStore.getState().sessionId !== sid) {
         handle.abort()

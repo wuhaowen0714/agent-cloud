@@ -1,21 +1,25 @@
 import type { AgentConfig, ContextDocument, FileEntry, Message, Session, Skill, User } from "../types"
-import { authHeader, onUnauth, refreshAccess, setAccess } from "./auth"
+import { authedFetch, setAccess } from "./auth"
+
+// 带 HTTP 状态码的错误,便于上层(如 AuthGate)按 status 分支,而不是脆弱地 match 错误文案。
+export class HttpError extends Error {
+  status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = "HttpError"
+    this.status = status
+  }
+}
 
 async function http<T>(path: string, init?: RequestInit, retry = true): Promise<T> {
-  const res = await fetch(`/api${path}`, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...authHeader(), ...(init?.headers ?? {}) },
-  })
-  if (res.status === 401 && retry) {
-    // access 过期 → 用 refresh cookie 静默换一枚,重试一次;再失败 → 登出。
-    const tok = await refreshAccess()
-    if (tok) return http<T>(path, init, false)
-    onUnauth()
-    throw new Error("unauthorized")
-  }
+  const res = await authedFetch(
+    `/api${path}`,
+    { ...init, headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } },
+    retry,
+  )
   if (!res.ok) {
     const body = await res.text().catch(() => "")
-    throw new Error(`${res.status} ${res.statusText}: ${body}`)
+    throw new HttpError(res.status, `${res.status} ${res.statusText}: ${body}`)
   }
   return res.status === 204 ? (undefined as T) : ((await res.json()) as T)
 }
@@ -26,28 +30,30 @@ interface AuthResp {
 }
 
 async function _blobUrl(path: string, attachment = false): Promise<string> {
-  // <img>/<a> 带不了 Authorization header,故下载/预览改 fetch(带 token)→ blob URL。
+  // <img>/<a> 带不了 Authorization header,故下载/预览改 authedFetch(带 token + 401 刷新)→ blob URL。
   const q = `path=${encodeURIComponent(path)}${attachment ? "&attachment=true" : ""}`
-  const res = await fetch(`/api/files/raw?${q}`, { headers: authHeader() })
-  if (!res.ok) throw new Error(`file fetch failed: ${res.status}`)
+  const res = await authedFetch(`/api/files/raw?${q}`)
+  if (!res.ok) throw new HttpError(res.status, `file fetch failed: ${res.status}`)
   return URL.createObjectURL(await res.blob())
 }
 
 export const api = {
-  // ── auth ──
+  // ── auth ──(register/login 用 retry=false:401/409 是真实结果,不该触发 refresh)
   register: async (email: string, password: string) => {
-    const r = await http<AuthResp>("/auth/register", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    })
+    const r = await http<AuthResp>(
+      "/auth/register",
+      { method: "POST", body: JSON.stringify({ email, password }) },
+      false,
+    )
     setAccess(r.access_token)
     return r.user
   },
   login: async (email: string, password: string) => {
-    const r = await http<AuthResp>("/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    })
+    const r = await http<AuthResp>(
+      "/auth/login",
+      { method: "POST", body: JSON.stringify({ email, password }) },
+      false,
+    )
     setAccess(r.access_token)
     return r.user
   },
@@ -70,12 +76,13 @@ export const api = {
   uploadFiles: async (path: string, files: File[]) => {
     const fd = new FormData()
     for (const f of files) fd.append("files", f)
-    const res = await fetch(`/api/files/upload?path=${encodeURIComponent(path)}`, {
+    // 不设 Content-Type,浏览器自动带 multipart boundary;authedFetch 负责 Bearer + 401 刷新。
+    const res = await authedFetch(`/api/files/upload?path=${encodeURIComponent(path)}`, {
       method: "POST",
-      headers: authHeader(), // 不设 Content-Type,浏览器自动带 multipart boundary
       body: fd,
     })
-    if (!res.ok) throw new Error(`upload failed: ${res.status} ${await res.text().catch(() => "")}`)
+    if (!res.ok)
+      throw new HttpError(res.status, `upload failed: ${res.status} ${await res.text().catch(() => "")}`)
     return (await res.json()) as FileEntry[]
   },
   mkdir: (path: string) =>

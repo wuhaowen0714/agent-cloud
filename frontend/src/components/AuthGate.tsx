@@ -4,10 +4,17 @@ import { useStore } from "../store"
 
 type Mode = "login" | "register"
 
-function humanError(raw: string, mode: Mode): string {
-  if (raw.includes("409")) return "该邮箱已被注册,请直接登录"
-  if (raw.includes("401")) return "邮箱或密码不正确"
-  if (raw.includes("422")) return "邮箱格式不正确,或密码太短(至少 8 位)"
+// 鸭子类型读 HttpError.status(不 import 类型,免得组件测试 mock 掉 ../api/client 时拿不到)。
+function statusOf(err: unknown): number {
+  return typeof err === "object" && err !== null && "status" in err
+    ? Number((err as { status: unknown }).status)
+    : 0
+}
+
+function humanError(status: number, mode: Mode): string {
+  if (status === 409) return "该邮箱已被注册,请直接登录"
+  if (status === 401) return "邮箱或密码不正确"
+  if (status === 422) return "邮箱格式不正确,或密码太短(至少 8 位)"
   return mode === "login" ? "登录失败,请重试" : "注册失败,请重试"
 }
 
@@ -34,7 +41,7 @@ export function AuthGate() {
           : await api.register(email.trim(), password)
       setAuth(user)
     } catch (err) {
-      setError(humanError(String(err), mode))
+      setError(humanError(statusOf(err), mode))
     } finally {
       setBusy(false)
     }

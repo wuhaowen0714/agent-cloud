@@ -12,7 +12,7 @@ async function downloadFile(e: FileEntry) {
   document.body.appendChild(a)
   a.click()
   a.remove()
-  URL.revokeObjectURL(url)
+  setTimeout(() => URL.revokeObjectURL(url), 0) // 同步 revoke 可能在某些浏览器取消下载,延后释放
 }
 
 export function FileList({

@@ -1,5 +1,6 @@
 import { create } from "zustand"
 import { setAccess, setOnUnauth } from "./api/auth"
+import { clearQueryCache } from "./api/queryClient"
 import type { Block } from "./blocks"
 import type { User } from "./types"
 
@@ -59,6 +60,7 @@ export const useStore = create<AppState>((set, get) => ({
   logout: () => {
     setAccess(null) // 丢弃内存里的 access(refresh cookie 由 /auth/logout 吊销)
     localStorage.removeItem("ac.sessionId")
+    clearQueryCache() // 清掉所有缓存,避免下个用户读到上个用户残留(尤其未按 user 命名的 key)
     set({
       user: null,
       userId: null,

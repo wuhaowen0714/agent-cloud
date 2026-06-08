@@ -44,7 +44,7 @@ export function FilePreview({ entry, onClose }: { entry: FileEntry; onClose: () 
     document.body.appendChild(a)
     a.click()
     a.remove()
-    URL.revokeObjectURL(u)
+    setTimeout(() => URL.revokeObjectURL(u), 0) // 同步 revoke 可能在某些浏览器取消下载,延后释放
   }
 
   return (

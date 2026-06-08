@@ -1,19 +1,5 @@
 import type { TurnEvent } from "../types"
-import { authHeader, refreshAccess } from "./auth"
-
-/** 带 Bearer 的 fetch;401 → 静默刷新一次再重试(刷新失败则原样返回 401 让调用方抛)。 */
-async function authedFetch(url: string, init: RequestInit = {}): Promise<Response> {
-  const withAuth = (): RequestInit => ({
-    ...init,
-    headers: { ...(init.headers ?? {}), ...authHeader() },
-  })
-  let res = await fetch(url, withAuth())
-  if (res.status === 401) {
-    const tok = await refreshAccess()
-    if (tok) res = await fetch(url, withAuth())
-  }
-  return res
-}
+import { authedFetch } from "./auth"
 
 /** 把任意切分的 SSE 文本喂进来,逐个 data: 事件回调。返回一个 feed(chunk) 函数。 */
 export function parseSSE(onEvent: (e: TurnEvent) => void): (chunk: string) => void {
