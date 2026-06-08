@@ -26,9 +26,9 @@ export function FileDrawer() {
   if (!open || !userId) return null
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-black/20" onClick={toggle} />
+      <div className="fixed inset-0 z-40 bg-slate-900/30 backdrop-blur-sm" onClick={toggle} />
       <aside
-        className="fixed right-0 top-0 z-50 flex h-full w-[28rem] max-w-[90vw] flex-col border-l border-slate-200 bg-white shadow-xl"
+        className="fixed right-0 top-0 z-50 flex h-full w-[28rem] max-w-[90vw] flex-col rounded-l-2xl border-l border-slate-200 bg-white shadow-pop"
         onDragOver={(e) => e.preventDefault()}
         onDrop={async (e) => {
           e.preventDefault()
@@ -39,9 +39,12 @@ export function FileDrawer() {
           }
         }}
       >
-        <header className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
-          <span className="text-sm font-semibold text-slate-800">文件</span>
-          <button className="text-slate-400 hover:text-slate-700" onClick={toggle}>
+        <header className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+          <span className="text-base font-semibold tracking-tight text-slate-800">文件</span>
+          <button
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+            onClick={toggle}
+          >
             ✕
           </button>
         </header>

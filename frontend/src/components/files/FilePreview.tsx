@@ -48,9 +48,12 @@ export function FilePreview({ entry, onClose }: { entry: FileEntry; onClose: () 
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-6" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/40 p-6 backdrop-blur-sm"
+      onClick={onClose}
+    >
       <div
-        className="flex max-h-[85vh] w-[44rem] max-w-[92vw] flex-col rounded-lg bg-white shadow-xl"
+        className="flex max-h-[85vh] w-[44rem] max-w-[92vw] flex-col overflow-hidden rounded-2xl bg-white shadow-pop"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-center justify-between border-b border-slate-100 px-3 py-2">

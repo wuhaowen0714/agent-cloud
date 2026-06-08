@@ -3,6 +3,11 @@ import { useEffect, useRef, useState } from "react"
 import { BUILTIN_TOOLS, checkedToEnabled, enabledToChecked } from "../../agentConfig"
 import { api } from "../../api/client"
 import { useStore } from "../../store"
+import { Button, Field, Input, Select, Textarea } from "../ui"
+
+function SectionTitle({ children }: { children: string }) {
+  return <div className="text-sm font-semibold text-slate-800">{children}</div>
+}
 
 export function AgentSettings() {
   const userId = useStore((s) => s.userId)!
@@ -23,30 +28,29 @@ export function AgentSettings() {
   if (!agentId) {
     return (
       <form
-        className="space-y-2"
+        className="space-y-3"
         onSubmit={(e) => {
           e.preventDefault()
           if (draft.name && draft.model) createAgent.mutate()
         }}
       >
-        <div className="text-sm font-medium text-slate-700">新建 Agent</div>
+        <SectionTitle>新建 Agent</SectionTitle>
         {(["name", "model", "provider"] as const).map((k) => (
-          <input
+          <Input
             key={k}
-            className="w-full rounded border border-slate-300 px-2 py-1 text-sm"
             placeholder={k === "model" ? "model(如 DeepSeek-V4-Pro)" : k}
             value={draft[k]}
             onChange={(e) => setDraft({ ...draft, [k]: e.target.value })}
           />
         ))}
-        <button className="rounded bg-brand-600 px-3 py-1 text-sm text-white hover:bg-brand-700">
-          创建
-        </button>
+        <Button type="submit">创建</Button>
       </form>
     )
   }
   return <AgentEditor key={agentId} agentId={agentId} userId={userId} />
 }
+
+const toolRow = "flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-slate-50"
 
 function AgentEditor({ agentId, userId }: { agentId: string; userId: string }) {
   const qc = useQueryClient()
@@ -109,46 +113,60 @@ function AgentEditor({ agentId, userId }: { agentId: string; userId: string }) {
     else n.add(key)
     return n
   }
-  const field = "w-full rounded border border-slate-300 px-2 py-1 text-sm"
   const invalid = !form.name || !form.model || !form.provider
 
   return (
-    <div className="space-y-4 text-sm">
-      <div className="space-y-2">
-        <input className={field} value={form.name} placeholder="名称" onChange={(e) => setForm({ ...form, name: e.target.value })} />
-        <input className={field} value={form.model} placeholder="模型" onChange={(e) => setForm({ ...form, model: e.target.value })} />
-        <input className={field} value={form.provider} placeholder="provider" onChange={(e) => setForm({ ...form, provider: e.target.value })} />
-        <select className={field} value={form.thinking_level} onChange={(e) => setForm({ ...form, thinking_level: e.target.value })}>
-          <option value="">思考档位:默认</option>
-          <option value="low">low</option>
-          <option value="medium">medium</option>
-          <option value="high">high</option>
-        </select>
-        <select className={field} value={form.key_ref} onChange={(e) => setForm({ ...form, key_ref: e.target.value })}>
-          <option value="">凭据:全局共享 Key</option>
-          {creds.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name} · {c.masked}
-            </option>
-          ))}
-        </select>
+    <div className="space-y-5">
+      <div className="space-y-3">
+        <Field label="名称">
+          <Input value={form.name} placeholder="名称" onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        </Field>
+        <Field label="模型">
+          <Input value={form.model} placeholder="模型" onChange={(e) => setForm({ ...form, model: e.target.value })} />
+        </Field>
+        <Field label="Provider">
+          <Input value={form.provider} placeholder="provider" onChange={(e) => setForm({ ...form, provider: e.target.value })} />
+        </Field>
+        <Field label="思考档位">
+          <Select value={form.thinking_level} onChange={(e) => setForm({ ...form, thinking_level: e.target.value })}>
+            <option value="">默认</option>
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+          </Select>
+        </Field>
+        <Field label="凭据" hint="空 = 用平台全局共享 Key">
+          <Select value={form.key_ref} onChange={(e) => setForm({ ...form, key_ref: e.target.value })}>
+            <option value="">全局共享 Key</option>
+            {creds.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name} · {c.masked}
+              </option>
+            ))}
+          </Select>
+        </Field>
       </div>
 
       <div className="space-y-1">
-        <div className="font-medium text-slate-700">工具</div>
+        <SectionTitle>工具</SectionTitle>
         {BUILTIN_TOOLS.map((t) => (
-          <label key={t.name} className="flex items-center gap-2 text-slate-600">
-            <input type="checkbox" checked={tools.has(t.name)} onChange={() => setTools((s) => toggle(s, t.name))} />
-            <span className="font-mono text-xs">{t.name}</span>
-            <span className="text-xs text-slate-400">{t.desc}</span>
+          <label key={t.name} className={toolRow}>
+            <input
+              type="checkbox"
+              className="h-4 w-4 accent-brand-600"
+              checked={tools.has(t.name)}
+              onChange={() => setTools((s) => toggle(s, t.name))}
+            />
+            <span className="font-mono text-xs text-slate-700">{t.name}</span>
+            <span className="truncate text-xs text-slate-400">{t.desc}</span>
           </label>
         ))}
       </div>
 
-      <div className="space-y-1">
-        <div className="font-medium text-slate-700">指令(AGENTS)</div>
-        <textarea
-          className="h-32 w-full resize-none rounded border border-slate-300 px-2 py-1 font-mono text-xs"
+      <div className="space-y-1.5">
+        <SectionTitle>指令(AGENTS)</SectionTitle>
+        <Textarea
+          className="h-32 font-mono text-xs"
           placeholder="给这个 agent 的指令 / 人设(可选)"
           value={instructions}
           onChange={(e) => setInstructions(e.target.value)}
@@ -156,30 +174,34 @@ function AgentEditor({ agentId, userId }: { agentId: string; userId: string }) {
       </div>
 
       <div className="space-y-1">
-        <div className="font-medium text-slate-700">启用技能</div>
+        <SectionTitle>启用技能</SectionTitle>
         {pool.length === 0 ? (
-          <div className="text-xs text-slate-400">技能池为空 — 去"技能"页安装</div>
+          <div className="px-2 text-xs text-slate-400">技能池为空 — 去"技能"页安装</div>
         ) : (
           pool.map((sk) => (
-            <label key={sk.id} className="flex items-center gap-2 text-slate-600">
-              <input type="checkbox" checked={skillIds.has(sk.id)} onChange={() => setSkillIds((s) => toggle(s, sk.id))} />
-              <span className="text-xs">{sk.name}</span>
+            <label key={sk.id} className={toolRow}>
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-brand-600"
+                checked={skillIds.has(sk.id)}
+                onChange={() => setSkillIds((s) => toggle(s, sk.id))}
+              />
+              <span className="text-xs text-slate-700">{sk.name}</span>
               <span className="truncate text-xs text-slate-400">{sk.description}</span>
             </label>
           ))
         )}
       </div>
 
-      <div className="flex items-center gap-2">
-        <button
-          className="rounded bg-brand-600 px-4 py-1.5 text-sm text-white hover:bg-brand-700 disabled:opacity-40"
+      <div className="flex items-center gap-2 border-t border-slate-100 pt-4">
+        <Button
           disabled={save.isPending || invalid}
           title={invalid ? "名称/模型/provider 不能为空" : ""}
           onClick={() => save.mutate()}
         >
           {save.isPending ? "保存中…" : "保存"}
-        </button>
-        {saved && <span className="text-xs text-brand-600">已保存</span>}
+        </Button>
+        {saved && <span className="text-xs font-medium text-brand-600">已保存 ✓</span>}
       </div>
     </div>
   )

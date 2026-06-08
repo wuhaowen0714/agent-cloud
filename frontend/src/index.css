@@ -4,7 +4,15 @@
 
 :root { color-scheme: light; }
 html, body, #root { height: 100%; }
-body { margin: 0; background: #f8fafc; color: #0f172a; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+body {
+  margin: 0;
+  /* 顶部一抹极淡的青色光晕,给浅色背景一点「有质感」的层次(克制,不喧宾夺主) */
+  background: radial-gradient(1100px 520px at 100% -8%, #ecfeff 0%, rgba(236, 254, 255, 0) 60%), #f7fafc;
+  color: #0f172a;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
 
 ::selection { background: #99f6e4; }            /* brand-200 */
 *::-webkit-scrollbar { width: 8px; height: 8px; }

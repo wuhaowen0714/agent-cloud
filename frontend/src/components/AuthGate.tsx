@@ -1,6 +1,7 @@
 import { type FormEvent, useState } from "react"
 import { api } from "../api/client"
 import { useStore } from "../store"
+import { Button, Field, Input } from "./ui"
 
 type Mode = "login" | "register"
 
@@ -47,14 +48,11 @@ export function AuthGate() {
     }
   }
 
-  const field =
-    "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-
   return (
-    <div className="flex h-full items-center justify-center bg-slate-50 p-6">
-      <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-        <div className="mb-6 flex flex-col items-center gap-2">
-          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-600 text-lg font-bold text-white">
+    <div className="flex h-full items-center justify-center p-6">
+      <div className="w-full max-w-sm rounded-2xl border border-slate-200/80 bg-white p-8 shadow-pop">
+        <div className="mb-7 flex flex-col items-center gap-2.5">
+          <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-400 to-brand-600 text-xl font-bold text-white shadow-sm">
             A
           </span>
           <h1 className="text-lg font-semibold tracking-tight text-slate-800">Agent Cloud</h1>
@@ -63,44 +61,36 @@ export function AuthGate() {
           </p>
         </div>
 
-        <form className="space-y-3" onSubmit={submit}>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-slate-500">邮箱</label>
-            <input
+        <form className="space-y-3.5" onSubmit={submit}>
+          <Field label="邮箱">
+            <Input
               type="email"
               required
               autoFocus
               autoComplete="email"
-              className={field}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
             />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-slate-500">密码</label>
-            <input
+          </Field>
+          <Field label="密码">
+            <Input
               type="password"
               required
               autoComplete={mode === "login" ? "current-password" : "new-password"}
-              className={field}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder={mode === "register" ? "至少 8 位" : "••••••••"}
             />
-          </div>
+          </Field>
 
           {error && (
             <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{error}</div>
           )}
 
-          <button
-            type="submit"
-            disabled={busy || !email || !password}
-            className="w-full rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40"
-          >
+          <Button type="submit" className="w-full" disabled={busy || !email || !password}>
             {busy ? "请稍候…" : mode === "login" ? "登录" : "注册"}
-          </button>
+          </Button>
         </form>
 
         <div className="mt-5 text-center text-sm text-slate-400">

@@ -4,6 +4,7 @@ import { useStore } from "../store"
 import { AccountMenu } from "./AccountMenu"
 import { AgentSwitcher } from "./AgentSwitcher"
 import { SessionList } from "./SessionList"
+import { Button } from "./ui"
 
 export function Sidebar() {
   const userId = useStore((s) => s.userId)
@@ -20,24 +21,24 @@ export function Sidebar() {
   })
 
   return (
-    <aside className="flex w-72 flex-col gap-3 border-r border-slate-200 bg-white p-3">
+    <aside className="flex w-72 flex-col gap-3 border-r border-slate-200 bg-white/80 p-3 backdrop-blur-sm">
       {/* 品牌头 */}
-      <div className="flex items-center gap-2 px-1 pt-1">
-        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-600 text-sm font-bold text-white">
+      <div className="flex items-center gap-2.5 px-1 pt-1">
+        <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 text-sm font-bold text-white shadow-sm">
           A
         </span>
-        <span className="text-sm font-semibold tracking-tight text-slate-800">Agent Cloud</span>
+        <span className="text-[15px] font-semibold tracking-tight text-slate-800">Agent Cloud</span>
       </div>
 
       {/* 新对话(无 agent 时禁用)*/}
-      <button
-        className="w-full rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40"
+      <Button
+        className="w-full"
         disabled={!agentId || create.isPending}
         title={agentId ? "" : "先选择 / 新建一个 agent"}
         onClick={() => create.mutate()}
       >
         ＋ 新对话
-      </button>
+      </Button>
 
       {/* agent 切换器 */}
       <AgentSwitcher />

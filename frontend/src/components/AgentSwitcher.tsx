@@ -30,12 +30,12 @@ export function AgentSwitcher() {
 
   const current = agents.find((a) => a.id === agentId)
   const item =
-    "flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-slate-50 disabled:opacity-40"
+    "flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm hover:bg-slate-100 disabled:opacity-40"
 
   return (
     <div ref={ref} className="relative">
       <button
-        className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm hover:bg-slate-50"
+        className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
         onClick={() => setOpen((v) => !v)}
       >
         <span className="min-w-0 flex-1 truncate">
@@ -52,7 +52,7 @@ export function AgentSwitcher() {
       </button>
 
       {open && (
-        <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+        <div className="absolute left-0 right-0 top-full z-30 mt-1.5 rounded-xl border border-slate-200 bg-white p-1.5 shadow-pop">
           <div className="max-h-60 overflow-auto">
             {agents.length === 0 && (
               <div className="px-3 py-2 text-xs text-slate-400">还没有 agent,先新建一个</div>

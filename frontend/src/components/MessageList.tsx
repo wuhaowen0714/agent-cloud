@@ -23,8 +23,9 @@ export function MessageList({
   const turns = useMemo(() => messagesToTurns(messages), [messages])
 
   return (
-    <div className="flex-1 space-y-3 overflow-auto p-4">
-      {turns.map((turn, i) => {
+    <div className="flex-1 overflow-auto p-4">
+      <div className="mx-auto max-w-3xl space-y-4">
+        {turns.map((turn, i) => {
         // user 消息但没有任何助手块 = 该回合被取消/出错(未完成)。但最后一条且当前
         // 有 live(正在流式/重连)的不算——那是进行中的回合,助手内容在下面的 live 里。
         const unfinished =
@@ -73,7 +74,8 @@ export function MessageList({
           </AssistantBubble>
         </>
       )}
-      <div ref={endRef} />
+        <div ref={endRef} />
+      </div>
     </div>
   )
 }

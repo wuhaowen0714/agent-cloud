@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { Button, Textarea } from "./ui"
 
 export function Composer({
   disabled,
@@ -17,37 +18,32 @@ export function Composer({
     setText("")
   }
   return (
-    <div className="flex gap-2 border-t border-slate-200 bg-white p-3">
-      <textarea
-        className="min-h-[44px] flex-1 resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none"
-        placeholder={disabled ? "生成中…" : "说点什么(Enter 发送,Shift+Enter 换行)"}
-        rows={1}
-        value={text}
-        disabled={disabled}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault()
-            send()
-          }
-        }}
-      />
-      {disabled && onStop ? (
-        <button
-          className="rounded-lg border border-slate-300 px-4 text-sm text-slate-600 hover:bg-slate-50"
-          onClick={onStop}
-        >
-          停止
-        </button>
-      ) : (
-        <button
-          className="rounded-lg bg-brand-600 px-4 text-sm text-white enabled:hover:bg-brand-700 disabled:opacity-40"
+    <div className="border-t border-slate-200 bg-white/80 p-3 backdrop-blur">
+      <div className="mx-auto flex max-w-3xl items-end gap-2">
+        <Textarea
+          className="min-h-[44px] flex-1"
+          placeholder={disabled ? "生成中…" : "说点什么(Enter 发送,Shift+Enter 换行)"}
+          rows={1}
+          value={text}
           disabled={disabled}
-          onClick={send}
-        >
-          发送
-        </button>
-      )}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault()
+              send()
+            }
+          }}
+        />
+        {disabled && onStop ? (
+          <Button variant="secondary" className="h-11" onClick={onStop}>
+            停止
+          </Button>
+        ) : (
+          <Button className="h-11" disabled={disabled} onClick={send}>
+            发送
+          </Button>
+        )}
+      </div>
     </div>
   )
 }
