@@ -1,0 +1,180 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useEffect, useState } from "react"
+import { BUILTIN_TOOLS, checkedToEnabled, enabledToChecked } from "../../agentConfig"
+import { api } from "../../api/client"
+import { useStore } from "../../store"
+
+export function AgentSettings() {
+  const userId = useStore((s) => s.userId)!
+  const agentId = useStore((s) => s.agentId)
+  const setAgent = useStore((s) => s.setAgent)
+  const qc = useQueryClient()
+
+  // 新建模式:没有选中 agent
+  const [draft, setDraft] = useState({ name: "", model: "", provider: "openai" })
+  const createAgent = useMutation({
+    mutationFn: () => api.createAgent({ user_id: userId, ...draft }),
+    onSuccess: (a) => {
+      qc.invalidateQueries({ queryKey: ["agents", userId] })
+      setAgent(a.id)
+    },
+  })
+
+  if (!agentId) {
+    return (
+      <form
+        className="space-y-2"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (draft.name && draft.model) createAgent.mutate()
+        }}
+      >
+        <div className="text-sm font-medium text-slate-700">新建 Agent</div>
+        {(["name", "model", "provider"] as const).map((k) => (
+          <input
+            key={k}
+            className="w-full rounded border border-slate-300 px-2 py-1 text-sm"
+            placeholder={k === "model" ? "model(如 DeepSeek-V4-Pro)" : k}
+            value={draft[k]}
+            onChange={(e) => setDraft({ ...draft, [k]: e.target.value })}
+          />
+        ))}
+        <button className="rounded bg-brand-600 px-3 py-1 text-sm text-white hover:bg-brand-700">
+          创建
+        </button>
+      </form>
+    )
+  }
+  return <AgentEditor key={agentId} agentId={agentId} userId={userId} />
+}
+
+function AgentEditor({ agentId, userId }: { agentId: string; userId: string }) {
+  const qc = useQueryClient()
+  const { data: agents = [] } = useQuery({
+    queryKey: ["agents", userId],
+    queryFn: () => api.listAgents(userId),
+  })
+  const agent = agents.find((a) => a.id === agentId)
+  const { data: docs = [] } = useQuery({
+    queryKey: ["docs", "agent", agentId],
+    queryFn: () => api.listDocs("agent", agentId),
+  })
+  const { data: pool = [] } = useQuery({
+    queryKey: ["skills", userId],
+    queryFn: () => api.listSkills(userId),
+  })
+  const { data: enabled = [] } = useQuery({
+    queryKey: ["agentSkills", agentId],
+    queryFn: () => api.getAgentSkills(agentId),
+  })
+
+  const [form, setForm] = useState({ name: "", model: "", provider: "", thinking_level: "" })
+  const [tools, setTools] = useState<Set<string>>(new Set())
+  const [instructions, setInstructions] = useState("")
+  const [skillIds, setSkillIds] = useState<Set<string>>(new Set())
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    if (agent) {
+      setForm({
+        name: agent.name,
+        model: agent.model,
+        provider: agent.provider,
+        thinking_level: agent.thinking_level ?? "",
+      })
+      setTools(enabledToChecked(agent.enabled_tools))
+    }
+  }, [agent])
+  useEffect(() => {
+    setInstructions(docs.find((d) => d.type === "AGENTS")?.content ?? "")
+  }, [docs])
+  useEffect(() => {
+    setSkillIds(new Set(enabled.map((s) => s.id)))
+  }, [enabled])
+
+  const save = useMutation({
+    mutationFn: async () => {
+      await api.patchAgent(agentId, { ...form, enabled_tools: checkedToEnabled(tools) })
+      if (instructions.trim()) await api.putDoc("agent", "AGENTS", agentId, instructions)
+      await api.setAgentSkills(agentId, [...skillIds])
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["agents", userId] })
+      qc.invalidateQueries({ queryKey: ["agentSkills", agentId] })
+      qc.invalidateQueries({ queryKey: ["docs", "agent", agentId] })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 1500)
+    },
+  })
+
+  const toggle = (set: Set<string>, key: string) => {
+    const n = new Set(set)
+    if (n.has(key)) n.delete(key)
+    else n.add(key)
+    return n
+  }
+  const field = "w-full rounded border border-slate-300 px-2 py-1 text-sm"
+
+  return (
+    <div className="space-y-4 text-sm">
+      <div className="space-y-2">
+        <input className={field} value={form.name} placeholder="名称" onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        <input className={field} value={form.model} placeholder="模型" onChange={(e) => setForm({ ...form, model: e.target.value })} />
+        <input className={field} value={form.provider} placeholder="provider" onChange={(e) => setForm({ ...form, provider: e.target.value })} />
+        <select className={field} value={form.thinking_level} onChange={(e) => setForm({ ...form, thinking_level: e.target.value })}>
+          <option value="">思考档位:默认</option>
+          <option value="low">low</option>
+          <option value="medium">medium</option>
+          <option value="high">high</option>
+        </select>
+      </div>
+
+      <div className="space-y-1">
+        <div className="font-medium text-slate-700">工具</div>
+        {BUILTIN_TOOLS.map((t) => (
+          <label key={t.name} className="flex items-center gap-2 text-slate-600">
+            <input type="checkbox" checked={tools.has(t.name)} onChange={() => setTools((s) => toggle(s, t.name))} />
+            <span className="font-mono text-xs">{t.name}</span>
+            <span className="text-xs text-slate-400">{t.desc}</span>
+          </label>
+        ))}
+      </div>
+
+      <div className="space-y-1">
+        <div className="font-medium text-slate-700">指令(AGENTS)</div>
+        <textarea
+          className="h-32 w-full resize-none rounded border border-slate-300 px-2 py-1 font-mono text-xs"
+          placeholder="给这个 agent 的指令 / 人设(可选)"
+          value={instructions}
+          onChange={(e) => setInstructions(e.target.value)}
+        />
+      </div>
+
+      <div className="space-y-1">
+        <div className="font-medium text-slate-700">启用技能</div>
+        {pool.length === 0 ? (
+          <div className="text-xs text-slate-400">技能池为空 — 去"技能"页安装</div>
+        ) : (
+          pool.map((sk) => (
+            <label key={sk.id} className="flex items-center gap-2 text-slate-600">
+              <input type="checkbox" checked={skillIds.has(sk.id)} onChange={() => setSkillIds((s) => toggle(s, sk.id))} />
+              <span className="text-xs">{sk.name}</span>
+              <span className="truncate text-xs text-slate-400">{sk.description}</span>
+            </label>
+          ))
+        )}
+      </div>
+
+      <div className="flex items-center gap-2">
+        <button
+          className="rounded bg-brand-600 px-4 py-1.5 text-sm text-white hover:bg-brand-700 disabled:opacity-40"
+          disabled={save.isPending}
+          onClick={() => save.mutate()}
+        >
+          {save.isPending ? "保存中…" : "保存"}
+        </button>
+        {saved && <span className="text-xs text-brand-600">已保存</span>}
+      </div>
+    </div>
+  )
+}

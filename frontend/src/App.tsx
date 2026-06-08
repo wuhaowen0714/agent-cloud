@@ -1,5 +1,6 @@
 import { ChatView } from "./components/ChatView"
 import { FileDrawer } from "./components/files/FileDrawer"
+import { SettingsDrawer } from "./components/settings/SettingsDrawer"
 import { Sidebar } from "./components/Sidebar"
 
 export default function App() {
@@ -10,6 +11,7 @@ export default function App() {
         <ChatView />
       </main>
       <FileDrawer />
+      <SettingsDrawer />
     </div>
   )
 }
