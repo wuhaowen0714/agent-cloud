@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     compaction_token_thresholds: dict[str, int] = {}
     compaction_keep_recent: int = 8  # 压缩时保留逐字的最近消息条数
 
+    # 回合失败透明自动重试(spec: turn-recovery-auto-retry)
+    turn_max_overflow_retries: int = 2  # 超窗压缩重试上限
+    turn_max_transient_retries: int = 3  # 瞬时错误退避重试上限
+    turn_max_total_attempts: int = 6  # 1 首发 + 两类上限之和;纯兜底
+    turn_retry_backoff_base_seconds: float = 0.5  # 第 i 次重试等 base*2**i 秒,单步封顶 8s
+
     def compaction_threshold_for(self, model: str) -> int:
         """该模型的压缩阈值:优先 per-model 覆盖,否则回退全局默认。"""
         return self.compaction_token_thresholds.get(model, self.compaction_token_threshold)
