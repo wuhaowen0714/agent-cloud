@@ -33,7 +33,8 @@ def builtin_tool_specs() -> list[ToolSpec]:
                 "Edit a file in place by exact text replacement. Prefer this over write_file "
                 "when changing part of a file (it won't drop the rest). `edits` is a list of "
                 "{old_text, new_text}; each old_text must match exactly once — include enough "
-                "surrounding context to be unique. Edits apply in order and are all-or-nothing."
+                "surrounding context to be unique. Edits apply in order (a later edit sees "
+                "earlier edits' result) and are all-or-nothing."
             ),
             input_schema={
                 "type": "object",

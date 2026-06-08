@@ -79,3 +79,42 @@ def test_empty_edits_rejected():
 def test_malformed_edit_shape_rejected():
     with pytest.raises(ValueError, match="needs old_text and new_text"):
         apply_edits("foo", [{"old_text": "foo"}])
+
+
+def test_crlf_preserved_exact_path():
+    out = apply_edits("x = 1\r\ny = 2\r\n", [{"old_text": "x = 1", "new_text": "x = 9"}])
+    assert out == "x = 9\r\ny = 2\r\n"
+
+
+def test_crlf_preserved_through_line_trim_path():
+    # 第一行尾有空格 → 精确失败 → line-trim 命中;CRLF 必须整体保留(不被吃成 LF)。
+    out = apply_edits(
+        "x = 1  \r\ny = 2\r\n", [{"old_text": "x = 1\ny = 2", "new_text": "x = 100\ny = 200"}]
+    )
+    assert out == "x = 100\r\ny = 200\r\n"
+
+
+def test_canon_midline_span_preserves_surrounding_text():
+    # 文件用弯引号、old 用直引号 → 经 Unicode 归一命中;只替换 ‘hi’,两侧文本必须原样保留。
+    out = apply_edits("x = ‘hi’ + tail", [{"old_text": "'hi'", "new_text": "'bye'"}])
+    assert out == "x = 'bye' + tail"
+
+
+def test_line_trim_ambiguous_is_error():
+    # 精确失败(行尾空格)但有两处逐行匹配 → 报不唯一(锁住 line-trim 的唯一性护栏)。
+    content = "a \nb\nX\na \nb\n"
+    with pytest.raises(ValueError, match="matched 2 places"):
+        apply_edits(content, [{"old_text": "a\nb", "new_text": "q\nr"}])
+
+
+def test_trailing_newline_in_old_text_matches_whole_line():
+    out = apply_edits("a = 1  \nb = 2\n", [{"old_text": "a = 1\n", "new_text": "a = 2"}])
+    assert out == "a = 2\nb = 2\n"
+
+
+def test_sequential_edit_sees_previous_output():
+    # 文档化语义:后一段在前一段的结果上匹配(故 edit#2 命中 edit#1 刚插入的 bar)。
+    out = apply_edits(
+        "foo", [{"old_text": "foo", "new_text": "foo bar"}, {"old_text": "bar", "new_text": "BAZ"}]
+    )
+    assert out == "foo BAZ"

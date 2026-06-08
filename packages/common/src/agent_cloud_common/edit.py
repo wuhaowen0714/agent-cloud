@@ -30,11 +30,24 @@ def _canon(s: str) -> str:
     return "".join(_CANON.get(ch, ch) for ch in s)
 
 
+def _detect_newline(s: str) -> str:
+    """文件主流换行风格:存在 \\r\\n 且不少于裸 \\n 则视为 CRLF,否则 LF。"""
+    crlf = s.count("\r\n")
+    lf = s.count("\n") - crlf
+    return "\r\n" if crlf and crlf >= lf else "\n"
+
+
+def _restore_newline(s: str, nl: str) -> str:
+    return s.replace("\n", nl) if nl == "\r\n" else s
+
+
 def _locate_line_trim(content: str, old: str, label: str) -> tuple[int, int] | None:
     """逐行尾空白不敏感匹配:把 old 当作整行序列,在 content 的行窗口里找(每行 rstrip 后比较)。
     覆盖"模型丢了/加了行尾空白"的常见情况。命中多处抛 ValueError;唯一→返回原文字符 span;无→None。"""
     c_lines = content.split("\n")
     o_lines = old.split("\n")
+    if len(o_lines) > 1 and o_lines[-1] == "":
+        o_lines = o_lines[:-1]  # old 末尾换行 = "匹配这些整行",不再额外要求一个空行
     k = len(o_lines)
     if k == 0 or k > len(c_lines):
         return None
@@ -104,17 +117,23 @@ def apply_edits(original: str, edits: object) -> str:
     if not isinstance(edits, list) or not edits:
         raise ValueError("edits must be a non-empty array of {old_text, new_text}")
 
-    content = original
+    # 全程在 LF 空间匹配/编辑,最后按文件主流换行风格还原。否则 line-trim 阶段(按行 rstrip
+    # 比较)会把编辑区内的 \r 吃掉,静默把 CRLF 文件改成混合/LF 换行。注意:这会把【整文件】
+    # 规整为主流换行(混合换行的文件会被统一)—— 对编辑工具是可接受甚至期望的行为。
+    nl = _detect_newline(original)
+    content = original.replace("\r\n", "\n")
     for idx, e in enumerate(edits):
         if not isinstance(e, dict) or "old_text" not in e or "new_text" not in e:
             raise ValueError(f"edit #{idx + 1}: each edit needs old_text and new_text")
         old, new = e["old_text"], e["new_text"]
         if not isinstance(old, str) or not isinstance(new, str):
             raise ValueError(f"edit #{idx + 1}: old_text and new_text must be strings")
+        old = old.replace("\r\n", "\n")  # 在 LF 空间匹配:模型常把 CRLF 文件的片段按 LF 发来
+        new = new.replace("\r\n", "\n")
         if old == "":
             raise ValueError(f"edit #{idx + 1}: old_text must not be empty")
         if old == new:
             raise ValueError(f"edit #{idx + 1}: old_text and new_text are identical (no-op)")
         start, end = _locate(content, old, idx)
         content = content[:start] + new + content[end:]
-    return content
+    return _restore_newline(content, nl)
