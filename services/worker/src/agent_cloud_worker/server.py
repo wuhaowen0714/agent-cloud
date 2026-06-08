@@ -8,21 +8,31 @@ import grpc
 from agent_cloud.v1 import worker_pb2, worker_pb2_grpc
 from agent_cloud_common import (
     MAX_GRPC_MESSAGE_BYTES,
+    CompletionRequest,
     ContextDocument,
     MemoryItem,
+    Message,
+    Role,
     SkillRef,
 )
 from agent_cloud_common.codec import msg_from_proto, msg_to_proto, turn_event_to_proto
 
 from agent_cloud_worker.context import build_system_prompt
 from agent_cloud_worker.loop import run_turn, run_turn_stream
-from agent_cloud_worker.provider import Provider
+from agent_cloud_worker.provider import ContextWindowExceeded, Provider
 from agent_cloud_worker.sandbox_executor import SandboxToolExecutor
 
 logger = logging.getLogger(__name__)
 
 # 由 agent 的 (model, provider, key_ref) 造一个 Provider。真实实现(Anthropic 等)在后续 Plan。
 ProviderFactory = Callable[[str, str, str], Provider]
+
+# 压缩器系统提示词:把历史浓缩成简明要点,保留后续回合需要的信息(spec §6)。
+_SUMMARIZE_SYSTEM = (
+    "你是对话压缩器。把给定对话浓缩成简明要点,保留:用户的目标与诉求、关键事实与决定、"
+    "已产出的文件与成果、尚未完成的事项。保留后续对话需要的上下文,去掉寒暄与冗余。"
+    "只输出要点本身,不要额外解释。"
+)
 
 
 def _build_context_and_history(request: worker_pb2.RunTurnRequest) -> tuple[str, list]:
@@ -78,6 +88,12 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                     history=history,
                     user_message=request.user_message,
                 )
+            except ContextWindowExceeded:
+                # 上下文超窗:可恢复,映射成 RESOURCE_EXHAUSTED(区别于下面的 INTERNAL),
+                # 后端据此触发压缩并提示用户重试(spec §6/§8)。
+                logger.info("RunTurn context window exceeded")
+                await context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, "context window exceeded")
+                return
             except Exception:
                 # provider 失败(超时/重试耗尽/上游 5xx)或 loop 守卫:收敛为 INTERNAL,
                 # 不把原始异常泄漏给客户端(与 RunTurnStream 一致)。后端会转成 502,
@@ -90,6 +106,7 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
             input_tokens=result.usage.input_tokens,
             output_tokens=result.usage.output_tokens,
             stop_reason=result.stop_reason,
+            context_tokens=result.context_tokens,
         )
 
     async def RunTurnStream(
@@ -129,10 +146,61 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                     user_message=request.user_message,
                 ):
                     yield turn_event_to_proto(event)
+            except ContextWindowExceeded:
+                # 上下文超窗:可恢复 → RESOURCE_EXHAUSTED(超窗发生在首个 LLM 调用,
+                # 通常尚未 yield 任何增量),后端据此触发压缩并提示重试。
+                logger.info("RunTurnStream context window exceeded")
+                await context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, "context window exceeded")
+                return
             except Exception:
                 logger.exception("RunTurnStream failed mid-stream")
                 await context.abort(grpc.StatusCode.INTERNAL, "turn failed")
                 return
+
+    async def Summarize(
+        self, request: worker_pb2.SummarizeRequest, context: grpc.aio.ServicerContext
+    ) -> worker_pb2.SummarizeResponse:
+        # 把历史(+已有摘要)折叠成一份更新后的摘要。一次 LLM 调用,不用工具。
+        try:
+            history = [msg_from_proto(m) for m in request.messages]
+        except (ValueError, json.JSONDecodeError) as exc:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+            return
+        try:
+            provider = self._provider_factory(
+                request.agent.model, request.agent.provider, request.agent.key_ref
+            )
+        except Exception as exc:  # noqa: BLE001 — 工厂任意失败收敛为明确状态码
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, f"provider unavailable: {exc}")
+            return
+
+        if request.prior_summary:
+            instruction = (
+                "已有摘要(把它与下面的新对话合并,更新成一份完整的要点摘要):\n"
+                f"{request.prior_summary}\n\n请输出合并后的完整要点。"
+            )
+        else:
+            instruction = "请将以上对话压缩成简明要点。"
+        messages = [*history, Message(role=Role.USER, text=instruction)]
+
+        try:
+            result = await provider.complete(
+                CompletionRequest(system=_SUMMARIZE_SYSTEM, messages=messages, tools=[])
+            )
+        except ContextWindowExceeded:
+            # 连摘要请求都超窗:可恢复,交给后端用更激进的折叠边界重试(spec §6/§8)。
+            logger.info("Summarize context window exceeded")
+            await context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, "context window exceeded")
+            return
+        except Exception:
+            logger.exception("Summarize failed")
+            await context.abort(grpc.StatusCode.INTERNAL, "summarize failed")
+            return
+        return worker_pb2.SummarizeResponse(
+            summary=result.message.text,
+            input_tokens=result.usage.input_tokens,
+            output_tokens=result.usage.output_tokens,
+        )
 
 
 async def create_server(

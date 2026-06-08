@@ -7,6 +7,14 @@ from typing import Protocol
 from agent_cloud_common import CompletionRequest, CompletionResult, Message, Usage
 
 
+class ContextWindowExceeded(Exception):
+    """provider 报告:请求超出模型上下文窗口(通常是上游 400)。
+
+    与一般 provider 失败区分开,让 server 把它映射成 gRPC RESOURCE_EXHAUSTED,
+    后端据此触发压缩并提示用户重试(spec §6/§8)。
+    """
+
+
 class Provider(Protocol):
     async def complete(self, request: CompletionRequest) -> CompletionResult: ...
 

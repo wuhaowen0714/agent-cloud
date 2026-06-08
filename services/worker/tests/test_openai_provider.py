@@ -1,7 +1,11 @@
 from types import SimpleNamespace
 
+import httpx
+import openai
+import pytest
 from agent_cloud_common import CompletionRequest, Message, Role, ToolSpec
-from agent_cloud_worker.openai_provider import OpenAIProvider
+from agent_cloud_worker.openai_provider import OpenAIProvider, _is_context_window_error
+from agent_cloud_worker.provider import ContextWindowExceeded
 
 
 class _FakeCompletions:
@@ -198,6 +202,78 @@ async def test_complete_captures_reasoning():
     provider = OpenAIProvider(client=_client(resp), model="m", max_tokens=9)
     result = await provider.complete(_req())
     assert result.message.reasoning == "why"
+
+
+# ---- Plan 12a: 上下文超窗(上游 400)→ ContextWindowExceeded ----
+
+
+def _bad_request(message, body=None):
+    # 构造一个真实的 openai.BadRequestError(400),供检测逻辑测试
+    req = httpx.Request("POST", "http://test")
+    resp = httpx.Response(400, request=req)
+    return openai.BadRequestError(message, response=resp, body=body)
+
+
+def test_is_context_window_error_by_message():
+    exc = _bad_request("This model's maximum context length is 8192 tokens, however ...")
+    assert _is_context_window_error(exc) is True
+
+
+def test_is_context_window_error_by_code():
+    exc = _bad_request("generic message")
+    exc.code = "context_length_exceeded"
+    assert _is_context_window_error(exc) is True
+
+
+def test_is_context_window_error_false_for_other_400():
+    assert _is_context_window_error(_bad_request("invalid value for 'temperature'")) is False
+
+
+def test_is_context_window_error_false_for_non_badrequest():
+    assert _is_context_window_error(RuntimeError("boom")) is False
+
+
+class _RaisingCompletions:
+    def __init__(self, exc):
+        self._exc = exc
+
+    async def create(self, **kwargs):
+        raise self._exc
+
+
+def _raising_client(exc):
+    return SimpleNamespace(chat=SimpleNamespace(completions=_RaisingCompletions(exc)))
+
+
+async def test_complete_maps_context_overflow_to_context_window_exceeded():
+    provider = OpenAIProvider(
+        client=_raising_client(_bad_request("maximum context length exceeded")),
+        model="m",
+        max_tokens=9,
+    )
+    with pytest.raises(ContextWindowExceeded):
+        await provider.complete(_req())
+
+
+async def test_complete_reraises_unrelated_badrequest():
+    provider = OpenAIProvider(
+        client=_raising_client(_bad_request("invalid value for 'temperature'")),
+        model="m",
+        max_tokens=9,
+    )
+    with pytest.raises(openai.BadRequestError):
+        await provider.complete(_req())
+
+
+async def test_stream_maps_context_overflow_to_context_window_exceeded():
+    provider = OpenAIProvider(
+        client=_raising_client(_bad_request("This model's maximum context length is 8192 tokens")),
+        model="m",
+        max_tokens=9,
+    )
+    with pytest.raises(ContextWindowExceeded):
+        async for _ in provider.stream(_req()):
+            pass
 
 
 async def test_stream_accumulates_reasoning_into_message():

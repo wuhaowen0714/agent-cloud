@@ -13,7 +13,7 @@ from agent_cloud_common import (
 )
 from agent_cloud_common.codec import turn_event_from_proto
 from agent_cloud_sandbox.server import create_server as create_sandbox_server
-from agent_cloud_worker.provider import FakeProvider, ProviderTextDelta
+from agent_cloud_worker.provider import ContextWindowExceeded, FakeProvider, ProviderTextDelta
 from agent_cloud_worker.server import create_server as create_worker_server
 
 _GRPC_OPTIONS = [
@@ -375,6 +375,106 @@ async def test_run_turn_stream_large_turn_done_under_shared_limit(sandbox):
         await worker_server.stop(None)
     assert isinstance(events[-1], TurnDone) and events[-1].stop_reason == "end_turn"
     assert len(events[-1].new_messages[-1].text) >= 5_000_000
+
+
+# ---- Plan 12a: Summarize RPC ----
+
+
+async def test_summarize_returns_summary_and_usage():
+    provider = FakeProvider([_final("摘要:用户要排序,已完成 bubble sort。")])
+    worker_server, wport = await create_worker_server(provider_factory=lambda *a: provider, port=0)
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            resp = await stub.Summarize(
+                worker_pb2.SummarizeRequest(
+                    agent=worker_pb2.Agent(model="m", provider="fake"),
+                    prior_summary="",
+                    messages=[
+                        worker_pb2.Msg(role="user", text="帮我排序"),
+                        worker_pb2.Msg(role="assistant", text="好的,用 bubble sort"),
+                    ],
+                )
+            )
+    finally:
+        await worker_server.stop(None)
+    assert "摘要" in resp.summary
+    assert resp.input_tokens == 3 and resp.output_tokens == 4
+
+
+async def test_summarize_invalid_role_returns_invalid_argument():
+    provider = FakeProvider([_final("x")])
+    worker_server, wport = await create_worker_server(provider_factory=lambda *a: provider, port=0)
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            with pytest.raises(grpc.aio.AioRpcError) as ei:
+                await stub.Summarize(
+                    worker_pb2.SummarizeRequest(
+                        agent=worker_pb2.Agent(model="m", provider="fake"),
+                        messages=[worker_pb2.Msg(role="system", text="bad role")],
+                    )
+                )
+    finally:
+        await worker_server.stop(None)
+    assert ei.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+
+# ---- Plan 12a: 上下文超窗 → RESOURCE_EXHAUSTED ----
+
+
+class _ContextOverflowProvider:
+    async def complete(self, request):
+        raise ContextWindowExceeded("context window exceeded")
+
+    async def stream(self, request):
+        raise ContextWindowExceeded("context window exceeded")
+        yield  # pragma: no cover — 使其成为 async generator
+
+
+async def test_run_turn_context_overflow_maps_to_resource_exhausted():
+    worker_server, wport = await create_worker_server(
+        provider_factory=lambda *a: _ContextOverflowProvider(), port=0
+    )
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            with pytest.raises(grpc.aio.AioRpcError) as ei:
+                await stub.RunTurn(
+                    worker_pb2.RunTurnRequest(
+                        agent=worker_pb2.Agent(model="m", provider="fake"),
+                        messages=[],
+                        user_message="go",
+                        sandbox_endpoint="localhost:1",
+                        work_subdir="s1",
+                    )
+                )
+    finally:
+        await worker_server.stop(None)
+    assert ei.value.code() == grpc.StatusCode.RESOURCE_EXHAUSTED
+
+
+async def test_run_turn_stream_context_overflow_maps_to_resource_exhausted():
+    worker_server, wport = await create_worker_server(
+        provider_factory=lambda *a: _ContextOverflowProvider(), port=0
+    )
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            with pytest.raises(grpc.aio.AioRpcError) as ei:
+                async for _ in stub.RunTurnStream(
+                    worker_pb2.RunTurnRequest(
+                        agent=worker_pb2.Agent(model="m", provider="fake"),
+                        messages=[],
+                        user_message="go",
+                        sandbox_endpoint="localhost:1",
+                        work_subdir="s1",
+                    )
+                ):
+                    pass
+    finally:
+        await worker_server.stop(None)
+    assert ei.value.code() == grpc.StatusCode.RESOURCE_EXHAUSTED
 
 
 async def test_run_turn_stream_invalid_role_aborts(sandbox):

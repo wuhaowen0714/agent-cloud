@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 
+import openai
 from agent_cloud_common import (
     CompletionRequest,
     CompletionResult,
@@ -14,11 +15,32 @@ from agent_cloud_common import (
 )
 
 from agent_cloud_worker.provider import (
+    ContextWindowExceeded,
     ProviderCompleted,
     ProviderEvent,
     ProviderTextDelta,
     ProviderThinkingDelta,
 )
+
+# 上游对“超出上下文窗口”没有统一表示:OpenAI 用 code=context_length_exceeded,
+# 其它兼容端点常只在 message 里写。两者都查,且仅针对 400(BadRequest)以免误伤别的错误。
+_CONTEXT_LEN_MARKERS = (
+    "context length",
+    "maximum context",
+    "context window",
+    "too long",
+    "reduce the length",
+    "reduce your prompt",
+)
+
+
+def _is_context_window_error(exc: Exception) -> bool:
+    if not isinstance(exc, openai.BadRequestError):
+        return False
+    if getattr(exc, "code", None) == "context_length_exceeded":
+        return True
+    text = str(getattr(exc, "message", "") or exc).lower()
+    return any(marker in text for marker in _CONTEXT_LEN_MARKERS)
 
 
 def to_openai_tools(tools: list[ToolSpec]) -> list[dict]:
@@ -116,7 +138,12 @@ class OpenAIProvider:
         return kwargs
 
     async def complete(self, request: CompletionRequest) -> CompletionResult:
-        resp = await self._client.chat.completions.create(**self._create_kwargs(request))
+        try:
+            resp = await self._client.chat.completions.create(**self._create_kwargs(request))
+        except openai.BadRequestError as exc:
+            if _is_context_window_error(exc):
+                raise ContextWindowExceeded(str(exc)) from exc
+            raise
         message = message_from_openai(resp.choices[0].message)
         # 部分 OpenAI 兼容端点非流式响应可能不带 usage;缺失按 0 计,不让成功的回合崩。
         u = resp.usage
@@ -130,7 +157,12 @@ class OpenAIProvider:
         kwargs = self._create_kwargs(request)
         kwargs["stream"] = True
         kwargs["stream_options"] = {"include_usage": True}
-        stream = await self._client.chat.completions.create(**kwargs)
+        try:
+            stream = await self._client.chat.completions.create(**kwargs)
+        except openai.BadRequestError as exc:
+            if _is_context_window_error(exc):
+                raise ContextWindowExceeded(str(exc)) from exc
+            raise
 
         text_parts: list[str] = []
         reasoning_parts: list[str] = []
