@@ -5,6 +5,8 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+from agent_cloud_common import apply_edits
+
 # 工具输出上限。bash 可能产出任意大的输出,超过 gRPC 默认 4MB 消息上限会导致
 # RESOURCE_EXHAUSTED 崩溃,因此在沙箱侧先截断。
 _MAX_OUTPUT = 100_000
@@ -60,10 +62,21 @@ def _read_file(workdir: Path, args: dict) -> str:
     return _truncate(_resolve_within(workdir, args["path"]).read_text())
 
 
+def _edit(workdir: Path, args: dict) -> str:
+    # 多段精确替换;apply_edits 失败抛 ValueError(可操作错误)→ run_tool 转成 is_error 交回模型。
+    target = _resolve_within(workdir, args["path"])
+    content = target.read_text()
+    new_content = apply_edits(content, args["edits"])
+    if new_content != content:
+        target.write_text(new_content)
+    return f"edited {args['path']}"
+
+
 _TOOLS: dict[str, Callable[[Path, dict], str]] = {
     "bash": _bash,
     "write_file": _write_file,
     "read_file": _read_file,
+    "edit": _edit,
 }
 
 

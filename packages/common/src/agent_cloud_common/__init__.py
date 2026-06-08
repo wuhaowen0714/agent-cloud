@@ -1,3 +1,4 @@
+from agent_cloud_common.edit import apply_edits
 from agent_cloud_common.events import (
     TextDelta,
     ThinkingDelta,
@@ -34,6 +35,7 @@ __all__ = [
     "ContextDocument",
     "MemoryItem",
     "SkillRef",
+    "apply_edits",
     "builtin_tool_specs",
     "MAX_GRPC_MESSAGE_BYTES",
     "TextDelta",

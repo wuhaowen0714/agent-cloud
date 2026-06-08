@@ -4,7 +4,7 @@ from agent_cloud_worker.sandbox_executor import SandboxToolExecutor, filtered_to
 
 
 def test_empty_enabled_tools_exposes_all():
-    assert {s.name for s in filtered_tool_specs([])} == {"bash", "write_file", "read_file"}
+    assert {s.name for s in filtered_tool_specs([])} == {"bash", "write_file", "read_file", "edit"}
 
 
 def test_filters_to_enabled_subset():

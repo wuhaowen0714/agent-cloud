@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from agent_cloud_common import ToolCall, ToolResult, ToolSpec
+from agent_cloud_common import ToolCall, ToolResult, ToolSpec, apply_edits
 
 
 @dataclass
@@ -89,6 +89,15 @@ def _read_file(workdir: Path, args: dict) -> str:
     return _resolve_within(workdir, args["path"]).read_text()
 
 
+def _edit(workdir: Path, args: dict) -> str:
+    target = _resolve_within(workdir, args["path"])
+    content = target.read_text()
+    new_content = apply_edits(content, args["edits"])
+    if new_content != content:
+        target.write_text(new_content)
+    return f"edited {args['path']}"
+
+
 def builtin_tools() -> list[Tool]:
     return [
         Tool(
@@ -126,5 +135,33 @@ def builtin_tools() -> list[Tool]:
                 },
             ),
             func=_read_file,
+        ),
+        Tool(
+            spec=ToolSpec(
+                name="edit",
+                description=(
+                    "Edit a file in place by exact text replacement (prefer over write_file for "
+                    "partial changes). `edits`: list of {old_text, new_text}, each matching once."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "edits": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "old_text": {"type": "string"},
+                                    "new_text": {"type": "string"},
+                                },
+                                "required": ["old_text", "new_text"],
+                            },
+                        },
+                    },
+                    "required": ["path", "edits"],
+                },
+            ),
+            func=_edit,
         ),
     ]

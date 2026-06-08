@@ -34,7 +34,7 @@ async def test_specs_match_catalog(sandbox):
     addr, _ = sandbox
     async with grpc.aio.insecure_channel(addr) as channel:
         ex = SandboxToolExecutor(channel, work_subdir="s1")
-        assert {s.name for s in ex.specs()} == {"bash", "write_file", "read_file"}
+        assert {s.name for s in ex.specs()} == {"bash", "write_file", "read_file", "edit"}
 
 
 async def test_run_turn_executes_tool_across_grpc(sandbox):

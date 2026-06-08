@@ -27,4 +27,31 @@ def builtin_tool_specs() -> list[ToolSpec]:
                           "properties": {"path": {"type": "string"}},
                           "required": ["path"]},
         ),
+        ToolSpec(
+            name="edit",
+            description=(
+                "Edit a file in place by exact text replacement. Prefer this over write_file "
+                "when changing part of a file (it won't drop the rest). `edits` is a list of "
+                "{old_text, new_text}; each old_text must match exactly once — include enough "
+                "surrounding context to be unique. Edits apply in order and are all-or-nothing."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "edits": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "old_text": {"type": "string"},
+                                "new_text": {"type": "string"},
+                            },
+                            "required": ["old_text", "new_text"],
+                        },
+                    },
+                },
+                "required": ["path", "edits"],
+            },
+        ),
     ]

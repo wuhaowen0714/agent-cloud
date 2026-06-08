@@ -65,6 +65,40 @@ def test_bash_failure_strips_grpc_fork_noise(tmp_path):
     assert "FD from fork parent" not in content
 
 
+def test_edit_replaces_text(tmp_path):
+    run_tool(tmp_path, "s1", "write_file", '{"path": "a.py", "content": "x = 1\\n"}')
+    _, err = run_tool(
+        tmp_path,
+        "s1",
+        "edit",
+        json.dumps({"path": "a.py", "edits": [{"old_text": "x = 1", "new_text": "x = 2"}]}),
+    )
+    assert err is False
+    assert (tmp_path / "s1" / "a.py").read_text() == "x = 2\n"
+
+
+def test_edit_not_found_is_error(tmp_path):
+    run_tool(tmp_path, "s1", "write_file", '{"path": "a.py", "content": "hello"}')
+    content, err = run_tool(
+        tmp_path,
+        "s1",
+        "edit",
+        json.dumps({"path": "a.py", "edits": [{"old_text": "nope", "new_text": "x"}]}),
+    )
+    assert err is True and "not found" in content
+
+
+def test_edit_ambiguous_is_error(tmp_path):
+    run_tool(tmp_path, "s1", "write_file", '{"path": "a.py", "content": "z\\nz\\n"}')
+    content, err = run_tool(
+        tmp_path,
+        "s1",
+        "edit",
+        json.dumps({"path": "a.py", "edits": [{"old_text": "z", "new_text": "q"}]}),
+    )
+    assert err is True and "unique" in content
+
+
 def test_unknown_tool(tmp_path):
     content, err = run_tool(tmp_path, "s1", "nope", "{}")
     assert err is True and "unknown tool" in content.lower()
