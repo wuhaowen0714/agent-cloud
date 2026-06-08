@@ -150,6 +150,49 @@ async def test_build_request_work_subdir_override(session):
     assert req2.work_subdir == "."
 
 
+async def test_build_request_drops_summarized_and_sends_history_summary(session):
+    # 压缩后:seq <= summary_through_seq 的消息不再逐字发,改为发 history_summary;
+    # 之后的消息(seq > 边界)仍逐字保留(spec §9)。
+    user = await UserRepository(session).create(User(email="sum@example.com"))
+    await session.flush()
+    agent = await AgentConfigRepository(session).create(
+        AgentConfig(user_id=user.id, name="c", model="m", provider="p")
+    )
+    await session.flush()
+    s = await SessionRepository(session).create_for(user.id, agent.id, None)
+    await session.flush()
+    # seq 0,1 已折叠;seq 2,3 保留
+    await MessageRepository(session).append(
+        s.id, OrmMessage(session_id=s.id, seq=0, role="user", content={"text": "old-u"})
+    )
+    await MessageRepository(session).append(
+        s.id,
+        OrmMessage(
+            session_id=s.id, seq=0, role="assistant",
+            content={"text": "old-a", "tool_calls": [], "tool_results": []},
+        ),
+    )
+    await MessageRepository(session).append(
+        s.id, OrmMessage(session_id=s.id, seq=0, role="user", content={"text": "recent-u"})
+    )
+    await MessageRepository(session).append(
+        s.id,
+        OrmMessage(
+            session_id=s.id, seq=0, role="assistant",
+            content={"text": "recent-a", "tool_calls": [], "tool_results": []},
+        ),
+    )
+    s.summary = "早期摘要"
+    s.summary_through_seq = 1
+    await session.commit()
+
+    req = await build_run_turn_request(
+        session, s, sandbox_endpoint="x", user_message="now", exclude_message_id=None
+    )
+    assert req.history_summary == "早期摘要"
+    assert [m.text for m in req.messages] == ["recent-u", "recent-a"]
+
+
 def _ns(role: str):
     from types import SimpleNamespace
 

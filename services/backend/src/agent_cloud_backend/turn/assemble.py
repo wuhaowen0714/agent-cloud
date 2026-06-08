@@ -48,7 +48,13 @@ async def build_run_turn_request(
     user_mem = await mem_repo.list_for_context("user", session.user_id)
     agent_mem = await mem_repo.list_for_context("agent", session.agent_config_id)
     history = await MessageRepository(db).list_by_session(session.id)
-    history = [m for m in history if m.id != exclude_message_id]
+    # 压缩后:已折叠进 summary 的消息(seq <= summary_through_seq)不再逐字发,
+    # 改由 history_summary 承载;未压缩会话的 summary_through_seq=-1,等价于不过滤。
+    history = [
+        m
+        for m in history
+        if m.id != exclude_message_id and m.seq > session.summary_through_seq
+    ]
     history = _strip_unanswered_user_messages(history)
 
     return worker_pb2.RunTurnRequest(
@@ -77,4 +83,5 @@ async def build_run_turn_request(
         user_message=user_message,
         sandbox_endpoint=sandbox_endpoint,
         work_subdir=work_subdir if work_subdir is not None else session.work_subdir,
+        history_summary=session.summary,
     )
