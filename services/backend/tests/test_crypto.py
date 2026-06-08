@@ -1,8 +1,8 @@
 import base64
 
 import pytest
-
 from agent_cloud_backend.crypto import decrypt, encrypt, load_credential_key, mask
+from cryptography.exceptions import InvalidTag
 
 KEY = base64.b64encode(b"\x01" * 32).decode()
 
@@ -23,7 +23,7 @@ def test_decrypt_with_wrong_key_fails():
     k = load_credential_key(KEY)
     other = load_credential_key(base64.b64encode(b"\x02" * 32).decode())
     blob = encrypt("x", k)
-    with pytest.raises(Exception):
+    with pytest.raises(InvalidTag):
         decrypt(blob, other)
 
 

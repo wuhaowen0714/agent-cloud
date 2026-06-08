@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_cloud_backend.models.agent_config import AgentConfig
+from agent_cloud_backend.models.provider_credential import ProviderCredential
 from agent_cloud_backend.models.session import Session
 
 
@@ -38,3 +39,12 @@ async def resolve_owner(
         await owned_agent(agent_id, user_id, db)
         return agent_id
     raise HTTPException(status_code=422, detail=f"invalid scope: {scope}")
+
+
+async def owned_credential(
+    cred_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSession
+) -> ProviderCredential:
+    c = await db.get(ProviderCredential, cred_id)
+    if c is None or c.user_id != user_id:
+        raise HTTPException(status_code=404, detail="credential not found")
+    return c

@@ -1,3 +1,5 @@
+import base64
+import os
 import uuid as _uuid
 from collections.abc import AsyncIterator
 
@@ -13,6 +15,9 @@ from agent_cloud_backend.skills.store import LocalObjectStore
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer
+
+# 凭据 API(/credentials)依赖 AGENT_CLOUD_CREDENTIAL_KEY;测试注入一个固定 32B 主密钥。
+os.environ.setdefault("AGENT_CLOUD_CREDENTIAL_KEY", base64.b64encode(b"\x07" * 32).decode())
 
 
 class _FakeProvisioner:

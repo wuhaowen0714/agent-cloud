@@ -11,6 +11,7 @@ from agent_cloud_backend.api import (
     agent_skills,
     auth,
     context_documents,
+    credentials,
     files,
     memory_entries,
     messages,
@@ -86,6 +87,7 @@ def create_app() -> FastAPI:
         skills,
         agent_skills,
         files,
+        credentials,
     ):
         app.include_router(module.router)
 
