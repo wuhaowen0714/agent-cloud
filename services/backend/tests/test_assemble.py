@@ -29,7 +29,9 @@ async def test_build_request_from_db(session):
     await session.flush()
     await ContextDocumentRepository(session).upsert("user", "USER", user.id, "# user")
     await ContextDocumentRepository(session).upsert("agent", "AGENTS", agent.id, "# agent")
-    await MemoryEntryRepository(session).append("user", user.id, "likes tea")
+    await MemoryEntryRepository(session).write_version(
+        "user", user.id, "likes tea", None, expected_version=0
+    )
     # history: one COMPLETE prior turn (user + assistant). 未完成(无助手回复)的 user
     # 消息会被 _strip_unanswered_user_messages 丢掉(见专项单测)。
     await MessageRepository(session).append(

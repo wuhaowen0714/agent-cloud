@@ -3,7 +3,6 @@ from agent_cloud_backend.models.message import Message
 from agent_cloud_backend.models.user import User
 from agent_cloud_backend.repositories.agent_config import AgentConfigRepository
 from agent_cloud_backend.repositories.context_document import ContextDocumentRepository
-from agent_cloud_backend.repositories.memory_entry import MemoryEntryRepository
 from agent_cloud_backend.repositories.message import MessageRepository
 from agent_cloud_backend.repositories.session import SessionRepository
 from agent_cloud_backend.repositories.user import UserRepository
@@ -90,35 +89,3 @@ async def test_context_document_upsert(session):
     d2 = await repo.upsert(scope="user", type="USER", owner_id=user.id, content="v2")
     await session.commit()
     assert d1.id == d2.id and d2.content == "v2"
-
-
-async def test_memory_append_and_list(session):
-    user = await _make_user(session)
-    repo = MemoryEntryRepository(session)
-    await repo.append(scope="user", owner_id=user.id, content="fact1")
-    await repo.append(scope="user", owner_id=user.id, content="fact2")
-    await session.commit()
-    entries = await repo.list_for_context(scope="user", owner_id=user.id, limit=10)
-    assert {e.content for e in entries} == {"fact1", "fact2"}
-
-
-async def test_memory_list_for_context_deterministic_same_transaction(session):
-    """I3: appends within ONE transaction share an identical created_at
-    (Postgres now() is transaction-stable), so ordering by created_at alone is
-    undefined. The (created_at desc, id desc) tiebreaker must produce a
-    deterministic order."""
-    user = await _make_user(session)
-    repo = MemoryEntryRepository(session)
-    # No commit between appends -> all three rows get the same created_at.
-    e1 = await repo.append(scope="user", owner_id=user.id, content="m1")
-    e2 = await repo.append(scope="user", owner_id=user.id, content="m2")
-    e3 = await repo.append(scope="user", owner_id=user.id, content="m3")
-    await session.commit()
-
-    # All share the same transaction timestamp -> tiebreaker is what decides.
-    assert e1.created_at == e2.created_at == e3.created_at
-
-    entries = await repo.list_for_context(scope="user", owner_id=user.id, limit=10)
-    # Deterministic order defined by the id-desc tiebreaker.
-    expected = sorted([e1, e2, e3], key=lambda e: e.id, reverse=True)
-    assert [e.id for e in entries] == [e.id for e in expected]
