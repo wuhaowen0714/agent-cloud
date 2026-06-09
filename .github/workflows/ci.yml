@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# 同一分支/PR 新推送时取消上一次未完成的运行,省 CI 时间。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: frontend (tsc + vitest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Type-check (tsc -b)
+        run: npm run lint
+      - name: Unit tests (vitest)
+        run: npm test
+
+  backend:
+    name: backend (pytest)
+    runs-on: ubuntu-latest
+    env:
+      # 后端测试用 testcontainers 起临时 Postgres;CI runner 自带 Docker。
+      # Ryuk(testcontainers 的清理 sidecar)在 CI 里会卡 teardown,禁用之。
+      TESTCONTAINERS_RYUK_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - name: Run tests (skip docker-marked sandbox integration)
+        working-directory: services/backend
+        # 标了 `docker` 的用例需要真实 Docker daemon + 构建好的 agent-cloud-sandbox
+        # 镜像;单元 + 数据层(testcontainers Postgres)用例在此跑全。
+        run: uv run pytest -m "not docker" -q

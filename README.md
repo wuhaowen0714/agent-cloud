@@ -3,6 +3,8 @@
 > 无状态、多租户的 **Agent Cloud**:用户创建可配置的 AI agent(模型 / Provider / 工具 / 技能),与之多轮对话;每个会话跑在**隔离沙箱**里,拥有持久工作区。后端是唯一访问数据库的服务,LLM 密钥只存在于 worker,沙箱按最小信任设计。
 
 <p>
+  <a href="https://github.com/wuhaowen0714/agent-cloud/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/wuhaowen0714/agent-cloud/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
   <img alt="Python" src="https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white">
   <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white">
   <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white">
@@ -231,7 +233,7 @@ bash scripts/gen_protos.sh     # 改了 protos/*.proto 后重新生成 gRPC stub
 
 ## 许可证
 
-尚未指定许可证。在补充 `LICENSE` 之前,默认保留所有权利(All rights reserved)。
+本项目以 [MIT License](LICENSE) 授权,© 2026 wuhaowen。
 
 ---
 
