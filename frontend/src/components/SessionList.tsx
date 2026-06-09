@@ -25,7 +25,7 @@ export function SessionList() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="mb-1.5 truncate px-1 text-xs font-medium text-slate-400">
+      <div className="mb-1 truncate px-1 text-xs font-medium tracking-wide text-slate-400">
         {current ? (
           <>
             <span className="text-slate-600">{current.name}</span> 的对话
@@ -38,9 +38,9 @@ export function SessionList() {
         {mine.map((s) => (
           <li key={s.id}>
             <button
-              className={`w-full truncate rounded-md px-2 py-1.5 text-left text-sm ${
+              className={`w-full truncate rounded-lg px-2.5 py-2 text-left text-sm transition ${
                 s.id === sessionId
-                  ? "bg-brand-50 font-medium text-brand-800 ring-1 ring-brand-100"
+                  ? "bg-brand-50 font-medium text-brand-800"
                   : "text-slate-600 hover:bg-slate-100"
               }`}
               onClick={() => setSession(s.id)}
