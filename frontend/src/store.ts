@@ -22,7 +22,7 @@ interface AppState {
   live: LiveTurn | null
   fileDrawerOpen: boolean
   settingsOpen: boolean
-  settingsTab: "agent" | "skills" | "keys"
+  settingsTab: "agent" | "skills" | "keys" | "memory"
   setAuth: (user: User | null) => void
   logout: () => void
   setAgent: (id: string | null) => void
@@ -31,7 +31,7 @@ interface AppState {
   setLive: (fn: (t: LiveTurn) => LiveTurn) => void
   clearLive: () => void
   toggleFileDrawer: () => void
-  openSettings: (tab?: "agent" | "skills" | "keys") => void
+  openSettings: (tab?: "agent" | "skills" | "keys" | "memory") => void
   closeSettings: () => void
 }
 

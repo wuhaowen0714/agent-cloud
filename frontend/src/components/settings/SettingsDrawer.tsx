@@ -1,12 +1,14 @@
 import { useStore } from "../../store"
 import { AgentSettings } from "./AgentSettings"
 import { KeysPanel } from "./KeysPanel"
+import { MemoryPanel } from "./MemoryPanel"
 import { SkillsPanel } from "./SkillsPanel"
 
-type Tab = "agent" | "skills" | "keys"
+type Tab = "agent" | "skills" | "keys" | "memory"
 const TABS: { id: Tab; label: string }[] = [
   { id: "agent", label: "Agent" },
   { id: "skills", label: "技能" },
+  { id: "memory", label: "记忆" },
   { id: "keys", label: "Provider Keys" },
 ]
 
@@ -48,6 +50,9 @@ export function SettingsDrawer() {
         <div className="flex-1 overflow-auto p-4">
           {tab === "agent" && <AgentSettings />}
           {tab === "skills" && <SkillsPanel />}
+          {tab === "memory" && (
+            <MemoryPanel scope="user" hint="跨你所有 agent 的个人长期记忆;agent 在对话空闲/压缩时自动维护。" />
+          )}
           {tab === "keys" && <KeysPanel />}
         </div>
       </aside>

@@ -2,6 +2,7 @@ import type {
   AgentConfig,
   ContextDocument,
   FileEntry,
+  MemoryBlock,
   Message,
   ProviderCredential,
   Session,
@@ -142,4 +143,17 @@ export const api = {
   createCredential: (body: { name: string; base_url: string; api_key: string }) =>
     http<ProviderCredential>("/credentials", { method: "POST", body: JSON.stringify(body) }),
   deleteCredential: (id: string) => http<void>(`/credentials/${id}`, { method: "DELETE" }),
+
+  // ── 智能体记忆(自整合单块)──
+  getMemory: (scope: string, agentId?: string) =>
+    http<MemoryBlock>(`/memory?scope=${scope}${agentId ? `&agent_id=${agentId}` : ""}`),
+  putMemory: (scope: string, content: string, agentId?: string) =>
+    http<MemoryBlock>("/memory", {
+      method: "PUT",
+      body: JSON.stringify({ scope, content, agent_id: agentId ?? null }),
+    }),
+  clearMemory: (scope: string, agentId?: string) =>
+    http<MemoryBlock>(`/memory?scope=${scope}${agentId ? `&agent_id=${agentId}` : ""}`, {
+      method: "DELETE",
+    }),
 }
