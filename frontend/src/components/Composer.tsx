@@ -1,5 +1,16 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import { matchCommands, parseInput } from "./slash/commands"
+import { SlashPalette } from "./slash/SlashPalette"
+import { StatusCard } from "./slash/StatusCard"
+import { useSlashCommands } from "./slash/useSlashCommands"
 import { Button, Textarea } from "./ui"
+
+type Notice = { kind: "flash"; flash: string } | { kind: "status" } | { kind: "help" } | null
+interface Entry {
+  title: string
+  hint?: string
+  exec: () => void
+}
 
 export function Composer({
   disabled,
@@ -11,24 +22,141 @@ export function Composer({
   onStop?: () => void
 }) {
   const [text, setText] = useState("")
+  const [sel, setSel] = useState(0)
+  const [dismissed, setDismissed] = useState(false) // Esc 关面板,保留文本走直通
+  const [notice, setNotice] = useState<Notice>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  const ctx = useSlashCommands({
+    notify: (msg) => setNotice({ kind: "flash", flash: msg }),
+    showStatus: () => setNotice({ kind: "status" }),
+    showHelp: () => setNotice({ kind: "help" }),
+  })
+
+  // 由文本派生面板条目(命令模式 / 参数模式)。
+  const parsed = parseInput(text)
+  const entries: Entry[] = []
+  if (!dismissed && !disabled) {
+    if (parsed.mode === "command") {
+      for (const cmd of matchCommands(parsed.prefix)) {
+        entries.push({
+          title: cmd.title,
+          hint: "/" + cmd.name,
+          exec: () => {
+            if (cmd.needsArg) {
+              setText(`/${cmd.name} `)
+              setSel(0)
+            } else {
+              void cmd.run?.(ctx)
+              setText("")
+            }
+          },
+        })
+      }
+    } else if (parsed.mode === "arg") {
+      const { command, arg } = parsed
+      const sugg = command.suggestions?.(ctx, arg) ?? []
+      for (const s of sugg) {
+        entries.push({
+          title: s,
+          hint: "模型",
+          exec: () => {
+            void command.runWithArg?.(ctx, s)
+            setText("")
+          },
+        })
+      }
+      const trimmed = arg.trim()
+      if (trimmed && !sugg.includes(trimmed)) {
+        entries.push({
+          title: `应用 "${trimmed}"`,
+          hint: "自由输入",
+          exec: () => {
+            void command.runWithArg?.(ctx, trimmed)
+            setText("")
+          },
+        })
+      }
+    }
+  }
+  const paletteOpen = entries.length > 0
+  const safeSel = paletteOpen ? Math.min(sel, entries.length - 1) : 0
+
+  // flash 自动消失;status/help 常驻直到手动关。
+  useEffect(() => {
+    if (notice?.kind !== "flash") return
+    const t = setTimeout(() => setNotice(null), 4000)
+    return () => clearTimeout(t)
+  }, [notice])
+
+  // 点 composer 外面 → 关通知卡(面板随文本变化自然收起)。
+  useEffect(() => {
+    if (!notice) return
+    const onDoc = (e: Event) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setNotice(null)
+    }
+    document.addEventListener("pointerdown", onDoc)
+    return () => document.removeEventListener("pointerdown", onDoc)
+  }, [notice])
+
   const send = () => {
     const t = text.trim()
     if (!t || disabled) return
     onSend(t)
     setText("")
   }
+
   return (
     <div className="border-t border-slate-200 bg-white/80 p-3 backdrop-blur">
-      <div className="mx-auto flex max-w-5xl items-end gap-2">
+      <div ref={wrapRef} className="relative mx-auto flex max-w-5xl items-end gap-2">
+        {notice && (
+          <StatusCard
+            kind={notice.kind}
+            status={notice.kind === "status" ? ctx.status() : undefined}
+            flash={notice.kind === "flash" ? notice.flash : undefined}
+            onClose={() => setNotice(null)}
+          />
+        )}
+        {paletteOpen && (
+          <SlashPalette
+            items={entries.map((e) => ({ title: e.title, hint: e.hint }))}
+            selectedIndex={safeSel}
+            onSelect={(i) => entries[i]?.exec()}
+            onHover={(i) => setSel(i)}
+          />
+        )}
         <Textarea
           className="min-h-[44px] flex-1"
-          placeholder={disabled ? "生成中…" : "说点什么(Enter 发送,Shift+Enter 换行)"}
+          placeholder={disabled ? "生成中…" : "说点什么(/ 唤起命令,Enter 发送,Shift+Enter 换行)"}
           rows={1}
           value={text}
           disabled={disabled}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value)
+            setSel(0)
+            setDismissed(false)
+          }}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
+            if (paletteOpen) {
+              if (e.key === "ArrowDown") {
+                e.preventDefault()
+                setSel((i) => Math.min(i + 1, entries.length - 1))
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault()
+                setSel((i) => Math.max(i - 1, 0))
+              } else if (e.key === "Enter" || e.key === "Tab") {
+                e.preventDefault()
+                entries[safeSel]?.exec()
+              } else if (e.key === "Escape") {
+                e.preventDefault()
+                setDismissed(true)
+              }
+              return
+            }
+            if (e.key === "Escape" && notice) {
+              e.preventDefault()
+              setNotice(null)
+            } else if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault()
               send()
             }

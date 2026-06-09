@@ -1,21 +1,154 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, screen } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { api } from "../api/client"
+import { useStore } from "../store"
 import { Composer } from "./Composer"
 
-describe("Composer", () => {
-  it("shows 发送 when idle and calls onSend", () => {
-    const onSend = vi.fn()
-    render(<Composer disabled={false} onSend={onSend} onStop={() => {}} />)
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "hi" } })
+const USER = "u1"
+
+function setup(opts?: { disabled?: boolean }) {
+  const qc = new QueryClient()
+  useStore.setState({ userId: USER, agentId: "a1", sessionId: "s1" })
+  qc.setQueryData(
+    ["agents", USER],
+    [
+      {
+        id: "a1",
+        name: "Coder",
+        model: "gpt-4o",
+        provider: "openai",
+        thinking_level: null,
+        enabled_tools: [],
+        permissions: {},
+        key_ref: null,
+      },
+      {
+        id: "a2",
+        name: "Other",
+        model: "claude-x",
+        provider: "anthropic",
+        thinking_level: null,
+        enabled_tools: [],
+        permissions: {},
+        key_ref: null,
+      },
+    ],
+  )
+  qc.setQueryData(
+    ["sessions", USER],
+    [{ id: "s1", user_id: USER, agent_config_id: "a1", title: "T", work_subdir: "workspace" }],
+  )
+  qc.setQueryData(["messages", "s1"], [{ id: "m1" }, { id: "m2" }, { id: "m3" }])
+  const onSend = vi.fn()
+  render(
+    <QueryClientProvider client={qc}>
+      <Composer disabled={opts?.disabled ?? false} onSend={onSend} onStop={() => {}} />
+    </QueryClientProvider>,
+  )
+  return { onSend }
+}
+
+const box = () => screen.getByRole("textbox")
+const type = (v: string) => fireEvent.change(box(), { target: { value: v } })
+
+afterEach(() => {
+  useStore.setState({ userId: null, agentId: null, sessionId: null, settingsOpen: false })
+  vi.restoreAllMocks()
+})
+
+describe("Composer 基础", () => {
+  it("idle 显示发送并回调 onSend", () => {
+    const { onSend } = setup()
+    type("hi")
     fireEvent.click(screen.getByText("发送"))
     expect(onSend).toHaveBeenCalledWith("hi")
   })
-
-  it("shows 停止 while streaming and calls onStop", () => {
-    const onStop = vi.fn()
-    render(<Composer disabled onSend={() => {}} onStop={onStop} />)
+  it("streaming 显示停止", () => {
+    setup({ disabled: true })
     expect(screen.queryByText("发送")).not.toBeInTheDocument()
-    fireEvent.click(screen.getByText("停止"))
-    expect(onStop).toHaveBeenCalled()
+    expect(screen.getByText("停止")).toBeInTheDocument()
+  })
+})
+
+describe("斜杠面板", () => {
+  it("输入 / 列出全部命令;/co 只剩 compact", () => {
+    setup()
+    type("/")
+    expect(screen.getByText("压缩上下文")).toBeInTheDocument()
+    expect(screen.getByText("切换模型")).toBeInTheDocument()
+    type("/co")
+    expect(screen.getByText("压缩上下文")).toBeInTheDocument()
+    expect(screen.queryByText("切换模型")).not.toBeInTheDocument()
+  })
+
+  it("↑↓ 改变高亮", () => {
+    setup()
+    type("/")
+    expect(screen.getAllByRole("option")[0]).toHaveAttribute("aria-selected", "true")
+    fireEvent.keyDown(box(), { key: "ArrowDown" })
+    expect(screen.getAllByRole("option")[1]).toHaveAttribute("aria-selected", "true")
+  })
+
+  it("/compact Enter → 调 compactSession 并 flash", async () => {
+    const spy = vi.spyOn(api, "compactSession").mockResolvedValue({ compacted: true })
+    setup()
+    type("/compact")
+    fireEvent.keyDown(box(), { key: "Enter" })
+    expect(spy).toHaveBeenCalledWith("s1")
+    expect(await screen.findByText("已压缩当前会话上下文")).toBeInTheDocument()
+  })
+
+  it("/model → 参数模式列建议 → 选中调 patchAgent", async () => {
+    const spy = vi.spyOn(api, "patchAgent").mockResolvedValue({} as never)
+    setup()
+    type("/model")
+    fireEvent.keyDown(box(), { key: "Enter" }) // 进参数模式,text → "/model "
+    expect(box()).toHaveValue("/model ")
+    const opt = await screen.findByText("gpt-4o")
+    fireEvent.mouseDown(opt)
+    expect(spy).toHaveBeenCalledWith("a1", { model: "gpt-4o" })
+  })
+
+  it("/new Enter → 调 createSession", () => {
+    const spy = vi.spyOn(api, "createSession").mockResolvedValue({ id: "s2" } as never)
+    setup()
+    type("/new")
+    fireEvent.keyDown(box(), { key: "Enter" })
+    expect(spy).toHaveBeenCalledWith({ agent_config_id: "a1" })
+  })
+
+  it("/memory Enter → 打开记忆设置", () => {
+    setup()
+    type("/memory")
+    fireEvent.keyDown(box(), { key: "Enter" })
+    expect(useStore.getState().settingsOpen).toBe(true)
+    expect(useStore.getState().settingsTab).toBe("memory")
+  })
+
+  it("/status Enter → 状态卡显示 agent/模型", async () => {
+    setup()
+    type("/status")
+    fireEvent.keyDown(box(), { key: "Enter" })
+    expect(await screen.findByText("Coder")).toBeInTheDocument()
+    expect(screen.getByText("gpt-4o")).toBeInTheDocument()
+  })
+
+  it("无匹配 / 路径样输入 → 直通发送", () => {
+    const { onSend } = setup()
+    type("/usr/bin/python")
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
+    fireEvent.keyDown(box(), { key: "Enter" })
+    expect(onSend).toHaveBeenCalledWith("/usr/bin/python")
+  })
+
+  it("Esc 关面板后 Enter → 直通发送", () => {
+    const { onSend } = setup()
+    type("/status")
+    expect(screen.getByRole("listbox")).toBeInTheDocument()
+    fireEvent.keyDown(box(), { key: "Escape" })
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
+    fireEvent.keyDown(box(), { key: "Enter" })
+    expect(onSend).toHaveBeenCalledWith("/status")
   })
 })
