@@ -119,11 +119,20 @@ async def apply_remember_calls(db, session_id: uuid.UUID, new_messages) -> int:
     与消息写入共用同一个 db 事务(由调用方提交);best-effort:坏参数/并发冲突跳过。
     去重/合并/裁剪交给后续 auto-reconcile。返回成功写入条数。
     """
+    # 只对 worker【已接受】(tool_result 非错误)的 remember 落库 —— worker 那边校验了 enabled +
+    # 参数。否则:被禁用时模型仍可能(被不可信 skill 诱导)发出 remember 调用,backend 不能仅凭
+    # "模型调用了"就写库(与 SandboxToolExecutor 在可信侧强制 enabled_tools 同理)。
+    ok_ids = {
+        r.call_id
+        for m in new_messages
+        for r in (getattr(m, "tool_results", None) or [])
+        if not r.is_error
+    }
     calls = [
         c
         for m in new_messages
         for c in (getattr(m, "tool_calls", None) or [])
-        if c.name == "remember"
+        if c.name == "remember" and c.id in ok_ids
     ]
     if not calls:
         return 0

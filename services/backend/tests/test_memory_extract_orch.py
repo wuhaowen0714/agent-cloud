@@ -21,7 +21,7 @@ from agent_cloud_backend.turn.memory_extract import (
     scan_idle_and_extract,
 )
 from agent_cloud_common import Message as CommonMessage
-from agent_cloud_common import Role, ToolCall
+from agent_cloud_common import Role, ToolCall, ToolResult
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 
@@ -232,20 +232,26 @@ async def test_scan_aborts_on_worker_unavailable(engine, monkeypatch):
     assert attempts["n"] == 1  # 第一个 UNAVAILABLE → break,不再连环打 down 的 worker
 
 
-def _remember_msg(content, scope=None):
+def _remember_msgs(content, scope=None, *, ok=True):
+    """模拟 worker 回传:assistant(remember tool_call)+ tool(对应结果)。ok=worker 是否接受。"""
     args = {"content": content}
     if scope is not None:
         args["scope"] = scope
-    return CommonMessage(
-        role=Role.ASSISTANT, tool_calls=[ToolCall(id="1", name="remember", arguments=args)]
-    )
+    return [
+        CommonMessage(
+            role=Role.ASSISTANT, tool_calls=[ToolCall(id="1", name="remember", arguments=args)]
+        ),
+        CommonMessage(
+            role=Role.TOOL, tool_results=[ToolResult(call_id="1", content="ok", is_error=not ok)]
+        ),
+    ]
 
 
 async def test_apply_remember_user_scope(engine):
     sid, uid = await _seed(engine, 1)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
-        assert await apply_remember_calls(db, sid, [_remember_msg("likes tea")]) == 1
+        assert await apply_remember_calls(db, sid, _remember_msgs("likes tea")) == 1
         await db.commit()
     assert "likes tea" in (await _current(engine, uid)).content
 
@@ -255,7 +261,7 @@ async def test_apply_remember_agent_scope(engine):
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
         aid = (await db.get(Session, sid)).agent_config_id
-        await apply_remember_calls(db, sid, [_remember_msg("uses pnpm", scope="agent")])
+        await apply_remember_calls(db, sid, _remember_msgs("uses pnpm", scope="agent"))
         await db.commit()
         cur = await MemoryEntryRepository(db).get_current("agent", aid)
     assert "uses pnpm" in cur.content
@@ -266,26 +272,36 @@ async def test_apply_remember_appends_across_turns(engine):
     maker = async_sessionmaker(engine, expire_on_commit=False)
     for fact in ("A fact", "B fact"):
         async with maker() as db:
-            await apply_remember_calls(db, sid, [_remember_msg(fact)])
+            await apply_remember_calls(db, sid, _remember_msgs(fact))
             await db.commit()
     cur = await _current(engine, uid)
     assert "A fact" in cur.content and "B fact" in cur.content
     assert cur.version == 2  # 两次 remember = 两个版本
 
 
-async def test_apply_remember_skips_bad_and_non_remember(engine):
+async def test_apply_remember_skips_rejected_call(engine):
+    # worker 拒绝(is_error 结果)→ backend 不落库(防被禁用时绕过 / 坏参数)
+    sid, uid = await _seed(engine, 1)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        assert await apply_remember_calls(db, sid, _remember_msgs("nope", ok=False)) == 0
+        await db.commit()
+    assert await _current(engine, uid) is None
+
+
+async def test_apply_remember_ignores_non_remember(engine):
     sid, uid = await _seed(engine, 1)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
         msgs = [
             CommonMessage(
                 role=Role.ASSISTANT,
-                tool_calls=[
-                    ToolCall(id="1", name="bash", arguments={"command": "ls"}),
-                    ToolCall(id="2", name="remember", arguments={"content": "   "}),  # 空 → 跳过
-                ],
-            )
+                tool_calls=[ToolCall(id="1", name="bash", arguments={"command": "ls"})],
+            ),
+            CommonMessage(
+                role=Role.TOOL, tool_results=[ToolResult(call_id="1", content="ok", is_error=False)]
+            ),
         ]
         assert await apply_remember_calls(db, sid, msgs) == 0
         await db.commit()
-    assert await _current(engine, uid) is None  # 什么都没写
+    assert await _current(engine, uid) is None
