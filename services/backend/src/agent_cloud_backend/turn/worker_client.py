@@ -45,3 +45,15 @@ async def summarize_via_worker(
     async with grpc.aio.insecure_channel(worker_endpoint, options=options) as channel:
         resp = await worker_pb2_grpc.WorkerStub(channel).Summarize(request)
         return resp.summary
+
+
+async def extract_memory_via_worker(
+    worker_endpoint: str, request: worker_pb2.ExtractMemoryRequest
+) -> worker_pb2.ExtractMemoryResponse:
+    """向 worker 发起一次 ExtractMemory(读旧块+对账重写),返回更新后的块 + changed 标志。"""
+    options = [
+        ("grpc.max_send_message_length", MAX_GRPC_MESSAGE_BYTES),
+        ("grpc.max_receive_message_length", MAX_GRPC_MESSAGE_BYTES),
+    ]
+    async with grpc.aio.insecure_channel(worker_endpoint, options=options) as channel:
+        return await worker_pb2_grpc.WorkerStub(channel).ExtractMemory(request)

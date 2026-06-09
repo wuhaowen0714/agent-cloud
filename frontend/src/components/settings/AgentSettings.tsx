@@ -4,6 +4,7 @@ import { BUILTIN_TOOLS, checkedToEnabled, enabledToChecked } from "../../agentCo
 import { api } from "../../api/client"
 import { useStore } from "../../store"
 import { Button, Field, Input, Segmented, SelectMenu, Switch, Textarea } from "../ui"
+import { MemoryPanel } from "./MemoryPanel"
 
 function SectionTitle({ children }: { children: string }) {
   return <div className="text-sm font-semibold text-slate-800">{children}</div>
@@ -180,6 +181,15 @@ function AgentEditor({ agentId, userId }: { agentId: string; userId: string }) {
           placeholder="给这个 agent 的指令 / 人设(可选)"
           value={instructions}
           onChange={(e) => setInstructions(e.target.value)}
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <SectionTitle>记忆(学到的)</SectionTitle>
+        <MemoryPanel
+          scope="agent"
+          agentId={agentId}
+          hint="这个 agent 从对话学到的事实,≠ 上面的指令/人设。当前由你手动维护。"
         />
       </div>
 

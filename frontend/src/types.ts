@@ -5,6 +5,7 @@ export interface AgentConfig {
   key_ref: string | null
 }
 export interface ProviderCredential { id: string; name: string; base_url: string; masked: string; created_at: string }
+export interface MemoryBlock { scope: string; owner_id: string; content: string; version: number }
 export interface Session { id: string; user_id: string; agent_config_id: string; title: string | null; work_subdir: string }
 
 export interface ToolCall { id: string; name: string; arguments: Record<string, unknown> }

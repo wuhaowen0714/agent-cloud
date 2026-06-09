@@ -1,21 +1,16 @@
 import uuid
-from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 
-class MemoryAppend(BaseModel):
+class MemoryBlockRead(BaseModel):
+    scope: str  # user | agent
+    owner_id: uuid.UUID
+    content: str
+    version: int  # 0 = 尚无记忆块
+
+
+class MemoryBlockWrite(BaseModel):
     scope: str  # user | agent
     agent_id: uuid.UUID | None = None  # scope=="agent" 时必填(须属本人);scope=="user" 忽略
     content: str
-    source_session_id: uuid.UUID | None = None
-
-
-class MemoryRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: uuid.UUID
-    scope: str
-    owner_id: uuid.UUID
-    content: str
-    source_session_id: uuid.UUID | None
-    created_at: datetime

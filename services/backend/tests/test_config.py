@@ -49,3 +49,11 @@ def test_compaction_thresholds_parsed_from_env_json(monkeypatch):
     monkeypatch.setenv("AGENT_CLOUD_COMPACTION_TOKEN_THRESHOLDS", '{"m-small": 8000}')
     s = Settings()
     assert s.compaction_threshold_for("m-small") == 8000
+
+
+def test_memory_settings_defaults():
+    s = Settings(_env_file=None)
+    assert s.memory_soft_chars == 2000
+    assert s.memory_min_rounds == 10
+    assert s.memory_idle_seconds == 1800
+    assert s.memory_max_versions == 20

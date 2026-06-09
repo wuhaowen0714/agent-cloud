@@ -38,10 +38,10 @@ async def test_context_documents_and_memory(auth_client):
         "/context-documents", json={"scope": "user", "type": "USER", "content": "# me"}
     )
     assert r.status_code == 200, r.text
-    r = await auth_client.post("/memory", json={"scope": "user", "content": "likes tea"})
-    assert r.status_code == 201
+    r = await auth_client.put("/memory", json={"scope": "user", "content": "likes tea"})
+    assert r.status_code == 200, r.text
     r = await auth_client.get("/memory?scope=user")
-    assert r.status_code == 200 and r.json()[0]["content"] == "likes tea"
+    assert r.status_code == 200 and r.json()["content"] == "likes tea"
 
 
 async def test_context_document_put_update_branch(auth_client):

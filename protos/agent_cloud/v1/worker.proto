@@ -7,6 +7,7 @@ service Worker {
   rpc RunTurn(RunTurnRequest) returns (RunTurnResponse);
   rpc RunTurnStream(RunTurnRequest) returns (stream TurnEvent);
   rpc Summarize(SummarizeRequest) returns (SummarizeResponse);
+  rpc ExtractMemory(ExtractMemoryRequest) returns (ExtractMemoryResponse);
 }
 
 message ToolCall {
@@ -115,4 +116,22 @@ message SummarizeResponse {
   string summary = 1;
   int64 input_tokens = 2;
   int64 output_tokens = 3;
+}
+
+// 记忆提炼(后端→worker;LLM key 留 worker)。v1 仅 user 层:worker 只改 user_memory,
+// agent_memory 透传不动。soft_max_chars 是软上限,只引导 LLM,后端不硬截断。
+message ExtractMemoryRequest {
+  Agent agent = 1;
+  string user_memory = 2;
+  string agent_memory = 3;
+  repeated Msg messages = 4;
+  int32 soft_max_chars = 5;
+}
+message ExtractMemoryResponse {
+  string user_memory = 1;
+  string agent_memory = 2;
+  bool user_changed = 3;
+  bool agent_changed = 4;
+  int64 input_tokens = 5;
+  int64 output_tokens = 6;
 }

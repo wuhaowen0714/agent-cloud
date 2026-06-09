@@ -29,7 +29,9 @@ async def test_build_request_from_db(session):
     await session.flush()
     await ContextDocumentRepository(session).upsert("user", "USER", user.id, "# user")
     await ContextDocumentRepository(session).upsert("agent", "AGENTS", agent.id, "# agent")
-    await MemoryEntryRepository(session).append("user", user.id, "likes tea")
+    await MemoryEntryRepository(session).write_version(
+        "user", user.id, "likes tea", None, expected_version=0
+    )
     # history: one COMPLETE prior turn (user + assistant). 未完成(无助手回复)的 user
     # 消息会被 _strip_unanswered_user_messages 丢掉(见专项单测)。
     await MessageRepository(session).append(
@@ -61,6 +63,27 @@ async def test_build_request_from_db(session):
     assert req.user_message == "now"
     assert req.sandbox_endpoint == "localhost:50051"
     assert req.work_subdir == s.work_subdir
+
+
+async def test_memory_injects_only_current_block(session):
+    user = await UserRepository(session).create(User(email="b@example.com"))
+    await session.flush()
+    agent = await AgentConfigRepository(session).create(
+        AgentConfig(user_id=user.id, name="a", model="m", provider="openai")
+    )
+    await session.flush()
+    s = await SessionRepository(session).create_for(user.id, agent.id, None)
+    await session.flush()
+    repo = MemoryEntryRepository(session)
+    await repo.write_version("user", user.id, "OLD block", None, expected_version=0)
+    await repo.write_version("user", user.id, "NEW block", None, expected_version=1)
+    await session.commit()
+
+    req = await build_run_turn_request(
+        session, s, sandbox_endpoint="x", user_message="hi", exclude_message_id=None
+    )
+    user_mems = [m.content for m in req.memory if m.scope == "user"]
+    assert user_mems == ["NEW block"]  # 只注入最新版本,不是历史所有条
 
 
 async def test_build_request_excludes_current_user_message(session):

@@ -19,6 +19,7 @@ from agent_cloud_common.codec import msg_from_proto, msg_to_proto, turn_event_to
 
 from agent_cloud_worker.context import build_system_prompt
 from agent_cloud_worker.loop import run_turn, run_turn_stream
+from agent_cloud_worker.memory_extract import MemoryParseError, reconcile_user_memory
 from agent_cloud_worker.provider import ContextWindowExceeded, Provider
 from agent_cloud_worker.sandbox_executor import SandboxToolExecutor
 
@@ -223,6 +224,62 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
             summary=result.message.text,
             input_tokens=result.usage.input_tokens,
             output_tokens=result.usage.output_tokens,
+        )
+
+    async def ExtractMemory(
+        self, request: worker_pb2.ExtractMemoryRequest, context: grpc.aio.ServicerContext
+    ) -> worker_pb2.ExtractMemoryResponse:
+        # 记忆提炼(v1:仅 user 层)。一次 LLM 调用,不用工具。
+        try:
+            messages = [msg_from_proto(m) for m in request.messages]
+        except (ValueError, json.JSONDecodeError) as exc:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+            return
+        if not messages:  # 没有新消息可提炼:原样回显,省一次上游调用
+            return worker_pb2.ExtractMemoryResponse(
+                user_memory=request.user_memory,
+                agent_memory=request.agent_memory,
+                user_changed=False,
+                agent_changed=False,
+                input_tokens=0,
+                output_tokens=0,
+            )
+        try:
+            provider = self._provider_factory(
+                request.agent.model,
+                request.agent.provider,
+                request.agent.api_key,
+                request.agent.base_url,
+            )
+        except Exception as exc:  # noqa: BLE001 — 工厂任意失败收敛为明确状态码
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, f"provider unavailable: {exc}")
+            return
+        try:
+            mem, changed, usage = await reconcile_user_memory(
+                provider,
+                current=request.user_memory,
+                messages=messages,
+                soft_max_chars=request.soft_max_chars or 2000,
+            )
+        except ContextWindowExceeded:
+            await context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, "context window exceeded")
+            return
+        except MemoryParseError:
+            # 模型输出无法解析:收敛为 INTERNAL(可重试),后端据此不推进水位线。
+            logger.warning("ExtractMemory: unparseable model output")
+            await context.abort(grpc.StatusCode.INTERNAL, "memory extraction failed to parse")
+            return
+        except Exception:
+            logger.exception("ExtractMemory failed")
+            await context.abort(grpc.StatusCode.INTERNAL, "extract memory failed")
+            return
+        return worker_pb2.ExtractMemoryResponse(
+            user_memory=mem,
+            agent_memory=request.agent_memory,
+            user_changed=changed,
+            agent_changed=False,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
         )
 
 

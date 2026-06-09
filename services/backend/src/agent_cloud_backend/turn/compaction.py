@@ -12,6 +12,7 @@ from agent_cloud_backend.repositories.agent_config import AgentConfigRepository
 from agent_cloud_backend.repositories.message import MessageRepository
 from agent_cloud_backend.repositories.session import SessionRepository
 from agent_cloud_backend.turn.credentials import resolve_agent_key
+from agent_cloud_backend.turn.memory_extract import extract_session_memory
 from agent_cloud_backend.turn.messages import orm_to_common, strip_unanswered_user_messages
 from agent_cloud_backend.turn.worker_client import summarize_via_worker
 
@@ -30,6 +31,11 @@ async def compact(
     session_id: uuid.UUID, *, worker_endpoint: str, keep_recent: int, settings: Settings
 ) -> bool:
     """把 summary_through_seq 之后、最近 keep_recent 条之前的历史折叠进 session.summary(增量)。"""
+    # 折叠前先提炼记忆(否则细节被摘要抹掉);best-effort,不因记忆失败坏掉压缩。
+    try:
+        await extract_session_memory(session_id, settings=settings, reason="compaction")
+    except Exception:
+        logger.exception("pre-compaction memory extract failed for session %s", session_id)
     async with get_sessionmaker()() as db:
         session = await SessionRepository(db).get(session_id)
         if session is None:

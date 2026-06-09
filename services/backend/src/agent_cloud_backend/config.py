@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     # 生成:python -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())"
     credential_key: str = ""
 
+    # 智能体记忆(spec 2026-06-09:自整合单块)。
+    memory_soft_chars: int = 2000  # 每块软上限,仅引导 LLM,后端不硬截断
+    memory_min_rounds: int = 10  # 空闲提炼:自上次提炼以来新对话轮次 ≥ 此值才提
+    memory_idle_seconds: int = 1800  # 空闲多久算"可提炼"(默认同沙箱 idle TTL)
+    memory_max_versions: int = 20  # 每块保留版本数,超出裁剪
+
     def compaction_threshold_for(self, model: str) -> int:
         """该模型的压缩阈值:优先 per-model 覆盖,否则回退全局默认。"""
         return self.compaction_token_thresholds.get(model, self.compaction_token_threshold)
