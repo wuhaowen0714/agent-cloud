@@ -33,8 +33,15 @@ async def build_run_turn_request(
     user_docs = await doc_repo.list_for_owner("user", session.user_id)
     agent_docs = await doc_repo.list_for_owner("agent", session.agent_config_id)
     mem_repo = MemoryEntryRepository(db)
-    user_mem = await mem_repo.list_for_context("user", session.user_id)
-    agent_mem = await mem_repo.list_for_context("agent", session.agent_config_id)
+    # 注入"当前块"(每作用域 version 最大的一条),不再是最近 N 条(spec 2026-06-09)。
+    mem_blocks = [
+        b
+        for b in (
+            await mem_repo.get_current("user", session.user_id),
+            await mem_repo.get_current("agent", session.agent_config_id),
+        )
+        if b is not None and b.content.strip()
+    ]
     history = await MessageRepository(db).list_by_session(session.id)
     # 压缩后:已折叠进 summary 的消息(seq <= summary_through_seq)不再逐字发,
     # 改由 history_summary 承载;未压缩会话的 summary_through_seq=-1,等价于不过滤。
@@ -67,7 +74,7 @@ async def build_run_turn_request(
             for d in [*user_docs, *agent_docs]
             if d.content.strip()  # 跳过空文档(如被清空的 AGENTS),不往 prompt 里塞空段
         ],
-        memory=[worker_pb2.Mem(scope=e.scope, content=e.content) for e in [*user_mem, *agent_mem]],
+        memory=[worker_pb2.Mem(scope=b.scope, content=b.content) for b in mem_blocks],
         skills=[
             worker_pb2.Skill(
                 name=sk.name, description=sk.description, location=skill_location(sk.name)
