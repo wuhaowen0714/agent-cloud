@@ -21,6 +21,7 @@ from agent_cloud_worker.context import build_system_prompt
 from agent_cloud_worker.loop import run_turn, run_turn_stream
 from agent_cloud_worker.memory_extract import MemoryParseError, reconcile_user_memory
 from agent_cloud_worker.provider import ContextWindowExceeded, Provider
+from agent_cloud_worker.remember import RememberingExecutor, remember_enabled
 from agent_cloud_worker.sandbox_executor import SandboxToolExecutor
 
 logger = logging.getLogger(__name__)
@@ -81,8 +82,11 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                 ("grpc.max_receive_message_length", MAX_GRPC_MESSAGE_BYTES),
             ],
         ) as channel:
-            executor = SandboxToolExecutor(
-                channel, request.work_subdir, list(request.agent.enabled_tools)
+            executor = RememberingExecutor(
+                SandboxToolExecutor(
+                    channel, request.work_subdir, list(request.agent.enabled_tools)
+                ),
+                enabled=remember_enabled(list(request.agent.enabled_tools)),
             )
             try:
                 result = await run_turn(
@@ -138,8 +142,11 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
             ("grpc.max_receive_message_length", MAX_GRPC_MESSAGE_BYTES),
         ]
         async with grpc.aio.insecure_channel(request.sandbox_endpoint, options=options) as channel:
-            executor = SandboxToolExecutor(
-                channel, request.work_subdir, list(request.agent.enabled_tools)
+            executor = RememberingExecutor(
+                SandboxToolExecutor(
+                    channel, request.work_subdir, list(request.agent.enabled_tools)
+                ),
+                enabled=remember_enabled(list(request.agent.enabled_tools)),
             )
             # 流中途失败(provider 抛错 / loop 守卫)是 worker-fault:收敛为通用 INTERNAL,
             # 不把原始异常文本泄漏给客户端(会暴露内部细节且与 UNKNOWN 无法区分)。

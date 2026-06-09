@@ -3,6 +3,7 @@ export const BUILTIN_TOOLS: { name: string; desc: string }[] = [
   { name: "write_file", desc: "写文件" },
   { name: "read_file", desc: "读文件" },
   { name: "edit", desc: "改文件(精确替换)" },
+  { name: "remember", desc: "主动记忆(把耐久事实写入长期记忆)" },
 ]
 const ALL = BUILTIN_TOOLS.map((t) => t.name)
 

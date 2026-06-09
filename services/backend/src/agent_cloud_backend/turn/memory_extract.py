@@ -113,6 +113,92 @@ async def _idle_session_ids(db, idle_seconds: int) -> list[uuid.UUID]:
     return list(rows.scalars().all())
 
 
+def _accepted_remember_calls(new_messages) -> list:
+    """worker【已接受】(tool_result 非错误)、按 call_id 去重的 remember 调用。
+
+    只认 worker 接受的:被禁用/坏参数时 worker 返回 is_error 结果 → 不落库。result 与 call 在
+    不同消息里(assistant 带 tool_calls、tool 带 tool_results),故按 call_id 跨消息配对。
+    """
+    ok_ids = {
+        r.call_id
+        for m in new_messages
+        for r in (getattr(m, "tool_results", None) or [])
+        if not r.is_error
+    }
+    seen: set[str] = set()
+    calls = []
+    for m in new_messages:
+        for c in getattr(m, "tool_calls", None) or []:
+            if c.name == "remember" and c.id in ok_ids and c.id not in seen:
+                seen.add(c.id)
+                calls.append(c)
+    return calls
+
+
+async def _append_facts(scope: str, owner_id, facts: list[str], source_session_id) -> bool:
+    """把若干 fact 一次性追加进 (scope, owner) 块;与 auto-reconcile 抢同一块时乐观重试。
+    每次尝试用【全新 session】,故冲突(IntegrityError 污染事务)被隔离,不影响消息持久化或他块。"""
+    addition = "\n".join(f"- {f}" for f in facts)
+    for _ in range(3):
+        try:
+            async with get_sessionmaker()() as db:
+                repo = MemoryEntryRepository(db)
+                cur = await repo.get_current(scope, owner_id)
+                new_block = f"{cur.content}\n{addition}" if (cur and cur.content) else addition
+                await repo.write_version(
+                    scope,
+                    owner_id,
+                    new_block,
+                    source_session_id,
+                    expected_version=cur.version if cur else 0,
+                )
+                await db.commit()
+            return True
+        except MemoryConflict:
+            continue  # 新 session 重读当前块再追加
+    logger.info("remember: gave up after write conflicts (scope=%s)", scope)
+    return False
+
+
+async def apply_remember_calls(session_id: uuid.UUID, new_messages) -> int:
+    """把本回合 agent 主动 remember 的事实追加进记忆块(spec 2026-06-09-remember-tool)。
+
+    **独立事务、best-effort**:与消息持久化解耦(记忆写冲突重试绝不拖垮消息写入)。按 scope 分组,
+    每 scope 一次写入(一回合至多 user+agent 两个新版本)。去重/合并/裁剪交给后续 auto-reconcile。
+    返回成功追加的事实数。
+    """
+    calls = _accepted_remember_calls(new_messages)
+    if not calls:
+        return 0
+    async with get_sessionmaker()() as db:
+        s = await db.get(Session, session_id)
+        if s is None:
+            logger.warning("remember: session %s gone; %d call(s) dropped", session_id, len(calls))
+            return 0
+        agent = await AgentConfigRepository(db).get(s.agent_config_id)
+        enabled = list(agent.enabled_tools) if agent else []
+        user_id, agent_config_id = s.user_id, s.agent_config_id
+    # backend 独立强制 enabled(纵深防御,不仅靠 worker 的 result)。空 = 全部。
+    if enabled and "remember" not in enabled:
+        return 0
+    # session.agent_config_id 必属 session.user(createSession 经 owned_agent 校验),故
+    # scope=agent 写的是"本人这个 agent"的块,非跨租户。
+    facts_by_scope: dict[str, list[str]] = {}
+    for c in calls:
+        args = c.arguments or {}
+        content = args.get("content")
+        scope = args.get("scope", "user")
+        if not isinstance(content, str) or not content.strip() or scope not in ("user", "agent"):
+            continue
+        facts_by_scope.setdefault(scope, []).append(content.strip())
+    written = 0
+    for scope, facts in facts_by_scope.items():
+        owner_id = user_id if scope == "user" else agent_config_id
+        if await _append_facts(scope, owner_id, facts, session_id):
+            written += len(facts)
+    return written
+
+
 async def scan_idle_and_extract(settings: Settings) -> int:
     """reaper 周期调用:对空闲且攒够新对话的会话各提炼一次(轮次闸在 extract 内生效)。"""
     async with get_sessionmaker()() as db:

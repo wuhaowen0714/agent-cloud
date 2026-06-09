@@ -17,6 +17,7 @@ from agent_cloud_backend.turn import worker_client
 from agent_cloud_backend.turn.compaction import force_compact, maybe_compact_after_turn
 from agent_cloud_backend.turn.heartbeat import session_heartbeat
 from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub
+from agent_cloud_backend.turn.memory_extract import apply_remember_calls
 from agent_cloud_backend.turn.messages import common_to_content
 from agent_cloud_backend.turn.retry import RetryAction, RetryPolicy, classify
 from agent_cloud_backend.turn.sse import error_sse, turn_event_to_sse
@@ -40,6 +41,11 @@ async def _persist(session_id: uuid.UUID, new_messages) -> list[str]:
             )
             ids.append(str(row.id))
         await db.commit()
+    # agent 主动记忆:独立事务、best-effort(记忆写冲突重试绝不拖垮上面的消息持久化)。
+    try:
+        await apply_remember_calls(session_id, new_messages)
+    except Exception:
+        logger.exception("apply_remember_calls failed for session %s", session_id)
     return ids
 
 
