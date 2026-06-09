@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from agent_cloud.v1 import worker_pb2
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -13,7 +14,12 @@ from agent_cloud_backend.repositories.memory_entry import MemoryEntryRepository
 from agent_cloud_backend.repositories.message import MessageRepository
 from agent_cloud_backend.repositories.session import SessionRepository
 from agent_cloud_backend.repositories.user import UserRepository
-from agent_cloud_backend.turn.memory_extract import extract_session_memory
+from agent_cloud_backend.turn.compaction import compact
+from agent_cloud_backend.turn.memory_extract import (
+    _idle_session_ids,
+    extract_session_memory,
+    scan_idle_and_extract,
+)
 
 
 def _settings() -> Settings:
@@ -130,3 +136,76 @@ async def test_no_new_messages_noop(engine, monkeypatch):
     # 第二次:没有新消息 → 不调 worker、返回 False
     assert await extract_session_memory(sid, settings=_settings(), reason="compaction") is False
     assert calls["n"] == n
+
+
+async def _seed_session(engine, *, rounds, idle, running=False, watermark=-1):
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        user = await UserRepository(db).create(User(email=f"{uuid.uuid4()}@e.com"))
+        await db.flush()
+        agent = await AgentConfigRepository(db).create(
+            AgentConfig(user_id=user.id, name="a", model="m", provider="openai")
+        )
+        await db.flush()
+        s = await SessionRepository(db).create_for(user.id, agent.id, None)
+        await db.flush()
+        mrepo = MessageRepository(db)
+        for i in range(rounds):
+            await mrepo.append(
+                s.id, Message(session_id=s.id, seq=0, role="user", content={"text": "u"})
+            )
+            await mrepo.append(
+                s.id, Message(session_id=s.id, seq=0, role="assistant", content={"text": "a"})
+            )
+        s.status = "running" if running else "idle"
+        s.memory_through_seq = watermark
+        if idle:
+            s.last_active_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        await db.commit()
+        return s.id
+
+
+async def test_idle_session_ids_selection(engine):
+    idle_id = await _seed_session(engine, rounds=10, idle=True)
+    recent_id = await _seed_session(engine, rounds=10, idle=False)
+    nonew_id = await _seed_session(engine, rounds=10, idle=True, watermark=19)  # 已提炼完
+    running_id = await _seed_session(engine, rounds=10, idle=True, running=True)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        ids = set(await _idle_session_ids(db, 1800))
+    assert idle_id in ids
+    assert recent_id not in ids  # 不够空闲
+    assert nonew_id not in ids  # 没有新消息
+    assert running_id not in ids  # 正在跑
+
+
+async def test_scan_extracts_idle_sessions(engine, monkeypatch):
+    _patch_sessionmaker(monkeypatch, engine)
+    calls = _patch_worker(monkeypatch, changed=True, mem="- x")
+    await _seed_session(engine, rounds=10, idle=True)
+    await _seed_session(engine, rounds=10, idle=False)  # recent → 跳过
+    assert await scan_idle_and_extract(_settings()) == 1
+    assert calls["n"] == 1
+
+
+async def test_compact_extracts_memory_before_folding(engine, monkeypatch):
+    _patch_sessionmaker(monkeypatch, engine)
+
+    async def _fake_summarize(endpoint, req):
+        return "summary"
+
+    monkeypatch.setattr(
+        "agent_cloud_backend.turn.compaction.summarize_via_worker", _fake_summarize
+    )
+    seen = {}
+
+    async def _fake_extract(session_id, *, settings, reason):
+        seen["reason"] = reason
+        return False
+
+    monkeypatch.setattr(
+        "agent_cloud_backend.turn.compaction.extract_session_memory", _fake_extract
+    )
+    sid, _ = await _seed(engine, 3)  # 6 条消息,keep_recent=1 → 有可折叠
+    await compact(sid, worker_endpoint="x", keep_recent=1, settings=_settings())
+    assert seen.get("reason") == "compaction"

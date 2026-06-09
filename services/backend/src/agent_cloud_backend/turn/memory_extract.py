@@ -5,9 +5,11 @@ import uuid
 
 from agent_cloud.v1 import worker_pb2
 from agent_cloud_common.codec import msg_to_proto
+from sqlalchemy import func, select
 
 from agent_cloud_backend.config import Settings
 from agent_cloud_backend.db import get_sessionmaker
+from agent_cloud_backend.models.message import Message
 from agent_cloud_backend.models.session import Session
 from agent_cloud_backend.repositories.agent_config import AgentConfigRepository
 from agent_cloud_backend.repositories.memory_entry import MemoryConflict, MemoryEntryRepository
@@ -85,3 +87,35 @@ async def extract_session_memory(
         s.memory_through_seq = max_seq  # 不论写没写都推进,避免反复重提同一批
         await db.commit()
         return wrote
+
+
+async def _idle_session_ids(db, idle_seconds: int) -> list[uuid.UUID]:
+    """空闲够久(非 running、last_active_at 早于 cutoff)且有未提炼新消息的会话。"""
+    cutoff = func.now() - func.make_interval(0, 0, 0, 0, 0, 0, idle_seconds)
+    has_new = (
+        select(Message.id)
+        .where(Message.session_id == Session.id, Message.seq > Session.memory_through_seq)
+        .exists()
+    )
+    rows = await db.execute(
+        select(Session.id).where(
+            Session.status != "running",
+            Session.last_active_at < cutoff,
+            has_new,
+        )
+    )
+    return list(rows.scalars().all())
+
+
+async def scan_idle_and_extract(settings: Settings) -> int:
+    """reaper 周期调用:对空闲且攒够新对话的会话各提炼一次(轮次闸在 extract 内生效)。"""
+    async with get_sessionmaker()() as db:
+        ids = await _idle_session_ids(db, settings.memory_idle_seconds)
+    n = 0
+    for sid in ids:
+        try:
+            if await extract_session_memory(sid, settings=settings, reason="idle"):
+                n += 1
+        except Exception:
+            logger.exception("idle memory extract failed for session %s", sid)
+    return n

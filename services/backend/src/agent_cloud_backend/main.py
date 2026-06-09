@@ -31,6 +31,14 @@ async def _reaper_loop(interval_seconds: float, manager) -> None:
             await manager.reap_idle()
         except Exception:
             logger.exception("sandbox reaper pass failed")
+        # 同一周期顺带做"空闲会话记忆提炼"(spec 2026-06-09:空闲触发,内含轮次闸)。
+        try:
+            from agent_cloud_backend.config import get_settings
+            from agent_cloud_backend.turn.memory_extract import scan_idle_and_extract
+
+            await scan_idle_and_extract(get_settings())
+        except Exception:
+            logger.exception("memory idle-extract pass failed")
         await asyncio.sleep(interval_seconds)
 
 
