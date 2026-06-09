@@ -40,9 +40,12 @@ async def _persist(session_id: uuid.UUID, new_messages) -> list[str]:
                 ),
             )
             ids.append(str(row.id))
-        # agent 主动记忆:把本回合的 remember 工具调用落到记忆块(同一事务)。
-        await apply_remember_calls(db, session_id, new_messages)
         await db.commit()
+    # agent 主动记忆:独立事务、best-effort(记忆写冲突重试绝不拖垮上面的消息持久化)。
+    try:
+        await apply_remember_calls(session_id, new_messages)
+    except Exception:
+        logger.exception("apply_remember_calls failed for session %s", session_id)
     return ids
 
 

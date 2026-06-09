@@ -247,61 +247,100 @@ def _remember_msgs(content, scope=None, *, ok=True):
     ]
 
 
-async def test_apply_remember_user_scope(engine):
+async def test_apply_remember_user_scope(engine, monkeypatch):
+    _patch_sessionmaker(monkeypatch, engine)
     sid, uid = await _seed(engine, 1)
-    maker = async_sessionmaker(engine, expire_on_commit=False)
-    async with maker() as db:
-        assert await apply_remember_calls(db, sid, _remember_msgs("likes tea")) == 1
-        await db.commit()
+    assert await apply_remember_calls(sid, _remember_msgs("likes tea")) == 1
     assert "likes tea" in (await _current(engine, uid)).content
 
 
-async def test_apply_remember_agent_scope(engine):
+async def test_apply_remember_agent_scope(engine, monkeypatch):
+    _patch_sessionmaker(monkeypatch, engine)
     sid, _ = await _seed(engine, 1)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
         aid = (await db.get(Session, sid)).agent_config_id
-        await apply_remember_calls(db, sid, _remember_msgs("uses pnpm", scope="agent"))
-        await db.commit()
+    await apply_remember_calls(sid, _remember_msgs("uses pnpm", scope="agent"))
+    async with maker() as db:
         cur = await MemoryEntryRepository(db).get_current("agent", aid)
     assert "uses pnpm" in cur.content
 
 
-async def test_apply_remember_appends_across_turns(engine):
+async def test_apply_remember_two_in_one_turn(engine, monkeypatch):
+    _patch_sessionmaker(monkeypatch, engine)
     sid, uid = await _seed(engine, 1)
-    maker = async_sessionmaker(engine, expire_on_commit=False)
-    for fact in ("A fact", "B fact"):
-        async with maker() as db:
-            await apply_remember_calls(db, sid, _remember_msgs(fact))
-            await db.commit()
+    msgs = [
+        CommonMessage(
+            role=Role.ASSISTANT,
+            tool_calls=[
+                ToolCall(id="a", name="remember", arguments={"content": "fact one"}),
+                ToolCall(id="b", name="remember", arguments={"content": "fact two"}),
+            ],
+        ),
+        CommonMessage(
+            role=Role.TOOL,
+            tool_results=[
+                ToolResult(call_id="a", content="ok", is_error=False),
+                ToolResult(call_id="b", content="ok", is_error=False),
+            ],
+        ),
+    ]
+    assert await apply_remember_calls(sid, msgs) == 2
+    cur = await _current(engine, uid)
+    assert "fact one" in cur.content and "fact two" in cur.content
+    assert cur.version == 1  # 同 scope 一回合合并为一个版本
+
+
+async def test_apply_remember_appends_across_turns(engine, monkeypatch):
+    _patch_sessionmaker(monkeypatch, engine)
+    sid, uid = await _seed(engine, 1)
+    await apply_remember_calls(sid, _remember_msgs("A fact"))
+    await apply_remember_calls(sid, _remember_msgs("B fact"))
     cur = await _current(engine, uid)
     assert "A fact" in cur.content and "B fact" in cur.content
-    assert cur.version == 2  # 两次 remember = 两个版本
+    assert cur.version == 2
 
 
-async def test_apply_remember_skips_rejected_call(engine):
+async def test_apply_remember_skips_rejected_call(engine, monkeypatch):
     # worker 拒绝(is_error 结果)→ backend 不落库(防被禁用时绕过 / 坏参数)
+    _patch_sessionmaker(monkeypatch, engine)
     sid, uid = await _seed(engine, 1)
-    maker = async_sessionmaker(engine, expire_on_commit=False)
-    async with maker() as db:
-        assert await apply_remember_calls(db, sid, _remember_msgs("nope", ok=False)) == 0
-        await db.commit()
+    assert await apply_remember_calls(sid, _remember_msgs("nope", ok=False)) == 0
     assert await _current(engine, uid) is None
 
 
-async def test_apply_remember_ignores_non_remember(engine):
+async def test_apply_remember_ignores_non_remember(engine, monkeypatch):
+    _patch_sessionmaker(monkeypatch, engine)
     sid, uid = await _seed(engine, 1)
+    msgs = [
+        CommonMessage(
+            role=Role.ASSISTANT,
+            tool_calls=[ToolCall(id="1", name="bash", arguments={"command": "ls"})],
+        ),
+        CommonMessage(
+            role=Role.TOOL, tool_results=[ToolResult(call_id="1", content="ok", is_error=False)]
+        ),
+    ]
+    assert await apply_remember_calls(sid, msgs) == 0
+    assert await _current(engine, uid) is None
+
+
+async def test_apply_remember_respects_backend_enable_gate(engine, monkeypatch):
+    # agent.enabled_tools 不含 remember → backend 独立拒绝(纵深防御),即便 result 成功
+    _patch_sessionmaker(monkeypatch, engine)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
-        msgs = [
-            CommonMessage(
-                role=Role.ASSISTANT,
-                tool_calls=[ToolCall(id="1", name="bash", arguments={"command": "ls"})],
-            ),
-            CommonMessage(
-                role=Role.TOOL, tool_results=[ToolResult(call_id="1", content="ok", is_error=False)]
-            ),
-        ]
-        assert await apply_remember_calls(db, sid, msgs) == 0
+        user = await UserRepository(db).create(User(email=f"{uuid.uuid4()}@e.com"))
+        await db.flush()
+        agent = await AgentConfigRepository(db).create(
+            AgentConfig(
+                user_id=user.id, name="a", model="m", provider="openai", enabled_tools=["bash"]
+            )
+        )
+        await db.flush()
+        s = await SessionRepository(db).create_for(user.id, agent.id, None)
+        await db.flush()
+        sid, uid = s.id, user.id
         await db.commit()
+    assert await apply_remember_calls(sid, _remember_msgs("blocked")) == 0
     assert await _current(engine, uid) is None
