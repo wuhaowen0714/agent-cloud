@@ -229,22 +229,22 @@
   <!-- ===================== P2 ===================== -->
   <div class="phase p2" id="p2">
     <h2><span class="badge soon">P2 · 近—中期</span> &nbsp;记忆与 agent 能力</h2>
-    <p class="meta">目标:让 agent 真正"会记、能力更强"。记忆是当前最大的能力空白;工具/技能生态决定 agent 能做多少事。</p>
+    <p class="meta">目标:让 agent 真正"会记、能力更强"。<b>记忆(user 层)已于 2026-06-09 落地</b>(PR #1,自整合单块);工具/技能生态决定 agent 能做多少事。</p>
     <table>
       <tr><th>事项</th><th>目标 / 内容</th><th>依赖</th><th>量</th></tr>
       <tr>
-        <td class="itm">智能体记忆 — 写入路径</td>
-        <td>两条可选(建议先做自动提炼):①会话结束/压缩时后端自动提炼耐久事实写入 <span class="mono">memory_entries</span>(天然在后端、复用压缩机制);②给 agent 一个 <span class="mono">remember</span> 工具(需 worker→后端回写通道,因 DB 后端独占)。<div class="why">现状:除手动 POST /memory 外无人写。</div></td>
+        <td class="itm"><span class="dot done"></span>智能体记忆 — 写入路径 ✅</td>
+        <td><b>已落地(PR #1)</b>:采用<b>自整合单块</b>设计 —— 每作用域一块,worker 端 LLM 读旧块对账重写(增/改/淘汰),v1 自动提炼 <b>user 层</b>;触发 = 空闲(≥10 轮闸)+ 压缩前;LLM key 仅经 worker。<div class="why">原"除手动 POST /memory 外无人写"已解决;agent 层自动提炼留后。</div></td>
         <td>—</td><td><span class="tag M">M</span></td>
       </tr>
       <tr>
         <td class="itm">记忆 — 向量检索</td>
-        <td>给 <span class="mono">memory_entries</span> 加 embedding 列 + ANN 索引(pgvector);读取从"近 N 全量"换成 top-k 相关。<div class="why">设计 §14 已点名;数据模型已预留 embedding 接口。</div></td>
-        <td>记忆写入</td><td><span class="tag M">M</span></td>
+        <td><b>本设计下不需要</b>:单块记忆全量注入,无需 top-k / pgvector。仅当记忆量撑爆单块时,再演进"核心块(总注入)+ 向量归档"两级。<div class="why">原 §14 的 embedding 方案被单块设计取代。</div></td>
+        <td>—</td><td><span class="tag S">S</span></td>
       </tr>
       <tr>
-        <td class="itm">记忆 — 生命周期 + UI</td>
-        <td>去重 / 更新 / 遗忘;记忆管理 UI(查看/编辑/删除);与压缩协同(摘要 vs 记忆边界)。</td>
+        <td class="itm"><span class="dot done"></span>记忆 — 生命周期 + UI(部分)</td>
+        <td><b>已落地</b>:去重/更新/遗忘由单块 reconcile 内建,版本快照可回滚;管理 UI(查看/编辑/清空,user + agent 块)。<b>待办</b>:agent 层自动提炼、与压缩的更细协同。</td>
         <td>记忆写入</td><td><span class="tag M">M</span></td>
       </tr>
       <tr>
