@@ -1,6 +1,7 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import grpc
 from agent_cloud.v1 import worker_pb2
 from agent_cloud_backend.config import Settings
 from agent_cloud_backend.models.agent_config import AgentConfig
@@ -208,3 +209,21 @@ async def test_compact_extracts_memory_before_folding(engine, monkeypatch):
     sid, _ = await _seed(engine, 3)  # 6 条消息,keep_recent=1 → 有可折叠
     await compact(sid, worker_endpoint="x", keep_recent=1, settings=_settings())
     assert seen.get("reason") == "compaction"
+
+
+async def test_scan_aborts_on_worker_unavailable(engine, monkeypatch):
+    _patch_sessionmaker(monkeypatch, engine)
+    await _seed_session(engine, rounds=10, idle=True)
+    await _seed_session(engine, rounds=10, idle=True)
+    attempts = {"n": 0}
+    err = grpc.aio.AioRpcError(
+        grpc.StatusCode.UNAVAILABLE, grpc.aio.Metadata(), grpc.aio.Metadata()
+    )
+
+    async def _boom(session_id, *, settings, reason):
+        attempts["n"] += 1
+        raise err
+
+    monkeypatch.setattr("agent_cloud_backend.turn.memory_extract.extract_session_memory", _boom)
+    assert await scan_idle_and_extract(_settings()) == 0
+    assert attempts["n"] == 1  # 第一个 UNAVAILABLE → break,不再连环打 down 的 worker

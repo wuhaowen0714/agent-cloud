@@ -53,6 +53,7 @@ class MemoryEntryRepository(BaseRepository[MemoryEntry]):
 
     async def prune(self, scope: str, owner_id: uuid.UUID, keep: int) -> int:
         """只保留最近 keep 个版本,删掉更老的;返回删除数。"""
+        keep = max(keep, 1)  # 永不删到 0 条(否则会把刚写入的当前块也删掉)
         ids = (
             (
                 await self.session.execute(

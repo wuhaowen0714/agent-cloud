@@ -23,21 +23,35 @@ Output STRICT JSON only, no prose, no code fence:
 Set "changed" to false and echo the current memory if there is nothing durable to add or change."""
 
 
-def _parse(text: str, current: str) -> tuple[str, bool]:
+class MemoryParseError(Exception):
+    """LLM 输出无法解析为 {changed, memory}。视为"提炼失败"(上层不推进水位线、下次重试),
+    而非静默当作"无变化"—— 否则解析失败会被误当 no-op 推进水位线、永久丢掉本可记住的事实。"""
+
+
+def _parse(text: str) -> tuple[str, bool]:
+    """解析 {"changed": bool, "memory": str};失败抛 MemoryParseError。"""
     s = text.strip()
-    if s.startswith("```"):  # 容错:去掉 ```json ... ``` 围栏
+    if "```" in s:  # 去掉 ```json ... ``` 围栏(取首对围栏内内容)
         parts = s.split("```")
-        s = parts[1] if len(parts) >= 2 else s
-        if s.lstrip().startswith("json"):
-            s = s.lstrip()[4:]
-        s = s.strip()
+        if len(parts) >= 3:
+            s = parts[1]
+            if s.lstrip().lower().startswith("json"):
+                s = s.lstrip()[4:]
+            s = s.strip()
+    start = s.find("{")  # 容忍前后多余说明文字:从第一个 { 起 raw_decode
+    if start < 0:
+        raise MemoryParseError("no JSON object in output")
     try:
-        obj = json.loads(s)
-        mem = str(obj["memory"])
-        changed = bool(obj["changed"])
-    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-        return current, False  # 解析失败 = 不动现有块
-    return (mem, True) if changed else (current, False)
+        obj, _ = json.JSONDecoder().raw_decode(s[start:])
+    except json.JSONDecodeError as e:
+        raise MemoryParseError(str(e)) from e
+    if (
+        not isinstance(obj, dict)
+        or not isinstance(obj.get("memory"), str)
+        or not isinstance(obj.get("changed"), bool)
+    ):
+        raise MemoryParseError("missing or mistyped 'changed'/'memory'")
+    return obj["memory"], obj["changed"]
 
 
 def _render(messages: list[Message]) -> str:
@@ -63,5 +77,6 @@ async def reconcile_user_memory(
             tools=[],
         )
     )
-    mem, changed = _parse(result.message.text, current)
-    return mem, changed, result.usage
+    # 解析失败 → 抛 MemoryParseError(handler 收敛为 INTERNAL)→ 后端不推进水位线、下次重试。
+    mem, changed = _parse(result.message.text)
+    return (mem if changed else current), changed, result.usage

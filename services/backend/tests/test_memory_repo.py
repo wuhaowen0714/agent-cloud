@@ -53,3 +53,14 @@ async def test_prune_keeps_latest_k(session):
         )
     ).scalar_one()
     assert cnt == 2
+
+
+async def test_prune_keep_zero_keeps_latest(session):
+    repo = MemoryEntryRepository(session)
+    oid = uuid.uuid4()
+    await repo.write_version("user", oid, "v1", None, expected_version=0)
+    await repo.write_version("user", oid, "v2", None, expected_version=1)
+    await session.commit()
+    await repo.prune("user", oid, keep=0)  # 0 被夹到 1,不会把当前块删掉
+    await session.commit()
+    assert (await repo.get_current("user", oid)).content == "v2"

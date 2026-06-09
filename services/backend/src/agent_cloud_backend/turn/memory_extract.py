@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import uuid
 
+import grpc
 from agent_cloud.v1 import worker_pb2
 from agent_cloud_common.codec import msg_to_proto
 from sqlalchemy import func, select
@@ -19,6 +20,9 @@ from agent_cloud_backend.turn.messages import orm_to_common
 from agent_cloud_backend.turn.worker_client import extract_memory_via_worker
 
 logger = logging.getLogger(__name__)
+
+# 每轮空闲扫描最多处理多少会话:限制单次工作量 + 对 worker 的压力。
+_SCAN_LIMIT = 100
 
 
 def _rounds(msgs: list) -> int:
@@ -98,11 +102,13 @@ async def _idle_session_ids(db, idle_seconds: int) -> list[uuid.UUID]:
         .exists()
     )
     rows = await db.execute(
-        select(Session.id).where(
+        select(Session.id)
+        .where(
             Session.status != "running",
             Session.last_active_at < cutoff,
             has_new,
         )
+        .limit(_SCAN_LIMIT)
     )
     return list(rows.scalars().all())
 
@@ -116,6 +122,12 @@ async def scan_idle_and_extract(settings: Settings) -> int:
         try:
             if await extract_session_memory(sid, settings=settings, reason="idle"):
                 n += 1
+        except grpc.aio.AioRpcError as e:
+            if e.code() == grpc.StatusCode.UNAVAILABLE:
+                # worker 不可用:停掉本轮,别对 down 的 worker 连环重连(storm)。
+                logger.warning("memory scan: worker unavailable, aborting this pass")
+                break
+            logger.warning("memory extract RPC failed for session %s: %s", sid, e.code())
         except Exception:
             logger.exception("idle memory extract failed for session %s", sid)
     return n

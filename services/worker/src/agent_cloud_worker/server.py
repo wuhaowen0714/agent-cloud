@@ -19,7 +19,7 @@ from agent_cloud_common.codec import msg_from_proto, msg_to_proto, turn_event_to
 
 from agent_cloud_worker.context import build_system_prompt
 from agent_cloud_worker.loop import run_turn, run_turn_stream
-from agent_cloud_worker.memory_extract import reconcile_user_memory
+from agent_cloud_worker.memory_extract import MemoryParseError, reconcile_user_memory
 from agent_cloud_worker.provider import ContextWindowExceeded, Provider
 from agent_cloud_worker.sandbox_executor import SandboxToolExecutor
 
@@ -263,6 +263,11 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
             )
         except ContextWindowExceeded:
             await context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, "context window exceeded")
+            return
+        except MemoryParseError:
+            # 模型输出无法解析:收敛为 INTERNAL(可重试),后端据此不推进水位线。
+            logger.warning("ExtractMemory: unparseable model output")
+            await context.abort(grpc.StatusCode.INTERNAL, "memory extraction failed to parse")
             return
         except Exception:
             logger.exception("ExtractMemory failed")
