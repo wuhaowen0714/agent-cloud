@@ -113,6 +113,47 @@ async def _idle_session_ids(db, idle_seconds: int) -> list[uuid.UUID]:
     return list(rows.scalars().all())
 
 
+async def apply_remember_calls(db, session_id: uuid.UUID, new_messages) -> int:
+    """把本回合 new_messages 里的 `remember` 工具调用追加进对应记忆块(agent 主动记忆)。
+
+    与消息写入共用同一个 db 事务(由调用方提交);best-effort:坏参数/并发冲突跳过。
+    去重/合并/裁剪交给后续 auto-reconcile。返回成功写入条数。
+    """
+    calls = [
+        c
+        for m in new_messages
+        for c in (getattr(m, "tool_calls", None) or [])
+        if c.name == "remember"
+    ]
+    if not calls:
+        return 0
+    s = await db.get(Session, session_id)
+    if s is None:
+        return 0
+    repo = MemoryEntryRepository(db)
+    written = 0
+    for c in calls:
+        args = c.arguments or {}
+        content = args.get("content")
+        scope = args.get("scope", "user")
+        if not isinstance(content, str) or not content.strip() or scope not in ("user", "agent"):
+            continue
+        owner_id = s.user_id if scope == "user" else s.agent_config_id
+        cur = await repo.get_current(scope, owner_id)
+        fact = content.strip()
+        new_block = f"{cur.content}\n- {fact}" if (cur and cur.content) else f"- {fact}"
+        try:
+            await repo.write_version(
+                scope, owner_id, new_block, session_id, expected_version=cur.version if cur else 0
+            )
+            written += 1
+        except MemoryConflict:
+            logger.info(
+                "remember write conflict (scope=%s) for session %s; skipped", scope, session_id
+            )
+    return written
+
+
 async def scan_idle_and_extract(settings: Settings) -> int:
     """reaper 周期调用:对空闲且攒够新对话的会话各提炼一次(轮次闸在 extract 内生效)。"""
     async with get_sessionmaker()() as db:

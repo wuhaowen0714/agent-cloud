@@ -17,6 +17,7 @@ from agent_cloud_backend.turn import worker_client
 from agent_cloud_backend.turn.compaction import force_compact, maybe_compact_after_turn
 from agent_cloud_backend.turn.heartbeat import session_heartbeat
 from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub
+from agent_cloud_backend.turn.memory_extract import apply_remember_calls
 from agent_cloud_backend.turn.messages import common_to_content
 from agent_cloud_backend.turn.retry import RetryAction, RetryPolicy, classify
 from agent_cloud_backend.turn.sse import error_sse, turn_event_to_sse
@@ -39,6 +40,8 @@ async def _persist(session_id: uuid.UUID, new_messages) -> list[str]:
                 ),
             )
             ids.append(str(row.id))
+        # agent 主动记忆:把本回合的 remember 工具调用落到记忆块(同一事务)。
+        await apply_remember_calls(db, session_id, new_messages)
         await db.commit()
     return ids
 
