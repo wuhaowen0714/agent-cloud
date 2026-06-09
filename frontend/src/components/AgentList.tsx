@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query"
+import { Plus, Settings2 } from "lucide-react"
 import { api } from "../api/client"
 import { useStore } from "../store"
 
 /**
  * 侧栏的 agent 列表(替换原来的下拉切换器):agent 是一等导航项,直接点选,选中高亮,
- * 悬停/选中露出 ⚙ 进设置。会话列表(SessionList)只显示当前选中 agent 的对话。
+ * 悬停/选中露出设置图标进设置。会话列表(SessionList)只显示当前选中 agent 的对话。
  */
 export function AgentList() {
   const userId = useStore((s) => s.userId)
@@ -25,15 +26,15 @@ export function AgentList() {
 
   return (
     <div className="flex flex-col">
-      <div className="mb-1.5 flex items-center justify-between px-1">
-        <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Agents</span>
+      <div className="mb-1 flex items-center justify-between px-1">
+        <span className="text-xs font-medium tracking-wide text-slate-400">Agents</span>
         <button
           className="flex h-5 w-5 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
           title="新建 agent"
           aria-label="新建 agent"
           onClick={newAgent}
         >
-          ＋
+          <Plus size={15} />
         </button>
       </div>
 
@@ -52,7 +53,7 @@ export function AgentList() {
               <li
                 key={a.id}
                 className={`group flex items-center gap-1 rounded-lg pr-1 transition ${
-                  active ? "bg-brand-50 ring-1 ring-brand-100" : "hover:bg-slate-100"
+                  active ? "bg-brand-50" : "hover:bg-slate-100"
                 }`}
               >
                 <button
@@ -79,7 +80,7 @@ export function AgentList() {
                     openSettings()
                   }}
                 >
-                  ⚙
+                  <Settings2 size={14} />
                 </button>
               </li>
             )
