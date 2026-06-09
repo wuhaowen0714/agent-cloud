@@ -28,3 +28,5 @@ class Session(Base, TimestampMixin):
     summary_through_seq: Mapped[int] = mapped_column(default=-1, nullable=False)
     # 智能体记忆(spec 2026-06-09):已提炼进记忆的最大消息 seq(每条最多被提炼一次)。
     memory_through_seq: Mapped[int] = mapped_column(default=-1, nullable=False)
+    # 最近一回合 worker 报告的上下文 token 占用(供 /status 显示;未跑过回合则为 NULL)。
+    last_context_tokens: Mapped[int | None] = mapped_column(nullable=True)

@@ -4,6 +4,8 @@ import { clearQueryCache } from "./api/queryClient"
 import type { Block } from "./blocks"
 import type { User } from "./types"
 
+export type SettingsTab = "agent" | "skills" | "keys" | "memory"
+
 // 进行中回合的实时聚合(由 SSE 事件填充)。blocks 按时间顺序记录思考/正文/工具,渲染即还原时序。
 export interface LiveTurn {
   userText: string
@@ -22,7 +24,7 @@ interface AppState {
   live: LiveTurn | null
   fileDrawerOpen: boolean
   settingsOpen: boolean
-  settingsTab: "agent" | "skills" | "keys" | "memory"
+  settingsTab: SettingsTab
   setAuth: (user: User | null) => void
   logout: () => void
   setAgent: (id: string | null) => void
@@ -31,7 +33,7 @@ interface AppState {
   setLive: (fn: (t: LiveTurn) => LiveTurn) => void
   clearLive: () => void
   toggleFileDrawer: () => void
-  openSettings: (tab?: "agent" | "skills" | "keys" | "memory") => void
+  openSettings: (tab?: SettingsTab) => void
   closeSettings: () => void
 }
 

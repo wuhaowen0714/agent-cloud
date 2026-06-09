@@ -78,6 +78,8 @@ export const api = {
   createSession: (body: { agent_config_id: string; title?: string }) =>
     http<Session>("/sessions", { method: "POST", body: JSON.stringify(body) }),
   listMessages: (sessionId: string) => http<Message[]>(`/sessions/${sessionId}/messages`),
+  compactSession: (id: string) =>
+    http<{ compacted: boolean }>(`/sessions/${id}/compact`, { method: "POST" }),
 
   // ── files ──
   listFiles: (path: string) => http<FileEntry[]>(`/files?path=${encodeURIComponent(path)}`),

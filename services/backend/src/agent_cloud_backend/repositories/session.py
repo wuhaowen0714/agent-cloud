@@ -79,3 +79,9 @@ class SessionRepository(BaseRepository[Session]):
         await self.session.execute(
             update(Session).where(Session.id == session_id).values(status="idle")
         )
+
+    async def set_context_tokens(self, session_id: uuid.UUID, tokens: int) -> None:
+        """记录最近一回合 worker 报告的上下文 token 占用(供 /status 显示)。"""
+        await self.session.execute(
+            update(Session).where(Session.id == session_id).values(last_context_tokens=tokens)
+        )
