@@ -87,6 +87,7 @@ export function ChatView() {
     if (inflight.current?.sessionId === sid) inflight.current = null
     const errored = useStore.getState().live?.status === "error"
     await qc.invalidateQueries({ queryKey: ["messages", sid] })
+    await qc.invalidateQueries({ queryKey: ["sessions"] }) // 刷新 last_context_tokens(/status 用)
     if (!errored && useStore.getState().sessionId === sid) clearLive()
   }
 

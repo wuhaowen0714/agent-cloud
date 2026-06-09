@@ -156,6 +156,49 @@ async def test_runner_persists_and_releases_without_any_subscriber(engine, monke
     assert hub.get(sid) is None  # 已移除
 
 
+async def test_runner_persists_context_tokens(engine, monkeypatch):
+    # /status 用:回合结束把 worker 报告的 context_tokens 落到 session.last_context_tokens。
+    from agent_cloud_backend.config import Settings
+    from agent_cloud_backend.models.session import Session
+    from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub
+    from agent_cloud_backend.turn.runner import run_turn
+
+    _patch_global_sessionmaker(monkeypatch, engine)
+    sid = await _make_session_row(engine)
+    await _acquire(engine, sid)
+
+    async def _gen(endpoint, request):
+        yield turn_event_to_proto(
+            TurnDone(
+                new_messages=[Message(role=Role.ASSISTANT, text="done")],
+                usage=Usage(input_tokens=1, output_tokens=2),
+                stop_reason="end_turn",
+                context_tokens=7,  # 远低于压缩阈值,避免触发主动压缩走真 worker
+            )
+        )
+
+    _fake_worker(monkeypatch, _gen)
+
+    hub = TurnHub()
+    active = ActiveTurn(session_id=sid)
+    hub.register(active)
+    await run_turn(
+        hub, active, worker_endpoint="x", request=_REQ, reassemble=_reassemble, session_id=sid,
+        heartbeat_interval=999, settings=Settings(),
+    )
+
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        tokens = (
+            await db.execute(
+                select(Session.last_context_tokens)
+                .where(Session.id == sid)
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one()
+    assert tokens == 7
+
+
 async def test_runner_cancel_emits_cancelled_and_releases(engine, monkeypatch):
     from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub
     from agent_cloud_backend.turn.runner import run_turn

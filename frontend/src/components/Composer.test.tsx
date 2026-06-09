@@ -37,7 +37,16 @@ function setup(opts?: { disabled?: boolean }) {
   )
   qc.setQueryData(
     ["sessions", USER],
-    [{ id: "s1", user_id: USER, agent_config_id: "a1", title: "T", work_subdir: "workspace" }],
+    [
+      {
+        id: "s1",
+        user_id: USER,
+        agent_config_id: "a1",
+        title: "T",
+        work_subdir: "workspace",
+        last_context_tokens: 873,
+      },
+    ],
   )
   qc.setQueryData(["messages", "s1"], [{ id: "m1" }, { id: "m2" }, { id: "m3" }])
   const onSend = vi.fn()
@@ -132,6 +141,7 @@ describe("斜杠面板", () => {
     fireEvent.keyDown(box(), { key: "Enter" })
     expect(await screen.findByText("Coder")).toBeInTheDocument()
     expect(screen.getByText("gpt-4o")).toBeInTheDocument()
+    expect(screen.getByText("873 tokens")).toBeInTheDocument()
   })
 
   it("无匹配 / 路径样输入 → 直通发送", () => {

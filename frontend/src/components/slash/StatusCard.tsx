@@ -41,6 +41,10 @@ export function StatusCard({
           </dd>
           <dt className="text-slate-400">消息数</dt>
           <dd className="text-slate-700">{status.messageCount}</dd>
+          <dt className="text-slate-400">上下文</dt>
+          <dd className="text-slate-700">
+            {status.contextTokens != null ? `${status.contextTokens.toLocaleString()} tokens` : "—"}
+          </dd>
         </dl>
       )}
       {kind === "help" && (

@@ -56,6 +56,7 @@ export function useSlashCommands(ui: {
         sessionTitle: sess?.title ?? null,
         sessionIdShort: sessionId ? sessionId.slice(0, 8) : null,
         messageCount: msgs.length,
+        contextTokens: sess?.last_context_tokens ?? null,
       }
     },
     openSettings,

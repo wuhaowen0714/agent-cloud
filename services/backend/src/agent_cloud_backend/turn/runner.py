@@ -25,7 +25,7 @@ from agent_cloud_backend.turn.sse import error_sse, turn_event_to_sse
 logger = logging.getLogger(__name__)
 
 
-async def _persist(session_id: uuid.UUID, new_messages) -> list[str]:
+async def _persist(session_id: uuid.UUID, new_messages, context_tokens: int) -> list[str]:
     ids: list[str] = []
     async with get_sessionmaker()() as db:
         repo = MessageRepository(db)
@@ -40,6 +40,8 @@ async def _persist(session_id: uuid.UUID, new_messages) -> list[str]:
                 ),
             )
             ids.append(str(row.id))
+        # 记录本回合上下文占用(供 /status 显示);与消息同事务落库。
+        await SessionRepository(db).set_context_tokens(session_id, context_tokens)
         await db.commit()
     # agent 主动记忆:独立事务、best-effort(记忆写冲突重试绝不拖垮上面的消息持久化)。
     try:
@@ -107,8 +109,10 @@ async def run_turn(
                     ):
                         event = turn_event_from_proto(proto_event)
                         if isinstance(event, TurnDone):
-                            message_ids = await _persist(session_id, event.new_messages)
                             ctx_tokens = event.context_tokens
+                            message_ids = await _persist(
+                                session_id, event.new_messages, ctx_tokens
+                            )
                             await active.emit(
                                 {
                                     "type": "turn_done",

@@ -7,6 +7,7 @@ export interface StatusInfo {
   sessionTitle: string | null
   sessionIdShort: string | null
   messageCount: number
+  contextTokens: number | null // 最近一回合 worker 报告的上下文占用;未跑过回合则 null
 }
 
 // compact 结果四态:压缩了 / 没东西可压 / 会话忙(回合进行中) / 出错。

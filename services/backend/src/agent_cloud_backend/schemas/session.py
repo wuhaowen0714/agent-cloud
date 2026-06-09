@@ -19,3 +19,4 @@ class SessionRead(BaseModel):
     work_subdir: str
     created_at: datetime
     last_active_at: datetime
+    last_context_tokens: int | None = None
