@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { api } from "../api/client"
+import { api, HttpError } from "../api/client"
 import { useStore } from "../store"
 import { Composer } from "./Composer"
 
@@ -150,5 +150,23 @@ describe("斜杠面板", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
     fireEvent.keyDown(box(), { key: "Enter" })
     expect(onSend).toHaveBeenCalledWith("/status")
+  })
+
+  it("无 agent 时 /new 不建会话且如实反馈(不谎报成功)", async () => {
+    setup()
+    useStore.setState({ agentId: null })
+    const spy = vi.spyOn(api, "createSession")
+    type("/new")
+    fireEvent.keyDown(box(), { key: "Enter" })
+    expect(spy).not.toHaveBeenCalled()
+    expect(await screen.findByText("请先选择一个 agent")).toBeInTheDocument()
+  })
+
+  it("/compact 撞 409 → 提示会话正忙(而非泛化失败)", async () => {
+    vi.spyOn(api, "compactSession").mockRejectedValue(new HttpError(409, "busy"))
+    setup()
+    type("/compact")
+    fireEvent.keyDown(box(), { key: "Enter" })
+    expect(await screen.findByText("会话正忙(回合进行中),稍后再试")).toBeInTheDocument()
   })
 })

@@ -137,6 +137,8 @@ export function Composer({
             setDismissed(false)
           }}
           onKeyDown={(e) => {
+            // IME 组词中的回车(选字)不应触发命令执行/发送。
+            if (e.nativeEvent.isComposing) return
             if (paletteOpen) {
               if (e.key === "ArrowDown") {
                 e.preventDefault()
@@ -150,6 +152,7 @@ export function Composer({
               } else if (e.key === "Escape") {
                 e.preventDefault()
                 setDismissed(true)
+                setNotice(null) // 一并收起通知卡(若有)
               }
               return
             }

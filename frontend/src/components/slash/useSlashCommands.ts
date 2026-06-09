@@ -1,8 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query"
-import { api } from "../../api/client"
+import { api, HttpError } from "../../api/client"
 import { useStore } from "../../store"
 import type { AgentConfig, Message, Session } from "../../types"
-import { dedupeModels, type SlashContext, type StatusInfo } from "./commands"
+import { type CompactResult, dedupeModels, type SlashContext, type StatusInfo } from "./commands"
 
 // 把命令动作接到 store / api / react-query。读缓存的 key 与各处一致:
 // agents/sessions 按 userId 命名,messages 按 sessionId。
@@ -22,20 +22,26 @@ export function useSlashCommands(ui: {
 
   return {
     newSession: async () => {
-      if (!agentId) return
+      if (!agentId) return false
       const s = await api.createSession({ agent_config_id: agentId })
       await qc.invalidateQueries({ queryKey: ["sessions", userId] })
       setSession(s.id)
+      return true
     },
     setModel: async (model) => {
-      if (!agentId) return
+      if (!agentId) return false
       await api.patchAgent(agentId, { model })
       await qc.invalidateQueries({ queryKey: ["agents", userId] })
+      return true
     },
-    compact: async () => {
-      if (!sessionId) return false
-      const r = await api.compactSession(sessionId)
-      return r.compacted
+    compact: async (): Promise<CompactResult> => {
+      if (!sessionId) return "error"
+      try {
+        const r = await api.compactSession(sessionId)
+        return r.compacted ? "compacted" : "nothing"
+      } catch (e) {
+        return e instanceof HttpError && e.status === 409 ? "busy" : "error"
+      }
     },
     modelSuggestions: () => dedupeModels(agents().map((a) => a.model)),
     status: (): StatusInfo => {

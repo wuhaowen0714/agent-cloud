@@ -9,11 +9,14 @@ export interface StatusInfo {
   messageCount: number
 }
 
+// compact 结果四态:压缩了 / 没东西可压 / 会话忙(回合进行中) / 出错。
+export type CompactResult = "compacted" | "nothing" | "busy" | "error"
+
 // 命令执行时拿到的上下文:动作接到 store/api/queryClient(在 useSlashCommands 里装配)。
 export interface SlashContext {
-  newSession: () => Promise<void>
-  setModel: (model: string) => Promise<void>
-  compact: () => Promise<boolean> // 返回是否真的压缩了
+  newSession: () => Promise<boolean> // false = 当前无 agent,未执行
+  setModel: (model: string) => Promise<boolean> // 同上
+  compact: () => Promise<CompactResult>
   modelSuggestions: () => string[]
   status: () => StatusInfo
   openSettings: (tab: SettingsTab) => void
@@ -52,11 +55,16 @@ export const COMMANDS: SlashCommand[] = [
     title: "压缩上下文",
     hint: "压缩当前会话",
     run: async (c) => {
-      try {
-        c.notify((await c.compact()) ? "已压缩当前会话上下文" : "暂无可压缩内容")
-      } catch {
-        c.notify("压缩失败,请稍后再试")
-      }
+      const r = await c.compact()
+      c.notify(
+        r === "compacted"
+          ? "已压缩当前会话上下文"
+          : r === "nothing"
+            ? "暂无可压缩内容"
+            : r === "busy"
+              ? "会话正忙(回合进行中),稍后再试"
+              : "压缩失败,请稍后再试",
+      )
     },
   },
   { name: "status", title: "状态", hint: "agent / 会话 / 消息数", run: (c) => c.showStatus() },
@@ -65,8 +73,7 @@ export const COMMANDS: SlashCommand[] = [
     title: "新会话",
     hint: "用当前 agent 开新会话",
     run: async (c) => {
-      await c.newSession()
-      c.notify("已新建会话")
+      c.notify((await c.newSession()) ? "已新建会话" : "请先选择一个 agent")
     },
   },
   {
@@ -79,8 +86,7 @@ export const COMMANDS: SlashCommand[] = [
       const m = arg.trim()
       if (!m) return
       try {
-        await c.setModel(m)
-        c.notify(`已切换模型:${m}`)
+        c.notify((await c.setModel(m)) ? `已切换模型:${m}` : "请先选择一个 agent")
       } catch {
         c.notify("切换模型失败")
       }
