@@ -1,10 +1,9 @@
 import uuid
 
 import pytest
-from sqlalchemy import func, select
-
 from agent_cloud_backend.models.memory_entry import MemoryEntry
 from agent_cloud_backend.repositories.memory_entry import MemoryConflict, MemoryEntryRepository
+from sqlalchemy import func, select
 
 
 async def test_write_and_get_current(session):

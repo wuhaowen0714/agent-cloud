@@ -1,5 +1,4 @@
 from agent_cloud_common import CompletionResult, Message, Role, Usage
-
 from agent_cloud_worker.memory_extract import reconcile_user_memory
 from agent_cloud_worker.provider import FakeProvider
 
@@ -13,7 +12,9 @@ def _result(text: str) -> CompletionResult:
 
 async def test_reconcile_adds():
     p = FakeProvider([_result('{"changed": true, "memory": "- prefers Python"}')])
-    mem, changed, usage = await reconcile_user_memory(p, current="", messages=[], soft_max_chars=2000)
+    mem, changed, usage = await reconcile_user_memory(
+        p, current="", messages=[], soft_max_chars=2000
+    )
     assert changed is True
     assert "Python" in mem
     assert usage.input_tokens == 1

@@ -1,9 +1,7 @@
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from agent_cloud.v1 import worker_pb2
-from sqlalchemy.ext.asyncio import async_sessionmaker
-
 from agent_cloud_backend.config import Settings
 from agent_cloud_backend.models.agent_config import AgentConfig
 from agent_cloud_backend.models.message import Message
@@ -20,6 +18,7 @@ from agent_cloud_backend.turn.memory_extract import (
     extract_session_memory,
     scan_idle_and_extract,
 )
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 
 def _settings() -> Settings:
@@ -150,7 +149,7 @@ async def _seed_session(engine, *, rounds, idle, running=False, watermark=-1):
         s = await SessionRepository(db).create_for(user.id, agent.id, None)
         await db.flush()
         mrepo = MessageRepository(db)
-        for i in range(rounds):
+        for _ in range(rounds):
             await mrepo.append(
                 s.id, Message(session_id=s.id, seq=0, role="user", content={"text": "u"})
             )
@@ -160,7 +159,7 @@ async def _seed_session(engine, *, rounds, idle, running=False, watermark=-1):
         s.status = "running" if running else "idle"
         s.memory_through_seq = watermark
         if idle:
-            s.last_active_at = datetime.now(timezone.utc) - timedelta(hours=1)
+            s.last_active_at = datetime.now(UTC) - timedelta(hours=1)
         await db.commit()
         return s.id
 

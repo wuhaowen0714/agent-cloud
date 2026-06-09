@@ -33,7 +33,9 @@ def upgrade() -> None:
         """
         UPDATE memory_entries m SET version = sub.rn
         FROM (
-            SELECT id, ROW_NUMBER() OVER (PARTITION BY scope, owner_id ORDER BY created_at, id) AS rn
+            SELECT id, ROW_NUMBER() OVER (
+                PARTITION BY scope, owner_id ORDER BY created_at, id
+            ) AS rn
             FROM memory_entries
         ) sub
         WHERE m.id = sub.id
