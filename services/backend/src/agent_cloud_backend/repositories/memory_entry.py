@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from agent_cloud_backend.models.memory_entry import MemoryEntry
 from agent_cloud_backend.repositories.base import BaseRepository
@@ -16,10 +16,19 @@ class MemoryEntryRepository(BaseRepository[MemoryEntry]):
         content: str,
         source_session_id: uuid.UUID | None = None,
     ) -> MemoryEntry:
+        # 旧接口(将在 T9 移除):自增 version 以满足 (scope,owner,version) 唯一约束。
+        nxt = (
+            await self.session.execute(
+                select(func.coalesce(func.max(MemoryEntry.version), 0) + 1).where(
+                    MemoryEntry.scope == scope, MemoryEntry.owner_id == owner_id
+                )
+            )
+        ).scalar_one()
         entry = MemoryEntry(
             scope=scope,
             owner_id=owner_id,
             content=content,
+            version=nxt,
             source_session_id=source_session_id,
         )
         self.session.add(entry)

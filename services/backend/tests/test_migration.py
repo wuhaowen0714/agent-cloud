@@ -49,3 +49,25 @@ def test_alembic_upgrade_creates_schema(migration_pg_url: str):
     assert "alembic_version" in tables
     assert "uq_active_sandbox_per_user" in indexes
     assert "uq_skill_user_name" in skill_indexes
+
+
+def test_memory_versioning_schema(migration_pg_url: str):
+    sync_url = migration_pg_url.replace("+asyncpg", "")
+    os.environ["AGENT_CLOUD_DATABASE_URL"] = migration_pg_url
+    command.upgrade(Config("alembic.ini"), "head")
+
+    engine = create_engine(sync_url)
+    with engine.connect() as conn:
+        cols = {
+            r[0]
+            for r in conn.execute(
+                text(
+                    "SELECT table_name||'.'||column_name FROM information_schema.columns "
+                    "WHERE table_schema='public'"
+                )
+            )
+        }
+        cons = {r[0] for r in conn.execute(text("SELECT conname FROM pg_constraint"))}
+    assert "memory_entries.version" in cols
+    assert "sessions.memory_through_seq" in cols
+    assert "uq_memory_scope_owner_version" in cons
