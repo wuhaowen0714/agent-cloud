@@ -24,7 +24,7 @@ describe("Sidebar", () => {
   it("renders brand, the new-chat button (disabled without an agent), and the account email", () => {
     render(wrap(<Sidebar />))
     expect(screen.getByText("Agent Cloud")).toBeInTheDocument()
-    const newChat = screen.getByRole("button", { name: "＋ 新对话" })
+    const newChat = screen.getByRole("button", { name: "新对话" })
     expect(newChat).toBeDisabled()
     expect(screen.getByText("alice@example.com")).toBeInTheDocument()
   })
