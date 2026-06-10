@@ -117,6 +117,7 @@ describe("斜杠面板", () => {
     type("/model")
     fireEvent.keyDown(box(), { key: "Enter" }) // 进参数模式,text → "/model "
     expect(box()).toHaveValue("/model ")
+    expect(await screen.findByRole("option", { name: /DeepSeek-V4-Flash/ })).toBeInTheDocument() // 预设进入建议
     // 用 option 角色定位面板建议项(底部模型 chip 也含 "gpt-4o" 文本,纯文本定位会歧义)
     const opt = await screen.findByRole("option", { name: /gpt-4o/ })
     fireEvent.mouseDown(opt)

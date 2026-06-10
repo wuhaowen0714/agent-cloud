@@ -2,7 +2,8 @@ import { useQueryClient } from "@tanstack/react-query"
 import { api, HttpError } from "../../api/client"
 import { useStore } from "../../store"
 import type { AgentConfig, Message, Session } from "../../types"
-import { type CompactResult, dedupeModels, type SlashContext, type StatusInfo } from "./commands"
+import { useModelOptions } from "../model/useModelOptions"
+import type { CompactResult, SlashContext, StatusInfo } from "./commands"
 
 // 把命令动作接到 store / api / react-query。读缓存的 key 与各处一致:
 // agents/sessions 按 userId 命名,messages 按 sessionId。
@@ -17,6 +18,7 @@ export function useSlashCommands(ui: {
   const agentId = useStore((s) => s.agentId)
   const setSession = useStore((s) => s.setSession)
   const openSettings = useStore((s) => s.openSettings)
+  const { options } = useModelOptions() // /model 建议与模型选单共用一个选项源
 
   const agents = (): AgentConfig[] => qc.getQueryData<AgentConfig[]>(["agents", userId]) ?? []
 
@@ -43,7 +45,7 @@ export function useSlashCommands(ui: {
         return e instanceof HttpError && e.status === 409 ? "busy" : "error"
       }
     },
-    modelSuggestions: () => dedupeModels(agents().map((a) => a.model)),
+    modelSuggestions: () => options.map((o) => o.model),
     status: (): StatusInfo => {
       const a = agents().find((x) => x.id === agentId) ?? null
       const sessions = qc.getQueryData<Session[]>(["sessions", userId]) ?? []
