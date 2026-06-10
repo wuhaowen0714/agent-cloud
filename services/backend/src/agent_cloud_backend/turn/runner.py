@@ -21,6 +21,7 @@ from agent_cloud_backend.turn.memory_extract import apply_remember_calls
 from agent_cloud_backend.turn.messages import common_to_content
 from agent_cloud_backend.turn.retry import RetryAction, RetryPolicy, classify
 from agent_cloud_backend.turn.sse import error_sse, turn_event_to_sse
+from agent_cloud_backend.turn.title import spawn_title_generation
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +107,7 @@ async def run_turn(
     session_id: uuid.UUID,
     heartbeat_interval: float,
     settings: Settings,
+    spawn_title: bool = False,  # 回合开始时会话尚无标题 → 成功收尾后异步起名
 ) -> None:
     """独立任务:消费 worker 流 → 落库;可恢复失败在回合内透明自动重试(spec: turn-recovery)。
 
@@ -143,10 +145,12 @@ async def run_turn(
                             )
                         else:
                             await active.emit(turn_event_to_sse(event))
-                    # 回合成功收尾 → 主动压缩(仍在心跳内续租)→ 结束
+                    # 回合成功收尾 → 主动压缩(仍在心跳内续租)→ 异步起名 → 结束
                     await maybe_compact_after_turn(
                         session_id, ctx_tokens, model=current.agent.model, settings=settings
                     )
+                    if spawn_title:
+                        spawn_title_generation(session_id, settings=settings)
                     return
                 except grpc.aio.AioRpcError as exc:
                     action = policy.decide(
