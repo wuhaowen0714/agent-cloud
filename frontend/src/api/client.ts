@@ -92,7 +92,12 @@ export const api = {
   downloadUrl: (path: string) => _blobUrl(path, true),
   uploadFiles: async (path: string, files: File[]) => {
     const fd = new FormData()
-    for (const f of files) fd.append("files", f)
+    // 文件夹上传:用 multipart filename 携带 webkitRelativePath(proj/sub/a.txt),
+    // 后端按相对路径嵌套落盘;普通文件无 relativePath,仍是 basename。
+    for (const f of files) {
+      const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath
+      fd.append("files", f, rel || f.name)
+    }
     // 不设 Content-Type,浏览器自动带 multipart boundary;authedFetch 负责 Bearer + 401 刷新。
     const res = await authedFetch(`/api/files/upload?path=${encodeURIComponent(path)}`, {
       method: "POST",

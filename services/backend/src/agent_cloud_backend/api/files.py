@@ -1,5 +1,4 @@
 import mimetypes
-from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -30,7 +29,27 @@ def _http_from(exc: Exception) -> HTTPException:
     # FileExistsError:把文件当目录用(move/upload 到 file/inner)→ 4xx 而非 500(I1)
     if isinstance(exc, (FileExistsError, NotADirectoryError, IsADirectoryError)):
         return HTTPException(status.HTTP_400_BAD_REQUEST, "wrong file type")
+    # 其余 OSError(如 ENAMETOOLONG:超长段/超深嵌套):围栏内的非法路径形态,
+    # 是客户端输入问题 → 400 而非 500。必须放在上面更具体的 OSError 子类之后。
+    if isinstance(exc, OSError):
+        return HTTPException(status.HTTP_400_BAD_REQUEST, "invalid path")
     raise exc  # 未知错误 → 冒泡成 500
+
+
+def _sanitize_rel_upload_path(filename: str) -> str:
+    """上传 filename → 围栏内相对路径。文件夹上传时 multipart filename 携带
+    webkitRelativePath(如 proj/sub/a.txt),需保留目录结构;普通上传仍是 basename。
+    消毒:`\\`→`/` 归一(Windows 风格)、拒 \\0、丢空段与 `.`、`..` 或空结果 → PathEscape
+    (提前拦成 400;store._resolve 仍是最终围栏,双层防护)。"""
+    raw = (filename or "").replace("\\", "/")
+    if "\0" in raw:
+        raise PathEscape("null byte in filename")
+    parts = [p for p in raw.split("/") if p not in ("", ".")]
+    if not parts:
+        raise PathEscape("empty filename")
+    if any(p == ".." for p in parts):
+        raise PathEscape(f"parent traversal not allowed: {filename!r}")
+    return "/".join(parts)
 
 
 def _cd_filename(name: str) -> str:
@@ -109,9 +128,9 @@ def upload(
 ):
     out = []
     for uf in files:
-        name = Path(uf.filename or "upload").name  # 只取 basename,消毒
-        dest = f"{path}/{name}" if path else name
         try:
+            name = _sanitize_rel_upload_path(uf.filename or "upload")
+            dest = f"{path}/{name}" if path else name
             out.append(store.write(str(user.id), dest, uf.file, settings.file_upload_max_bytes))
         except Exception as exc:
             raise _http_from(exc) from exc

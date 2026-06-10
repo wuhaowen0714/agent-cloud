@@ -55,7 +55,7 @@ Agent Cloud 是一个把"可配置 AI agent + 隔离代码执行"做成多租户
 - 🎛️ **模型切换**:composer 左下模型 chip 即点即切(持久到当前 agent);选项 = 预设(DeepSeek-V4-Pro / DeepSeek-V4-Flash / GLM-5.1)∪ 各 agent 在用 ∪ **用户自定义**(后端持久化、跨设备);创建 agent 免填模型。
 - 🚀 **开箱即用**:注册自动播种默认 agent(`main`)+ 默认会话,登录即可开聊;一键新建 agent(`Agent N`,新建即行内改名);agent / 会话支持行内**重命名**与**二次确认删除**(删 agent 连带其会话,进行中的回合受保护)。
 - 🧩 **技能(Skills)**:从 registry **安装**到用户对象库 → 在 agent 上**启用** → 每回合**物化**进沙箱并注入提示词;内置 `skill-creator`,支持**从工作区一键安装**自制技能。
-- 📁 **文件管理**:每用户持久工作区,经 `/files` 浏览 / 预览 / 上传 / 下载 / 删除 / 重命名 / 建目录(路径越狱防护)。
+- 📁 **文件管理**:每用户持久工作区,经 `/files` 浏览 / 预览(md/html 渲染 + 源码切换)/ 上传(支持**整文件夹**,保留目录结构)/ 下载 / 删除 / 重命名 / 建目录(路径越狱防护)。
 - 📦 **沙箱隔离**:`inprocess`(默认 / CI,**无隔离**)与 `docker`(真隔离:内存 / CPU / PIDs 限额、空闲回收、持久 `/workspace` 卷)两种 provisioner。
 - 🎨 **精致前端**:React 19 + Tailwind(浅色 + teal,Notion 风侧栏与设置),lucide 线性图标,自绘 Segmented / Switch / 选单浮层 / 命令面板,Markdown 渲染,固定视口布局(只有消息区滚动)。
 
