@@ -138,3 +138,49 @@ def test_raw_zip_dir_with_non_ascii_name(client):
     r = client.get("/files/raw", params={"path": "中文目录"})
     assert r.status_code == 200
     assert "filename*=UTF-8''" in r.headers["content-disposition"]
+
+
+# ---- 文件夹上传:multipart filename 携带相对路径(spec 2026-06-10-folder-upload)----
+
+
+def test_upload_folder_with_relative_paths(client):
+    r = client.post(
+        "/files/upload",
+        files=[
+            ("files", ("proj/sub/a.txt", b"a", "text/plain")),
+            ("files", ("proj/b.txt", b"b", "text/plain")),
+        ],
+    )
+    assert r.status_code == 201
+    assert {e["path"] for e in r.json()} == {"proj/sub/a.txt", "proj/b.txt"}
+    assert [e["name"] for e in client.get("/files", params={"path": "proj/sub"}).json()] == [
+        "a.txt"
+    ]
+
+
+def test_upload_folder_under_subdir_query(client):
+    client.post("/files/mkdir", json={"path": "dest"})
+    r = client.post(
+        "/files/upload",
+        params={"path": "dest"},
+        files=[("files", ("pkg/x.txt", b"x", "text/plain"))],
+    )
+    assert r.status_code == 201
+    assert r.json()[0]["path"] == "dest/pkg/x.txt"
+
+
+def test_upload_rejects_traversal_in_filename(client):
+    r = client.post("/files/upload", files=[("files", ("../evil.txt", b"x", "text/plain"))])
+    assert r.status_code == 400
+
+
+def test_upload_normalizes_backslashes(client):
+    r = client.post("/files/upload", files=[("files", ("win\\style.txt", b"x", "text/plain"))])
+    assert r.status_code == 201
+    assert r.json()[0]["path"] == "win/style.txt"
+
+
+def test_upload_plain_basename_unchanged(client):
+    r = client.post("/files/upload", files=[("files", ("plain.txt", b"p", "text/plain"))])
+    assert r.status_code == 201
+    assert r.json()[0]["path"] == "plain.txt"
