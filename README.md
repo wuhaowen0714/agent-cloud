@@ -176,14 +176,16 @@ bash scripts/dev_up.sh
 |---|---|---|---|
 | `AGENT_CLOUD_WORKER_OPENAI_API_KEY` | worker | — | 平台默认 LLM 密钥(用户未配 BYO-Key 时用) |
 | `AGENT_CLOUD_WORKER_OPENAI_BASE_URL` | worker | — | OpenAI 兼容端点(`.../v1`) |
-| `AGENT_CLOUD_WORKER_REQUEST_MAX_TOKENS` | worker | `4096` | 单次输出上限 |
+| `AGENT_CLOUD_WORKER_REQUEST_MAX_TOKENS` | worker | `32768` | 单次输出上限(撞上限有兜底:文本截断落库提示、工具参数截断回合内自修复) |
 | `AGENT_CLOUD_DATABASE_URL` | backend | `postgresql+asyncpg://postgres:postgres@localhost:5432/agent_cloud` | Postgres 连接串 |
 | `AGENT_CLOUD_AUTH_SECRET` | backend | `dev-insecure-…`(占位) | access JWT 的 HS256 密钥,**生产必须换成长随机串** |
 | `AGENT_CLOUD_AUTH_COOKIE_SECURE` | backend | `false` | refresh cookie 是否仅 https 下发;**生产(https)必须 `true`** |
 | `AGENT_CLOUD_CREDENTIAL_KEY` | backend | 空 | BYO-Key 的 AES-GCM 主密钥(base64 的 32 字节);**空则凭据功能不可用** |
 | `AGENT_CLOUD_SANDBOX_PROVISIONER` | backend | `inprocess` | `inprocess`(无隔离)/ `docker`(真隔离) |
 | `AGENT_CLOUD_SANDBOX_IMAGE` | backend | `agent-cloud-sandbox:latest` | 沙箱镜像(由 `deploy/sandbox.Dockerfile` 构建) |
-| `AGENT_CLOUD_COMPACTION_TOKEN_THRESHOLD` | backend | `128000` | 历史压缩阈值(建议设为模型窗口的 ~70–80%;可经 `…_THRESHOLDS` 按模型覆盖) |
+| `AGENT_CLOUD_COMPACTION_TOKEN_THRESHOLD` | backend | `128000` | 压缩阈值的全局兜底(未配窗口/覆盖的模型用它) |
+| `AGENT_CLOUD_MODEL_CONTEXT_WINDOWS` | backend | DeepSeek-V4-Pro/Flash `1M`、GLM-5.1 `200k` | 模型上下文窗口(JSON);阈值 = 窗口 × 触发比例 |
+| `AGENT_CLOUD_COMPACTION_TRIGGER_RATIO` | backend | `0.75` | 上下文占用达窗口此比例触发自动压缩 |
 | `AGENT_CLOUD_DEFAULT_AGENT_MODEL` | backend | `DeepSeek-V4-Pro` | 注册播种的默认 agent 模型(与前端预设同值) |
 | `AGENT_CLOUD_MEMORY_SOFT_CHARS` | backend | `2000` | 记忆块软上限(引导 LLM,后端不硬截断) |
 | `AGENT_CLOUD_MEMORY_MIN_ROUNDS` | backend | `10` | 空闲提炼闸:自上次提炼新增对话轮次 ≥ 此值才提 |

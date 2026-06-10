@@ -33,8 +33,9 @@ def test_compaction_threshold_default_is_128k():
 
 def test_compaction_threshold_for_falls_back_to_default():
     s = Settings(_env_file=None)
-    # 未配 per-model override → 回退全局默认
-    assert s.compaction_threshold_for("DeepSeek-V4-Pro") == 128000
+    # 未配窗口、未配 override 的模型 → 回退全局默认。
+    # (预设模型按「窗口 × 触发比例」解析,见 test_config_thresholds.py。)
+    assert s.compaction_threshold_for("unknown-model") == 128000
     assert s.compaction_threshold_for("") == 128000
 
 
