@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef } from "react"
 import { api } from "../api/client"
 import { cancelTurn, resumeTurn, streamTurn } from "../api/stream"
-import { appendDelta, appendToolCall, attachToolResult } from "../blocks"
+import { appendDelta, appendToolCall, attachToolResult, upsertToolProgress } from "../blocks"
 import { useStore } from "../store"
 import type { TurnEvent } from "../types"
 import { Composer } from "./Composer"
@@ -44,6 +44,8 @@ export function ChatView() {
       setLive((t) => ({ ...t, blocks: appendDelta(t.blocks, "thinking", e.text) }))
     else if (e.type === "text_delta")
       setLive((t) => ({ ...t, blocks: appendDelta(t.blocks, "text", e.text) }))
+    else if (e.type === "tool_call_progress")
+      setLive((t) => ({ ...t, blocks: upsertToolProgress(t.blocks, e) }))
     else if (e.type === "tool_call_start")
       setLive((t) => ({
         ...t,

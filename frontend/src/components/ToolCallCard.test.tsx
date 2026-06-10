@@ -45,3 +45,28 @@ describe("ToolCallCard", () => {
     expect(container.textContent).toContain("sleep 1")
   })
 })
+
+describe("ToolCallCard pending(参数生成中)", () => {
+  it("显示路径与计数,无展开按钮与结果区", () => {
+    render(
+      <ToolCallCard
+        call={{ id: "c9", name: "write_file", arguments: {} }}
+        progress={{ argsChars: 12345, lines: 340, path: "src/big.py" }}
+      />,
+    )
+    expect(screen.getByText("write_file")).toBeInTheDocument()
+    expect(screen.getByText("src/big.py")).toBeInTheDocument()
+    expect(screen.getByText("已生成 12.3k 字符 · 约 340 行")).toBeInTheDocument()
+    expect(screen.queryByRole("button")).not.toBeInTheDocument()
+  })
+
+  it("单行小参数:不显示行数", () => {
+    render(
+      <ToolCallCard
+        call={{ id: "c8", name: "bash", arguments: {} }}
+        progress={{ argsChars: 42, lines: 1, path: "" }}
+      />,
+    )
+    expect(screen.getByText("已生成 42 字符")).toBeInTheDocument()
+  })
+})
