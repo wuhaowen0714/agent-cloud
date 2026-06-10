@@ -69,3 +69,12 @@ describe("SkillsMenu", () => {
     expect(await screen.findByText("技能池为空")).toBeInTheDocument()
   })
 })
+
+describe("SkillsMenu 加载 gate(审查 M2)", () => {
+  it("启用集未加载完不渲染开关——此时全『关』是假状态,点一下会清空真实启用集", async () => {
+    vi.spyOn(api, "getAgentSkills").mockReturnValue(new Promise(() => {}) as never)
+    render(wrap(<SkillsMenu agentId="a1" />))
+    expect(await screen.findByText("加载中…")).toBeInTheDocument()
+    expect(screen.queryAllByRole("switch")).toHaveLength(0)
+  })
+})

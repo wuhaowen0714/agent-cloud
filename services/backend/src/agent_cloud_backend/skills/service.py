@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from pathlib import Path
+
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_cloud_backend.models.skill import Skill
 from agent_cloud_backend.repositories.skill import AgentSkillEnableRepository, SkillRepository
 from agent_cloud_backend.skills.manifest import SkillManifestError, parse_skill_md
 from agent_cloud_backend.skills.store import ObjectStore
+
+logger = logging.getLogger(__name__)
 
 
 def skill_package_ref(user_id: uuid.UUID, name: str) -> str:
@@ -60,6 +66,7 @@ async def install_skill_from_dir(
 
 async def ensure_builtin_skills(
     *,
+    session: AsyncSession,
     user_id: uuid.UUID,
     registry_root: Path,
     repo: SkillRepository,
@@ -68,7 +75,9 @@ async def ensure_builtin_skills(
     """把 registry 里该用户缺失的内置技能补装(幂等)。返回本次新装的。
 
     GET /skills 与注册时调用:无缺失时只有一次目录扫描 + 名字比对,零写入。
-    目录名预筛、manifest.name 终判;并发 ensure 撞 ValueError(已装)视为达成。
+    并发安全:两个并发事务都能通过「已装」预查(MVCC 互不可见),输家在 flush 撞
+    uq(user_id,name) 抛 IntegrityError——每个安装包进 SAVEPOINT,回滚到点不污染
+    外层事务(register/create 同事务里还有 user/agent 行),两类冲突都视为达成。
     """
     if not registry_root.exists():
         return []
@@ -78,13 +87,19 @@ async def ensure_builtin_skills(
         if not p.is_dir() or not (p / "SKILL.md").is_file() or p.name in installed:
             continue
         try:
-            out.append(
-                await install_skill_from_dir(
-                    user_id=user_id, src_dir=p, source="registry", repo=repo, store=store
+            async with session.begin_nested():
+                out.append(
+                    await install_skill_from_dir(
+                        user_id=user_id, src_dir=p, source="registry", repo=repo, store=store
+                    )
                 )
-            )
+        except IntegrityError:
+            pass  # 并发对手先 flush:目标已达成
+        except SkillManifestError:
+            # registry 里的内置技能包坏了——静默吞会永远装不上,记日志暴露
+            logger.warning("builtin skill %s failed manifest parse; skipped", p.name)
         except ValueError:
-            pass
+            pass  # 已装(预查命中):达成
     return out
 
 

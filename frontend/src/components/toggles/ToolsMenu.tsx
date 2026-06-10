@@ -32,23 +32,32 @@ export function ToolsMenu({ agent }: { agent: AgentConfig }) {
     const next = new Set(checked)
     if (next.has(name)) next.delete(name)
     else next.add(name)
-    // 全关 → checkedToEnabled 会规范化成 [](= 全部启用)而非「全禁」,
-    // 即点即存下这是个反直觉陷阱:忽略关掉最后一个工具的点击。
+    // 全关 → checkedToEnabled 会规范化成 [](= 全部启用)而非「全禁」——
+    // 防呆:最后一个启用项的开关渲染为 disabled(见下),这里兜底再拦一次。
     if (next.size === 0) return
     patch.mutate(checkedToEnabled(next))
   }
 
   return (
     <div>
-      {BUILTIN_TOOLS.map((t) => (
-        <div key={t.name} className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-50">
-          <div className="min-w-0 flex-1">
-            <div className="font-mono text-xs text-slate-700">{t.name}</div>
-            <div className="truncate text-[11px] text-slate-400">{t.desc}</div>
+      {BUILTIN_TOOLS.map((t) => {
+        const lastOn = checked.has(t.name) && checked.size === 1
+        return (
+          <div key={t.name} className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-50">
+            <div className="min-w-0 flex-1">
+              <div className="font-mono text-xs text-slate-700">{t.name}</div>
+              <div className="truncate text-[11px] text-slate-400">{t.desc}</div>
+            </div>
+            <Switch
+              checked={checked.has(t.name)}
+              onChange={() => toggle(t.name)}
+              label={t.name}
+              disabled={lastOn}
+              title={lastOn ? "至少保留一个工具" : undefined}
+            />
           </div>
-          <Switch checked={checked.has(t.name)} onChange={() => toggle(t.name)} label={t.name} />
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

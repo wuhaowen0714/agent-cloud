@@ -47,10 +47,12 @@ describe("ToolsMenu", () => {
     await waitFor(() => expect(patch).toHaveBeenCalledWith("a1", { enabled_tools: [] }))
   })
 
-  it("关掉仅剩的一个工具被忽略(空集会回退成「全部」语义,危险)", () => {
+  it("最后一个启用的工具:开关禁用(空集会回退成「全部」语义,危险)", () => {
     const patch = vi.spyOn(api, "patchAgent").mockResolvedValue(agent([]))
     render(wrap(<ToolsMenu agent={agent(["bash"])} />))
-    fireEvent.click(screen.getByRole("switch", { name: "bash" }))
+    const sw = screen.getByRole("switch", { name: "bash" })
+    expect(sw).toBeDisabled()
+    fireEvent.click(sw)
     expect(patch).not.toHaveBeenCalled()
   })
 })

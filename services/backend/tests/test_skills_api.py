@@ -256,3 +256,23 @@ async def test_new_agent_gets_builtins_enabled(client):
     agent_id = r.json()["id"]
     enabled = (await client.get(f"/agent-configs/{agent_id}/skills")).json()
     assert [s["name"] for s in enabled] == ["skill-creator"]
+
+
+async def test_concurrent_skill_lists_all_succeed(client):
+    # 并发 ensure 回归钉(审查 M1):两个并发事务都过「已装」预查,输家 flush 撞
+    # uq(user_id,name)——SAVEPOINT 内接 IntegrityError 视为达成,所有请求必须 200。
+    import asyncio
+
+    await _auth(client)
+    rs = await asyncio.gather(*[client.get("/skills") for _ in range(8)])
+    assert [r.status_code for r in rs] == [200] * 8
+    assert all([s["name"] for s in r.json()] == ["skill-creator"] for r in rs)
+
+
+async def test_builtin_can_be_reinstalled_after_delete(client):
+    # POST /skills/install 的 201 路径仍有效(端点保留;前端已不再调用)
+    await _auth(client)
+    sid = (await client.get("/skills")).json()[0]["id"]
+    assert (await client.delete(f"/skills/{sid}")).status_code == 204
+    r = await client.post("/skills/install", json={"name": "skill-creator"})
+    assert r.status_code == 201

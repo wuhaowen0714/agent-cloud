@@ -83,7 +83,7 @@ async def register(
     # 内置技能开箱即用:补装 + 对种子 main 默认启用(与 user 同事务,同生共死)
     skill_repo = SkillRepository(db)
     await ensure_builtin_skills(
-        user_id=user.id, registry_root=registry_root, repo=skill_repo, store=store
+        session=db, user_id=user.id, registry_root=registry_root, repo=skill_repo, store=store
     )
     await enable_builtin_skills(
         agent_config_id=agent.id, user_id=user.id,

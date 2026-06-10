@@ -57,7 +57,7 @@ async def create_agent_config(
     # 无内置技能的 agent),再默认启用全部 registry 来源技能。
     skill_repo = SkillRepository(session)
     await ensure_builtin_skills(
-        user_id=user.id, registry_root=registry_root, repo=skill_repo, store=store
+        session=session, user_id=user.id, registry_root=registry_root, repo=skill_repo, store=store
     )
     await enable_builtin_skills(
         agent_config_id=agent.id, user_id=user.id,

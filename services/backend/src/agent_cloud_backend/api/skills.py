@@ -60,7 +60,7 @@ async def list_skills(
     # UI 加载即收敛(开箱即用),免做迁移;无缺失时零写入。
     repo = SkillRepository(session)
     if await ensure_builtin_skills(
-        user_id=user.id, registry_root=registry_root, repo=repo, store=store
+        session=session, user_id=user.id, registry_root=registry_root, repo=repo, store=store
     ):
         await session.commit()
     return await repo.list_by_user(user.id)

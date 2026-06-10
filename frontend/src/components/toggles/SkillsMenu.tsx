@@ -14,10 +14,11 @@ export function SkillsMenu({ agentId }: { agentId: string }) {
     queryKey: ["skills", userId],
     queryFn: () => api.listSkills(),
   })
-  const { data: enabled = [] } = useQuery({
+  const enabledQ = useQuery({
     queryKey: ["agentSkills", agentId],
     queryFn: () => api.getAgentSkills(agentId),
   })
+  const enabled = enabledQ.data ?? []
   const ids = new Set(enabled.map((s) => s.id))
 
   const put = useMutation({
@@ -44,6 +45,11 @@ export function SkillsMenu({ agentId }: { agentId: string }) {
 
   if (pool.length === 0) {
     return <div className="px-2.5 py-3 text-center text-xs text-slate-400">技能池为空</div>
+  }
+  // 启用集没回来前不渲染开关:此时全显「关」是假状态,一次点击的 PUT 全量替换
+  // 会把真实启用集静默清空(审查 M2)
+  if (enabledQ.isPending) {
+    return <div className="px-2.5 py-3 text-center text-xs text-slate-400">加载中…</div>
   }
   return (
     <div>
