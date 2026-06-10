@@ -1,26 +1,23 @@
 # Agent Cloud Backend
 
+FastAPI 后端:**唯一**访问 Postgres 的服务。负责鉴权与多租户、会话/回合编排(SSE 流式、会话锁、压缩、自动重试)、文件与技能、BYO-Key 凭据、智能体记忆,并经 provisioner 管理沙箱生命周期。
+
+架构、特性与配置见仓库根 [README](../../README.md);设计文档索引见 [docs/README.md](../../docs/README.md)。API 文档:服务起来后访问 `http://localhost:8000/docs`(FastAPI 自带)。
+
 ## 开发
 
 ```bash
-# 起本地 Postgres
-docker run -d --name agent-cloud-pg -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=agent_cloud -p 5432:5432 postgres:16
-
 cd services/backend
-uv run alembic upgrade head            # 迁移
-uv run uvicorn agent_cloud_backend.main:app --reload   # 起服务
-uv run pytest -v                       # 测试(需 Docker:testcontainers)
+
+# 测试(testcontainers 起临时 Postgres;本环境需禁用 Ryuk)
+TESTCONTAINERS_RYUK_DISABLED=true uv run pytest -m "not docker"
+
+# 数据库迁移(对运行中的库)
+AGENT_CLOUD_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/agent_cloud \
+  uv run alembic upgrade head
+
+# 单独起服务(平时建议直接用仓库根的 bash scripts/dev_up.sh 一键起全栈)
+uv run uvicorn agent_cloud_backend.main:app --reload
 ```
 
-## 回合编排(Plan 2d)
-- `POST /sessions/{id}/turn` `{ "content": "..." }` → 加会话锁 → 组装上下文 → gRPC 调 worker `RunTurn` → 落库新消息 → 返回 `{messages, stop_reason, usage}`。
-- 配置:`AGENT_CLOUD_WORKER_ENDPOINT`、`AGENT_CLOUD_SANDBOX_ENDPOINT`(默认 localhost:50052 / 50051)。
-- 当前为单一配置沙箱端点;每用户 sandbox 生命周期/路由见 Plan 4。流式见 Plan 3。
-- 流式:`POST /sessions/{id}/turn/stream` `{ "content": "..." }` → `text/event-stream`(SSE)。逐事件下发 `text_delta`/`thinking_delta`/`tool_call_start`/`tool_result`,以 `turn_done`(含 `message_ids`/`usage`/`stop_reason`)收尾;错误以 `error` 事件 in-band 下发。后端代理 worker 的 `RunTurnStream`,`turn_done` 时落库新消息并释放锁。
-
-## Sandbox 管理(Plan 4a)
-- `SandboxManager.get_endpoint_for_user(user_id)` — 查 `SandboxRegistry`,命中则复用,否则经 `SandboxProvisioner` 起新 sandbox 并登记。`reap_idle()` 按 TTL 回收空闲 sandbox。
-- `SandboxProvisioner` 是接口;`InProcessProvisioner`(每用户持久工作目录的进程内实现)仅单副本/开发用,生产用 Docker/k8s impl。
-- 后端 turn 端点按用户路由(用 manager 取 endpoint)见 Plan 4b。
-- turn 端点(一元 + SSE)现按用户路由:`sandbox_endpoint = await SandboxManager.get_endpoint_for_user(user_id)`;不同用户进各自 sandbox(各自持久工作目录)。配置 `AGENT_CLOUD_SANDBOX_BASE_ROOT`(InProcessProvisioner 根目录)。死端点存活检测/健康检查为后续。
+代码布局:`api/`(路由)· `repositories/`(数据访问)· `models/`(ORM)· `schemas/`(Pydantic)· `turn/`(回合编排:runner / 压缩 / 记忆提炼 / 重试)· `sandbox/`(provisioner)· `skills/` · `files/` · `auth/`。
