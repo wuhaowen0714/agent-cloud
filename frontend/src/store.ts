@@ -10,6 +10,7 @@ export type SettingsTab = "agent" | "skills" | "keys" | "memory"
 export interface LiveTurn {
   userText: string
   sessionId: string
+  startedAt: string // 发送时刻(ISO);用户气泡下的时间(历史接管前的乐观显示)
   blocks: Block[]
   status: "streaming" | "done" | "error"
   errorMessage?: string
@@ -37,7 +38,7 @@ interface AppState {
   closeSettings: () => void
 }
 
-const EMPTY: LiveTurn = { userText: "", sessionId: "", blocks: [], status: "streaming" }
+const EMPTY: LiveTurn = { userText: "", sessionId: "", startedAt: "", blocks: [], status: "streaming" }
 
 export const useStore = create<AppState>((set, get) => ({
   user: null, // 由 bootstrap(refresh→me)决定,不再从 localStorage 假造
@@ -89,7 +90,8 @@ export const useStore = create<AppState>((set, get) => ({
     else localStorage.removeItem("ac.sessionId")
     set({ sessionId: id, live: null })
   },
-  startLive: (userText, sessionId) => set({ live: { ...EMPTY, userText, sessionId, blocks: [] } }),
+  startLive: (userText, sessionId) =>
+    set({ live: { ...EMPTY, userText, sessionId, blocks: [], startedAt: new Date().toISOString() } }),
   setLive: (fn) => set((s) => (s.live ? { live: fn(s.live) } : {})),
   clearLive: () => set({ live: null }),
   toggleFileDrawer: () => set((s) => ({ fileDrawerOpen: !s.fileDrawerOpen })),
