@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { appendDelta, appendToolCall, attachToolResult, messagesToTurns, upsertToolProgress, type Block } from "./blocks"
+import { appendDelta, appendToolCall, attachToolResult, dropPendingTools, messagesToTurns, upsertToolProgress, type Block } from "./blocks"
 import type { Message } from "./types"
 
 describe("appendDelta", () => {
@@ -127,5 +127,17 @@ describe("upsertToolProgress / pending 升级", () => {
     b = appendDelta(b, "text", "t")
     b = appendToolCall(b, { id: "c9", name: "bash", arguments: {} })
     expect(b.map((x) => x.kind)).toEqual(["text", "tool"])
+  })
+})
+
+describe("dropPendingTools(error/cancel 终态)", () => {
+  it("只剥 pending 进度卡,保留真卡与半截文本", () => {
+    let b: Block[] = []
+    b = appendDelta(b, "text", "half answer")
+    b = appendToolCall(b, { id: "c0", name: "bash", arguments: { command: "ls" } })
+    b = upsertToolProgress(b, { call_id: "c1", tool: "write_file", args_chars: 9, lines: 1, path: "" })
+    const out = dropPendingTools(b)
+    expect(out.map((x) => x.kind)).toEqual(["text", "tool"])
+    expect((out[1] as Extract<Block, { kind: "tool" }>).id).toBe("c0")
   })
 })

@@ -47,6 +47,12 @@ export function upsertToolProgress(
   return [...blocks.slice(0, i), { ...b, progress }, ...blocks.slice(i + 1)]
 }
 
+// 终态(error/cancel):回合流已死,不会再有 tool_call_start 升级 pending 卡——剥掉它们,
+// 避免对已死回合显示"仍在运行"的旋转指示;其余块保留(error 不清半截文本是既有有意行为)。
+export function dropPendingTools(blocks: Block[]): Block[] {
+  return blocks.filter((b) => !(b.kind === "tool" && b.progress))
+}
+
 // 流式:工具结果按 call_id 配对回填到对应的工具块(位置不变)。
 export function attachToolResult(blocks: Block[], callId: string, result: ToolResult): Block[] {
   return blocks.map((b) => (b.kind === "tool" && b.call.id === callId ? { ...b, result } : b))
