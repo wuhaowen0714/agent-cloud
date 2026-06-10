@@ -10,3 +10,8 @@ export const setQueryClient = (qc: QueryClient) => {
 export const clearQueryCache = () => {
   _qc?.clear()
 }
+
+// 首回合结束后会话标题在服务端异步生成,常规 invalidate 会早于它——延迟二刷兜接。
+export function refreshSessionsLater(qc: QueryClient, delayMs = 3000) {
+  setTimeout(() => void qc.invalidateQueries({ queryKey: ["sessions"] }), delayMs)
+}
