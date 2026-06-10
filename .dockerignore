@@ -1,0 +1,14 @@
+# 构建上下文瘦身(backend/worker/frontend 镜像都从仓库根构建)
+.git
+.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/node_modules
+frontend/dist
+docs
+.superpowers
+.claude
+# 机密绝不进镜像(运行期经 compose env_file 注入)
+.env
+*.env
