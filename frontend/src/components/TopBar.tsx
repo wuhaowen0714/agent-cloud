@@ -1,15 +1,28 @@
 import { useQuery } from "@tanstack/react-query"
-import { Folder } from "lucide-react"
+import { Folder, Sparkles, Wrench } from "lucide-react"
+import { useRef, useState } from "react"
 import { api } from "../api/client"
 import { useStore } from "../store"
+import { SkillsMenu } from "./toggles/SkillsMenu"
+import { ToolsMenu } from "./toggles/ToolsMenu"
+import { TogglePopover } from "./toggles/TogglePopover"
 
-// 主区顶栏(仿 Claude Code):左侧 agent/会话 面包屑,最右工作区文件按钮。
+const ICON_BTN =
+  "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition " +
+  "hover:bg-slate-100 hover:text-slate-700 disabled:cursor-default disabled:opacity-40 " +
+  "disabled:hover:bg-transparent disabled:hover:text-slate-400"
+
+// 主区顶栏(仿 Claude Code):左侧 agent/会话 面包屑;右侧 工具/技能 开关入口 + 工作区文件。
 // 认证后常驻——文件抽屉是用户级工作区,与是否选中会话无关,入口要始终可达。
 export function TopBar() {
   const userId = useStore((s) => s.userId)
   const agentId = useStore((s) => s.agentId)
   const sessionId = useStore((s) => s.sessionId)
   const toggleFileDrawer = useStore((s) => s.toggleFileDrawer)
+  // 工具/技能弹层:一次只开一个;无选中 agent 时按钮禁用(开关是 per-agent 的)
+  const [open, setOpen] = useState<"tools" | "skills" | null>(null)
+  const toolsBtn = useRef<HTMLButtonElement>(null)
+  const skillsBtn = useRef<HTMLButtonElement>(null)
 
   const { data: agents = [] } = useQuery({
     queryKey: ["agents", userId],
@@ -34,14 +47,46 @@ export function TopBar() {
         {sessionLabel && <span className="truncate font-medium text-slate-800">{sessionLabel}</span>}
       </div>
       <button
+        ref={toolsBtn}
+        type="button"
+        disabled={!agent}
+        title={agent ? "工具" : "先选择 agent"}
+        aria-label="工具"
+        onClick={() => setOpen(open === "tools" ? null : "tools")}
+        className={ICON_BTN}
+      >
+        <Wrench size={16} />
+      </button>
+      <button
+        ref={skillsBtn}
+        type="button"
+        disabled={!agent}
+        title={agent ? "技能" : "先选择 agent"}
+        aria-label="技能"
+        onClick={() => setOpen(open === "skills" ? null : "skills")}
+        className={ICON_BTN}
+      >
+        <Sparkles size={16} />
+      </button>
+      <button
         type="button"
         title="工作区文件"
         aria-label="工作区文件"
         onClick={toggleFileDrawer}
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+        className={ICON_BTN}
       >
         <Folder size={16} />
       </button>
+      {open === "tools" && agent && (
+        <TogglePopover anchorRef={toolsBtn} title="工具" onClose={() => setOpen(null)}>
+          <ToolsMenu agent={agent} />
+        </TogglePopover>
+      )}
+      {open === "skills" && agent && (
+        <TogglePopover anchorRef={skillsBtn} title="技能" onClose={() => setOpen(null)}>
+          <SkillsMenu agentId={agent.id} />
+        </TogglePopover>
+      )}
     </header>
   )
 }

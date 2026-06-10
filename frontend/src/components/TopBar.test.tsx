@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { api } from "../api/client"
@@ -60,5 +60,22 @@ describe("TopBar", () => {
     render(wrap(<TopBar />))
     fireEvent.click(screen.getByRole("button", { name: "工作区文件" }))
     expect(useStore.getState().fileDrawerOpen).toBe(true)
+  })
+})
+
+describe("TopBar 工具/技能开关入口", () => {
+  it("点「工具」弹出 popover(含 bash 开关);无 agent 时按钮禁用", async () => {
+    render(wrap(<TopBar />))
+    const btn = await screen.findByRole("button", { name: "工具" })
+    await waitFor(() => expect(btn).toBeEnabled()) // agents query 解析后才可点
+    fireEvent.click(btn)
+    expect(await screen.findByRole("switch", { name: "bash" })).toBeInTheDocument()
+  })
+
+  it("点「技能」弹出 popover;agentId 为空时两按钮禁用", async () => {
+    useStore.setState({ agentId: null })
+    render(wrap(<TopBar />))
+    expect(await screen.findByRole("button", { name: "工具" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "技能" })).toBeDisabled()
   })
 })
