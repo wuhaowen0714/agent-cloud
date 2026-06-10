@@ -293,6 +293,7 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                     # 起名不需要全文:截前 2000 字符,长提问不白烧 token
                     messages=[Message(role=Role.USER, text=text[:2000])],
                     tools=[],
+                    max_tokens=64,  # 几个字的产出,不给话痨模型烧输出的空间
                 )
             )
         except Exception:

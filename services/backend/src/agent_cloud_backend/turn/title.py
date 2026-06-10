@@ -7,7 +7,7 @@ import logging
 import uuid
 
 from agent_cloud.v1 import worker_pb2
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from agent_cloud_backend.config import Settings
 from agent_cloud_backend.db import get_sessionmaker
@@ -33,8 +33,13 @@ def spawn_title_generation(session_id: uuid.UUID, *, settings: Settings) -> None
 async def generate_session_title(session_id: uuid.UUID, *, settings: Settings) -> bool:
     """title 为空时,基于首条 user 消息让 LLM 起名。返回是否写入。
 
-    best-effort:任何失败只记日志、留 null(下一回合自然重试);
-    写前重查 title 仍为空才写——生成期间用户手动改名优先。
+    三段式,事务绝不横跨 RPC(审查 H1:横跨会把池连接钉在 idle-in-transaction
+    整个 LLM 调用时长,测试里曾把下个用例的 DROP TABLE 锁死):
+      1) 短事务读齐(title 空检 / 首条提问 / agent 凭据)→ 关闭;
+      2) 调 worker(带 deadline);
+      3) 条件 UPDATE `WHERE title IS NULL` 单语句写——生成期间用户手动改名 →
+         rowcount=0,自动放弃,无覆盖窗口。
+    best-effort:任何失败只记日志、留 null(下一回合自然重试)。
     """
     try:
         async with get_sessionmaker()() as db:
@@ -61,26 +66,28 @@ async def generate_session_title(session_id: uuid.UUID, *, settings: Settings) -
             api_key, base_url = await resolve_agent_key(
                 db, agent.key_ref or "", s.user_id, settings
             )
-            title = await generate_title_via_worker(
-                settings.worker_endpoint,
-                worker_pb2.GenerateTitleRequest(
-                    agent=worker_pb2.Agent(
-                        model=agent.model,
-                        provider=agent.provider,
-                        api_key=api_key,
-                        base_url=base_url,
-                    ),
-                    user_message=text,
+            model, provider = agent.model, agent.provider
+
+        title = await generate_title_via_worker(
+            settings.worker_endpoint,
+            worker_pb2.GenerateTitleRequest(
+                agent=worker_pb2.Agent(
+                    model=model, provider=provider, api_key=api_key, base_url=base_url
                 ),
+                user_message=text,
+            ),
+        )
+        if not title:
+            return False  # LLM 清不出标题:放弃,不写空串
+
+        async with get_sessionmaker()() as db:
+            res = await db.execute(
+                update(Session)
+                .where(Session.id == session_id, Session.title.is_(None))
+                .values(title=title)
             )
-            if not title:
-                return False  # LLM 清不出标题:放弃,不写空串
-            await db.refresh(s)  # 写前重查:生成期间被手动改名 → 不覆盖
-            if s.title is not None:
-                return False
-            s.title = title
             await db.commit()
-            return True
+            return bool(res.rowcount)
     except Exception:
         logger.warning("session title generation failed for %s", session_id, exc_info=True)
         return False

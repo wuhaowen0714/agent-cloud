@@ -678,3 +678,21 @@ async def test_generate_title_provider_factory_failure_failed_precondition():
     finally:
         await worker_server.stop(None)
     assert ei.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+
+
+async def test_generate_title_caps_max_tokens():
+    # 起标题是几个字的产出:请求级 max_tokens=64 收紧,不给话痨模型烧输出(审查 M3)
+    provider = _CapturingProvider(_final("短名"))
+    worker_server, wport = await create_worker_server(provider_factory=lambda *a: provider, port=0)
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            await stub.GenerateTitle(
+                worker_pb2.GenerateTitleRequest(
+                    agent=worker_pb2.Agent(model="m", provider="fake"),
+                    user_message="问题",
+                )
+            )
+    finally:
+        await worker_server.stop(None)
+    assert provider.last_request.max_tokens == 64

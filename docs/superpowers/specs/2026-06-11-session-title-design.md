@@ -15,19 +15,22 @@
   - `GenerateTitleRequest { Agent agent = 1; string user_message = 2; }`
   - `GenerateTitleResponse { string title = 1; int64 input_tokens = 2; int64 output_tokens = 3; }`
   - service 加 `rpc GenerateTitle(...)`;`scripts/gen_protos.sh` 重生成。不涉 TurnEvent/codec。
-- worker 实现(`server.py` + 新 `title.py`):用 agent 凭据构造 provider(同 Summarize 工厂路径),非流式 `complete()`、`max_tokens=64`;system prompt 要求「为对话起一个简短标题,≤16 字,直接输出标题本身,不要引号/标点收尾/解释」,user 内容 = 首条提问(worker 侧截到前 2000 字符,起名不需要全文)。
+- worker 实现(`server.py` + 新 `title.py`):用 agent 凭据构造 provider(同 Summarize 工厂路径),非流式 `complete()`、**请求级 `max_tokens=64`**(`CompletionRequest` 新增可选 `max_tokens` 覆盖,None = provider 配置值);system prompt 要求「为对话起一个简短标题,≤16 字,直接输出标题本身,不要引号/标点收尾/解释」,user 内容 = 首条提问(worker 侧截到前 2000 字符,起名不需要全文)。
 - 清洗(worker 侧,`_clean_title`):去首尾空白与成对引号(`"" '' “” 「」`)、换行/连续空白压成单空格、超 50 字符截 47 + `…`;清洗后为空 → 返回空串(由 backend 决定放弃)。
 
 ### Backend:回合后异步钩子(同 memory_extract 模式)
 
 - 触发(`turn/runner.py`):回合**成功收尾**(persist 完成)后,若 `session.title is None` → `asyncio.create_task(generate_session_title(session_id, settings=...))`,fire-and-forget,不阻塞回合返回、不挂回合事务。条件不限首回合:失败留 null,下一回合自然重试;生成内容始终基于首条 user 消息。
-- 钩子(新 `turn/title.py`):开独立 DB 会话(`get_sessionmaker`):
-  1. 载 session;`title is not None` → 直接返回(零 LLM);
-  2. 取该会话 seq 最小的 user 消息;无 → 返回;
-  3. `resolve_agent_key` 解析 BYO-Key(同 memory_extract;key 仅经 worker);
-  4. `generate_title_via_worker(...)`(`worker_client.py` 新函数,gRPC 错误不抛出钩子外);
-  5. 清洗后为空 → 放弃;**写前重查 `title is None` 才写**(防生成期间用户手动改名被覆盖),commit。
-  - 全程异常 log warning,绝不影响已完成的回合。
+- 钩子(新 `turn/title.py`)**三段式,事务绝不横跨 RPC**(审查 H1:横跨会把池连接钉在
+  idle-in-transaction 整个 LLM 时长,曾把测试套件的 DROP TABLE 锁死):
+  1. **短事务读齐**:载 session(`title is not None` → 直接返回,零 LLM)、seq 最小的 user
+     消息、agent 凭据(`resolve_agent_key`,key 仅经 worker)→ 关闭会话;
+  2. **RPC**:`generate_title_via_worker(...)`(**deadline 30s**;gRPC 错误不抛出钩子外);
+  3. **条件 UPDATE**:`SET title=… WHERE id=… AND title IS NULL` 单语句写,rowcount=0 即
+     放弃——改名覆盖窗口彻底关死(替代"写前重查"方案)。
+  - 清洗后为空 → 放弃;全程异常 log warning,绝不影响已完成的回合。
+  - 测试隔离:conftest autouse 把两处接线点的 spawn 打成 no-op(否则未 override settings 的
+    测试会打真 worker 发真 LLM 请求);真链路用例标 `@pytest.mark.real_title`。
 - 标题长度天然 ≤50 < PATCH 校验上限 200,无冲突。
 
 ### 前端(一行级)

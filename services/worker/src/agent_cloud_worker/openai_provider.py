@@ -213,7 +213,8 @@ class OpenAIProvider:
         kwargs: dict = {
             "model": self._model,
             "messages": to_openai_messages(request),
-            self._max_tokens_param: self._max_tokens,
+            # 请求级覆盖优先(小输出任务如起标题收紧到几十 token),默认用配置值
+            self._max_tokens_param: request.max_tokens or self._max_tokens,
         }
         if request.tools:
             kwargs["tools"] = to_openai_tools(request.tools)

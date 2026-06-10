@@ -3,6 +3,7 @@
 import asyncio
 import uuid
 
+import pytest
 import pytest_asyncio
 from agent_cloud_backend.api.deps import get_session
 from agent_cloud_backend.config import Settings, get_settings
@@ -108,6 +109,7 @@ async def _poll_title(engine, sid: str, *, timeout: float = 5.0) -> str | None:
     return None
 
 
+@pytest.mark.real_title
 async def test_unary_turn_fills_title_async(title_stack):
     client, engine = title_stack
     await _register(client)
@@ -118,6 +120,7 @@ async def test_unary_turn_fills_title_async(title_stack):
     assert await _poll_title(engine, sid) == "快排实现"
 
 
+@pytest.mark.real_title
 async def test_renamed_session_untouched(title_stack):
     client, engine = title_stack
     await _register(client)
@@ -142,6 +145,7 @@ async def stream_title_stack(engine, tmp_path, monkeypatch):
     await provisioner.stop_all()
 
 
+@pytest.mark.real_title
 async def test_stream_turn_fills_title_async(stream_title_stack):
     client, engine = stream_title_stack
     await _register(client)

@@ -68,5 +68,6 @@ async def generate_title_via_worker(
         ("grpc.max_receive_message_length", MAX_GRPC_MESSAGE_BYTES),
     ]
     async with grpc.aio.insecure_channel(worker_endpoint, options=options) as channel:
-        resp = await worker_pb2_grpc.WorkerStub(channel).GenerateTitle(request)
+        # deadline:标题是 best-effort 锦上添花,绝不允许无界等待钉死调用方资源
+        resp = await worker_pb2_grpc.WorkerStub(channel).GenerateTitle(request, timeout=30.0)
         return resp.title
