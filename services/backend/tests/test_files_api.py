@@ -1,3 +1,4 @@
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -239,6 +240,47 @@ def test_walk_limit_truncates(tmp_path):
     for i in range(5):
         (ws / f"f{i}.txt").write_text("x")
     assert store.walk(UID, limit=3) == ["f0.txt", "f1.txt", "f2.txt"]
+
+
+def test_index_prunes_dot_dirs_and_dep_caches(client, tmp_path):
+    # 沙箱把 HOME/pip/npm 缓存路由进工作区(.home 等),点目录按字节序排最前——
+    # 不剪枝的话一次 pip install 的数千缓存文件就把 limit 配额全部吃光(审查 H1)。
+    ws = tmp_path / UID / "workspace"
+    (ws / ".home" / ".cache" / "pip").mkdir(parents=True)
+    (ws / ".home" / ".cache" / "pip" / "junk.bin").write_text("x")
+    (ws / ".git").mkdir()
+    (ws / ".git" / "HEAD").write_text("ref")
+    (ws / "node_modules" / "pkg").mkdir(parents=True)
+    (ws / "node_modules" / "pkg" / "index.js").write_text("x")
+    (ws / "src" / "__pycache__").mkdir(parents=True)
+    (ws / "src" / "__pycache__" / "app.cpython-312.pyc").write_text("x")
+    (ws / "src" / "app.py").write_text("x")
+    (ws / ".env.example").write_text("x")  # 顶层点【文件】保留,可被 @ 引用
+    assert client.get("/files/index").json() == [".env.example", "src/app.py"]
+
+
+def test_index_does_not_follow_dir_symlinks(client, tmp_path):
+    # 钉死「目录符号链接不下钻」:自环不死循环,外指目录不泄漏(审查 Nit,防回归)
+    ws = tmp_path / UID / "workspace"
+    ws.mkdir(parents=True)
+    (ws / "real.txt").write_text("x")
+    (ws / "loop").symlink_to(ws)  # 自环
+    outdir = tmp_path / "outdir"
+    outdir.mkdir()
+    (outdir / "secret.txt").write_text("s")
+    (ws / "out").symlink_to(outdir)  # 外指目录
+    assert client.get("/files/index").json() == ["real.txt"]
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="非 UTF-8 文件名仅 Linux(CI)可造")
+def test_index_skips_undecodable_names(client, tmp_path):
+    # Linux 文件名是任意字节:surrogateescape 名进 JSON 渲染会 UnicodeEncodeError →
+    # 整个 /files/index 永久 500(审查 M3)。这类文件纯文本 @ 也引用不了,跳过自洽。
+    ws = tmp_path / UID / "workspace"
+    ws.mkdir(parents=True)
+    (ws / "good.txt").write_text("x")
+    (ws / "bad\udcff.txt").write_text("x")  # fsencode 后是磁盘上的非 UTF-8 字节
+    assert client.get("/files/index").json() == ["good.txt"]
 
 
 def test_sanitize_rel_upload_path_edge_cases():

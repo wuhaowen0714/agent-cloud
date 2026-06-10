@@ -269,6 +269,38 @@ describe("@ 文件引用", () => {
     expect(onSend).not.toHaveBeenCalled()
     expect(box()).toHaveValue("@")
   })
+
+  it("发送后 Esc 豁免重置:新消息开头的 @ 正常弹层(审查 M1)", async () => {
+    const { onSend } = setup()
+    type("@a")
+    await screen.findByRole("listbox")
+    fireEvent.keyDown(box(), { key: "Escape" }) // 豁免 start=0
+    fireEvent.keyDown(box(), { key: "Enter" }) // 直通发送 "@a"
+    expect(onSend).toHaveBeenCalledWith("@a")
+    type("@") // 新消息开头同样 start=0,不应被旧豁免压住
+    expect(await screen.findByRole("listbox")).toBeInTheDocument()
+  })
+
+  it("索引加载中:显示占位,Enter 不直通发送(审查 L1)", async () => {
+    const { onSend } = setup()
+    let resolve!: (v: string[]) => void
+    vi.spyOn(api, "indexFiles").mockImplementation(
+      () => new Promise<string[]>((r) => (resolve = r)),
+    )
+    type("@app")
+    expect(await screen.findByText("加载文件索引…")).toBeInTheDocument()
+    fireEvent.keyDown(box(), { key: "Enter" })
+    expect(onSend).not.toHaveBeenCalled()
+    resolve(FILE_INDEX)
+    expect(await screen.findByRole("option", { name: /app\.py/ })).toBeInTheDocument()
+  })
+
+  it("索引加载失败:显示失败提示而非静默(审查 L1)", async () => {
+    setup()
+    vi.spyOn(api, "indexFiles").mockRejectedValue(new Error("net"))
+    type("@")
+    expect(await screen.findByText("文件索引加载失败", undefined, { timeout: 4000 })).toBeInTheDocument()
+  })
 })
 
 describe("模型 chip", () => {

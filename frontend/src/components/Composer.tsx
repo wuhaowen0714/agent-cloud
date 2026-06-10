@@ -52,12 +52,18 @@ export function Composer({
   const currentModel = agents.find((a) => a.id === agentId)?.model
 
   // @ 文件引用:光标所在 @ 词活跃才拉索引(staleTime 内打字不抖动,新文件最迟 30s 可见)。
+  // retry 1:浮层场景要快速反馈;失败提示后,下个 @ 词重新激活 enabled 时会再拉。
   const atToken = atTokenAt(text, caret)
-  const { data: fileIndex = [] } = useQuery({
+  const {
+    data: fileIndex = [],
+    isLoading: indexLoading,
+    isError: indexError,
+  } = useQuery({
     queryKey: ["fileIndex", userId],
     queryFn: () => api.indexFiles(),
     enabled: !!userId && !!atToken,
     staleTime: 30_000,
+    retry: 1,
   })
 
   // 选中:把 [start, caret) 换成 "@路径 ",光标落在尾空格后(焦点保持)。
@@ -80,12 +86,19 @@ export function Composer({
   const entries: Entry[] = []
   if (atToken && !disabled) {
     if (atDismissed !== atToken.start) {
-      for (const p of filterPaths(fileIndex, atToken.query)) {
-        entries.push({
-          title: p.split("/").pop() ?? p,
-          hint: p,
-          exec: () => insertPath(p),
-        })
+      if (indexLoading) {
+        // 占位条目(无操作):加载中 Enter 不该把半截 "@app" 直通发出去(审查 L1)
+        entries.push({ title: "加载文件索引…", exec: () => {} })
+      } else if (indexError) {
+        entries.push({ title: "文件索引加载失败", exec: () => {} })
+      } else {
+        for (const p of filterPaths(fileIndex, atToken.query)) {
+          entries.push({
+            title: p.split("/").pop() ?? p,
+            hint: p,
+            exec: () => insertPath(p),
+          })
+        }
       }
     }
   } else if (!dismissed && !disabled) {
@@ -156,6 +169,11 @@ export function Composer({
     if (!t || disabled) return
     onSend(t)
     setText("")
+    // setText 不走 onChange:caret/Esc 豁免须随文本一起归零,否则豁免跨消息泄漏——
+    // 下一条消息开头的 @(同样 start=0)会被旧豁免压住、浮层永不弹(审查 M1)。
+    setCaret(0)
+    setSel(0)
+    setAtDismissed(null)
   }
 
   return (
