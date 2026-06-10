@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from agent_cloud_common import CompletionRequest, CompletionResult, Message, Usage
@@ -34,6 +34,12 @@ class ProviderThinkingDelta:
 class ProviderCompleted:
     message: Message
     usage: Usage
+    # finish_reason == "length":本次输出被单次 token 上限掐断(文本截断 → loop 上抛
+    # stop_reason="length";若同时有残缺工具调用,见 truncated_call_ids)。
+    length_truncated: bool = False
+    # 参数 JSON 解析失败(几乎总是被 length 掐断)的 call id:arguments 已降级为 {},
+    # loop 对这些 call 跳过执行、回灌修复性错误,让模型在回合内自行重试小块写入。
+    truncated_call_ids: set[str] = field(default_factory=set)
 
 
 ProviderEvent = ProviderTextDelta | ProviderThinkingDelta | ProviderCompleted

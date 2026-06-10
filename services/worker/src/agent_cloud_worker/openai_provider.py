@@ -109,8 +109,17 @@ def to_openai_messages(request: CompletionRequest) -> list[dict]:
     return out
 
 
+def _loads_or_empty(raw: str) -> dict:
+    """工具参数解析:残缺/非法 JSON(典型:被 finish_reason=length 掐断)降级为 {},
+    绝不让一次截断把整个请求炸成 INTERNAL(那会触发后端对确定性失败的重试风暴)。"""
+    try:
+        return json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return {}
+
+
 def message_from_openai(om) -> Message:
-    """OpenAI 响应 message → 领域 Message(assistant)。tool_call 参数始终 json.loads。
+    """OpenAI 响应 message → 领域 Message(assistant)。
 
     捕获 reasoning_content(思考模式端点),以便回合内后续请求把它回传(DeepSeek 等要求)。
     """
@@ -118,7 +127,7 @@ def message_from_openai(om) -> Message:
         ToolCall(
             id=tc.id,
             name=tc.function.name,
-            arguments=json.loads(tc.function.arguments or "{}"),
+            arguments=_loads_or_empty(tc.function.arguments),
         )
         for tc in (om.tool_calls or [])
     ]
@@ -185,6 +194,7 @@ class OpenAIProvider:
         # index -> {"id","name","args"};按 index 累积分片的 tool_call 参数
         tool_acc: dict[int, dict] = {}
         usage = Usage()
+        finish: str | None = None
 
         async for chunk in stream:
             if chunk.usage is not None:
@@ -194,6 +204,8 @@ class OpenAIProvider:
                 )
             if not chunk.choices:
                 continue
+            if chunk.choices[0].finish_reason:
+                finish = chunk.choices[0].finish_reason
             delta = chunk.choices[0].delta
             reasoning = getattr(delta, "reasoning_content", None)
             if reasoning:
@@ -211,14 +223,28 @@ class OpenAIProvider:
                 if tcd.function and tcd.function.arguments:
                     slot["args"] += tcd.function.arguments
 
-        tool_calls = [
-            ToolCall(id=s["id"], name=s["name"], arguments=json.loads(s["args"] or "{}"))
-            for _, s in sorted(tool_acc.items())
-        ]
+        # 组装 tool_calls:参数 JSON 解析失败(典型:被 length 掐断)的 call 降级为
+        # arguments={} 并记入 truncated_call_ids,由 loop 跳过执行、回灌修复性错误;
+        # id 分片可能还没到就被掐断,合成稳定 id 以保证 tool 结果能按 call_id 应答。
+        tool_calls: list[ToolCall] = []
+        truncated_call_ids: set[str] = set()
+        for index, s in sorted(tool_acc.items()):
+            call_id = s["id"] or f"truncated-{index}"
+            try:
+                arguments = json.loads(s["args"] or "{}")
+            except json.JSONDecodeError:
+                arguments = {}
+                truncated_call_ids.add(call_id)
+            tool_calls.append(ToolCall(id=call_id, name=s["name"], arguments=arguments))
         message = Message(
             role=Role.ASSISTANT,
             text="".join(text_parts),
             tool_calls=tool_calls,
             reasoning="".join(reasoning_parts),
         )
-        yield ProviderCompleted(message=message, usage=usage)
+        yield ProviderCompleted(
+            message=message,
+            usage=usage,
+            length_truncated=finish == "length",
+            truncated_call_ids=truncated_call_ids,
+        )

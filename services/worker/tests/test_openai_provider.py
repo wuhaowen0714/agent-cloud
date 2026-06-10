@@ -111,9 +111,11 @@ def _stream_client(chunks, captured=None):
     return SimpleNamespace(chat=SimpleNamespace(completions=_Comp()))
 
 
-def _delta(content=None, tool_calls=None, reasoning=None):
+def _delta(content=None, tool_calls=None, reasoning=None, finish_reason=None):
     d = SimpleNamespace(content=content, tool_calls=tool_calls, reasoning_content=reasoning)
-    return SimpleNamespace(choices=[SimpleNamespace(delta=d, finish_reason=None)], usage=None)
+    return SimpleNamespace(
+        choices=[SimpleNamespace(delta=d, finish_reason=finish_reason)], usage=None
+    )
 
 
 def _usage_chunk(pt, ct):
@@ -306,6 +308,66 @@ async def test_stream_maps_context_overflow_to_context_window_exceeded():
     with pytest.raises(ContextWindowExceeded):
         async for _ in provider.stream(_req()):
             pass
+
+
+async def test_stream_marks_length_truncation():
+    chunks = [_delta(content="half answ"), _delta(finish_reason="length"), _usage_chunk(5, 9)]
+    provider = OpenAIProvider(client=_stream_client(chunks), model="m", max_tokens=9)
+    events = [e async for e in provider.stream(_req())]
+    done = events[-1]
+    assert isinstance(done, ProviderCompleted)
+    assert done.length_truncated is True
+    assert done.truncated_call_ids == set()
+
+
+async def test_stream_tolerates_truncated_tool_call_args():
+    # 参数 JSON 被 length 掐断:不抛 JSONDecodeError,降级为 {} 并报告 call id
+    tc = SimpleNamespace(
+        index=0, id="c1", function=SimpleNamespace(name="write_file", arguments='{"path": "a.t')
+    )
+    chunks = [_delta(tool_calls=[tc], finish_reason="length"), _usage_chunk(1, 9)]
+    provider = OpenAIProvider(client=_stream_client(chunks), model="m", max_tokens=9)
+    events = [e async for e in provider.stream(_req())]
+    done = events[-1]
+    assert isinstance(done, ProviderCompleted)
+    assert done.length_truncated is True
+    assert done.truncated_call_ids == {"c1"}
+    call = done.message.tool_calls[0]
+    assert call.id == "c1" and call.name == "write_file" and call.arguments == {}
+
+
+async def test_stream_synthesizes_id_for_truncated_call_without_id():
+    # 截断发生在 id 分片到达之前:合成稳定 id,保证 tool 结果能应答
+    tc = SimpleNamespace(index=0, id=None, function=SimpleNamespace(name="bash", arguments='{"co'))
+    chunks = [_delta(tool_calls=[tc]), _usage_chunk(1, 9)]
+    provider = OpenAIProvider(client=_stream_client(chunks), model="m", max_tokens=9)
+    events = [e async for e in provider.stream(_req())]
+    done = events[-1]
+    assert done.message.tool_calls[0].id == "truncated-0"
+    assert done.truncated_call_ids == {"truncated-0"}
+
+
+async def test_complete_tolerates_truncated_tool_call_args():
+    # 一元路径止血:残缺参数不崩(降级 {}),不做回合内修复
+    resp = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=None,
+                    tool_calls=[
+                        SimpleNamespace(
+                            id="c1",
+                            function=SimpleNamespace(name="bash", arguments='{"comm'),
+                        )
+                    ],
+                )
+            )
+        ],
+        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+    )
+    provider = OpenAIProvider(client=_client(resp), model="m", max_tokens=9)
+    result = await provider.complete(_req())
+    assert result.message.tool_calls[0].arguments == {}
 
 
 async def test_stream_accumulates_reasoning_into_message():
