@@ -9,6 +9,7 @@ from agent_cloud_backend.models.sandbox_registry import SandboxRegistry
 from agent_cloud_backend.models.session import Session
 from agent_cloud_backend.models.skill import AgentSkillEnable, Skill
 from agent_cloud_backend.models.user import User
+from agent_cloud_backend.models.user_model import UserModel
 
 __all__ = [
     "Base",
@@ -23,4 +24,5 @@ __all__ = [
     "SandboxRegistry",
     "Skill",
     "AgentSkillEnable",
+    "UserModel",
 ]
