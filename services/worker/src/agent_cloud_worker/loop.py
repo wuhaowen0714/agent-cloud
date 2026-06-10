@@ -10,6 +10,7 @@ from agent_cloud_common import (
     TextDelta,
     ThinkingDelta,
     ToolCallStarted,
+    ToolResult,
     ToolResultEvent,
     TurnDone,
     TurnEvent,
@@ -24,6 +25,15 @@ from agent_cloud_worker.provider import (
     StreamingProvider,
 )
 from agent_cloud_worker.tools import ToolExecutor
+
+# 工具调用参数被单次输出上限(finish_reason=length)掐断时回灌的修复性错误:
+# 不执行残缺参数,让模型在回合内自行用更小的负载重试(如分块写文件)。
+_TRUNCATED_CALL_RESULT = (
+    "[tool-call truncated] The arguments for this call were cut off because the "
+    "response hit the per-request output token limit (finish_reason=length). "
+    "Re-issue the call with a smaller payload — e.g. write the file in smaller "
+    "chunks across multiple calls."
+)
 
 
 @dataclass
@@ -138,8 +148,12 @@ async def run_turn_stream(
         new_messages.append(assistant)
 
         if not assistant.tool_calls:
+            # 文本被单次输出上限掐断 → stop_reason="length",backend 据此给落库消息
+            # 追加截断提示(用户可「继续」);否则正常 end_turn。
             yield TurnDone(
-                new_messages=new_messages, usage=usage, stop_reason="end_turn",
+                new_messages=new_messages,
+                usage=usage,
+                stop_reason="length" if completed.length_truncated else "end_turn",
                 context_tokens=last_input,
             )
             return
@@ -147,7 +161,13 @@ async def run_turn_stream(
         tool_results = []
         for call in assistant.tool_calls:
             yield ToolCallStarted(call_id=call.id, name=call.name, arguments=call.arguments)
-            result = await executor.execute(call)
+            if call.id in completed.truncated_call_ids:
+                # 参数被截断:不执行,回灌修复性错误让模型在回合内重试小块负载
+                result = ToolResult(
+                    call_id=call.id, content=_TRUNCATED_CALL_RESULT, is_error=True
+                )
+            else:
+                result = await executor.execute(call)
             yield ToolResultEvent(
                 call_id=result.call_id, content=result.content, is_error=result.is_error
             )
