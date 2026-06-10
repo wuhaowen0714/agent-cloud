@@ -1,5 +1,6 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Plus } from "lucide-react"
+import { useEffect } from "react"
 import { api } from "../api/client"
 import { useStore } from "../store"
 import { AccountMenu } from "./AccountMenu"
@@ -9,6 +10,8 @@ import { SessionList } from "./SessionList"
 export function Sidebar() {
   const userId = useStore((s) => s.userId)
   const agentId = useStore((s) => s.agentId)
+  const sessionId = useStore((s) => s.sessionId)
+  const setAgent = useStore((s) => s.setAgent)
   const setSession = useStore((s) => s.setSession)
   const qc = useQueryClient()
 
@@ -19,6 +22,27 @@ export function Sidebar() {
       setSession(s.id)
     },
   })
+
+  const { data: agents = [] } = useQuery({
+    queryKey: ["agents", userId],
+    queryFn: () => api.listAgents(),
+    enabled: !!userId,
+  })
+  const { data: sessions = [] } = useQuery({
+    queryKey: ["sessions", userId],
+    queryFn: () => api.listSessions(),
+    enabled: !!userId,
+  })
+  // 自动落位:无选中 agent → 选第一个;选中后无会话 → 选该 agent 最近一条。
+  // 新注册用户(注册播种 main+会话)登录即可直接打字;删除当前选中后的兜底也走这里。
+  useEffect(() => {
+    if (!agentId && agents.length) setAgent(agents[0].id)
+  }, [agentId, agents, setAgent])
+  useEffect(() => {
+    if (!agentId || sessionId) return
+    const mine = sessions.filter((s) => s.agent_config_id === agentId)
+    if (mine.length) setSession(mine[mine.length - 1].id)
+  }, [agentId, sessionId, sessions, setSession])
 
   return (
     <aside className="flex w-72 flex-col gap-3 border-r border-slate-200 bg-white/80 p-3 backdrop-blur-sm">
