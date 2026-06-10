@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { appendDelta, appendToolCall, attachToolResult, messagesToTurns, type Block } from "./blocks"
+import { appendDelta, appendToolCall, attachToolResult, messagesToTurns, upsertToolProgress, type Block } from "./blocks"
 import type { Message } from "./types"
 
 describe("appendDelta", () => {
@@ -86,5 +86,46 @@ describe("messagesToTurns", () => {
 
   it("returns no turns for empty input", () => {
     expect(messagesToTurns([])).toEqual([])
+  })
+})
+
+describe("upsertToolProgress / pending 升级", () => {
+  const prog = (chars: number) => ({
+    call_id: "c1", tool: "write_file", args_chars: chars, lines: 3, path: "a.py",
+  })
+
+  it("首个进度新开 pending 卡,后续原位更新计数", () => {
+    let b: Block[] = []
+    b = upsertToolProgress(b, prog(10))
+    b = upsertToolProgress(b, prog(99))
+    expect(b).toHaveLength(1)
+    const t = b[0] as Extract<Block, { kind: "tool" }>
+    expect(t.progress).toMatchObject({ argsChars: 99, lines: 3, path: "a.py" })
+    expect(t.call.name).toBe("write_file")
+  })
+
+  it("tool_call_start 原位替换 pending 卡(位置与 id 不变,progress 清掉)", () => {
+    let b: Block[] = []
+    b = appendDelta(b, "text", "before")
+    b = upsertToolProgress(b, prog(10))
+    b = appendToolCall(b, { id: "c1", name: "write_file", arguments: { path: "a.py", content: "x" } })
+    expect(b.map((x) => x.kind)).toEqual(["text", "tool"])
+    const t = b[1] as Extract<Block, { kind: "tool" }>
+    expect(t.progress).toBeUndefined()
+    expect(t.call.arguments).toMatchObject({ path: "a.py" })
+  })
+
+  it("真卡之后迟到的进度被忽略(原引用返回)", () => {
+    let b: Block[] = []
+    b = appendToolCall(b, { id: "c1", name: "bash", arguments: { command: "ls" } })
+    const out = upsertToolProgress(b, { call_id: "c1", tool: "bash", args_chars: 5, lines: 1, path: "" })
+    expect(out).toBe(b)
+  })
+
+  it("appendToolCall 无 pending 时仍尾部追加(回归)", () => {
+    let b: Block[] = []
+    b = appendDelta(b, "text", "t")
+    b = appendToolCall(b, { id: "c9", name: "bash", arguments: {} })
+    expect(b.map((x) => x.kind)).toEqual(["text", "tool"])
   })
 })
