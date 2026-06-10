@@ -14,7 +14,7 @@ export function TurnBlocks({ blocks, streaming = false }: { blocks: Block[]; str
         if (b.kind === "text") {
           return <Markdown key={b.id}>{b.text}</Markdown>
         }
-        return <ToolCallCard key={b.id} call={b.call} result={b.result} />
+        return <ToolCallCard key={b.id} call={b.call} result={b.result} progress={b.progress} />
       })}
       {streaming && <span className="ml-0.5 animate-pulse text-brand-600">▍</span>}
     </>

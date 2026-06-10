@@ -19,6 +19,7 @@ export type TurnEvent =
   | { type: "text_delta"; text: string }
   | { type: "thinking_delta"; text: string }
   | { type: "tool_call_start"; call_id: string; tool: string; args: Record<string, unknown> }
+  | { type: "tool_call_progress"; call_id: string; tool: string; args_chars: number; lines: number; path: string }
   | { type: "tool_result"; call_id: string; result: string; is_error: boolean }
   | { type: "turn_done"; usage: { input_tokens: number; output_tokens: number }; message_ids: string[]; stop_reason: string }
   | { type: "error"; message: string; recoverable: boolean }

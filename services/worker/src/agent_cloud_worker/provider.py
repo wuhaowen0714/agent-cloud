@@ -40,6 +40,17 @@ class ProviderThinkingDelta:
 
 
 @dataclass
+class ProviderToolCallProgress:
+    """LLM 正在生成某工具调用的参数(分片累积中,节流发射;不含内容)。"""
+
+    call_id: str
+    name: str
+    args_chars: int
+    lines: int
+    path_hint: str
+
+
+@dataclass
 class ProviderCompleted:
     message: Message
     usage: Usage
@@ -51,7 +62,9 @@ class ProviderCompleted:
     truncated_call_ids: set[str] = field(default_factory=set)
 
 
-ProviderEvent = ProviderTextDelta | ProviderThinkingDelta | ProviderCompleted
+ProviderEvent = (
+    ProviderTextDelta | ProviderThinkingDelta | ProviderToolCallProgress | ProviderCompleted
+)
 
 
 class StreamingProvider(Protocol):

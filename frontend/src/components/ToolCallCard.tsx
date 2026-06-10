@@ -1,4 +1,5 @@
 import { useState } from "react"
+import type { ToolProgress } from "../blocks"
 import type { ToolCall, ToolResult } from "../types"
 
 // 把工具调用浓缩成「主摘要 + 可选细节」:bash→命令、write/read_file→文件名,其余→紧凑 JSON。
@@ -15,10 +16,42 @@ function describe(call: ToolCall): { summary: string; details: string | null } {
   return { summary: keys.length ? JSON.stringify(a) : "", details: keys.length ? JSON.stringify(a, null, 2) : null }
 }
 
-export function ToolCallCard({ call, result }: { call: ToolCall; result?: ToolResult }) {
+function fmtChars(n: number): string {
+  return n < 1000 ? `${n}` : `${(n / 1000).toFixed(1)}k`
+}
+
+export function ToolCallCard({
+  call,
+  result,
+  progress,
+}: { call: ToolCall; result?: ToolResult; progress?: ToolProgress }) {
   const [open, setOpen] = useState(false)
   const { summary, details } = describe(call)
   const error = result?.is_error ?? false
+
+  if (progress) {
+    // 参数生成中(LLM 流式累积):只给轻量进度,不渲染内容。ToolCallStarted 到达后
+    // 上游原位替换为真卡(progress 清空),自然落回下方正常分支。
+    const counter =
+      `已生成 ${fmtChars(progress.argsChars)} 字符` +
+      (progress.lines >= 2 ? ` · 约 ${progress.lines} 行` : "")
+    return (
+      <div className="my-1.5 overflow-hidden rounded-lg border border-l-2 border-slate-200 border-l-brand-200 bg-white text-xs">
+        <div className="flex w-full items-center gap-2 px-2.5 py-1.5">
+          <span className="shrink-0 rounded bg-brand-50 px-1.5 py-0.5 font-mono text-[11px] font-medium text-brand-700 ring-1 ring-brand-100">
+            {call.name}
+          </span>
+          {progress.path && (
+            <span className="min-w-0 truncate font-mono text-slate-600">{progress.path}</span>
+          )}
+          <span className="min-w-0 flex-1 truncate text-slate-400">{counter}</span>
+          <span className="shrink-0" aria-hidden>
+            <span className="block h-3 w-3 animate-spin rounded-full border-[1.5px] border-slate-200 border-t-brand-500" />
+          </span>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="my-1.5 overflow-hidden rounded-lg border border-l-2 border-slate-200 border-l-brand-200 bg-white text-xs">

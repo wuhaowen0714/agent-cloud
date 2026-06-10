@@ -441,3 +441,106 @@ async def test_stream_length_with_empty_trailing_args_marked_truncated():
     done = events[-1]
     assert done.truncated_call_ids == {"c1"}
     assert done.message.tool_calls[0].arguments == {}
+
+
+# ---- 工具调用参数生成进度(节流发射) ----
+from agent_cloud_worker import openai_provider as op_mod  # noqa: E402
+from agent_cloud_worker.provider import ProviderToolCallProgress  # noqa: E402
+
+
+def _tc(index=0, id=None, name=None, arguments=None):
+    return SimpleNamespace(
+        index=index, id=id, function=SimpleNamespace(name=name, arguments=arguments)
+    )
+
+
+def _fake_clock(monkeypatch, times):
+    it = iter(times)
+    monkeypatch.setattr(op_mod, "_monotonic", lambda: next(it))
+
+
+async def test_stream_emits_throttled_tool_progress(monkeypatch):
+    # 三个参数分片,时刻 10.0/10.1/10.5:首片立即发,间隔 0.1s 的不发,0.5s 的发
+    _fake_clock(monkeypatch, [10.0, 10.1, 10.5])
+    frag1 = '{"path": "a.py", "content": "x'
+    chunks = [
+        _delta(tool_calls=[_tc(id="c1", name="write_file", arguments=frag1)]),
+        _delta(tool_calls=[_tc(arguments="yz")]),
+        _delta(tool_calls=[_tc(arguments='123"}')]),
+        _usage_chunk(1, 1),
+    ]
+    provider = OpenAIProvider(client=_stream_client(chunks), model="m", max_tokens=9)
+    events = [e async for e in provider.stream(_req())]
+    prog = [e for e in events if isinstance(e, ProviderToolCallProgress)]
+    assert len(prog) == 2
+    assert prog[0].call_id == "c1" and prog[0].name == "write_file"
+    assert prog[0].path_hint == "a.py"
+    assert prog[0].args_chars == len(frag1)
+    assert prog[1].args_chars == len('{"path": "a.py", "content": "xyz123"}')
+    # 进度事件不影响最终装配
+    done = events[-1]
+    assert isinstance(done, ProviderCompleted)
+    assert done.message.tool_calls[0].arguments == {"path": "a.py", "content": "xyz123"}
+
+
+async def test_stream_progress_waits_for_id(monkeypatch):
+    # id/name 分片未到不发(孤儿进度无法与 ToolCallStarted 配对);到齐才发
+    _fake_clock(monkeypatch, [10.0, 20.0])
+    chunks = [
+        _delta(tool_calls=[_tc(arguments='{"comm')]),
+        _delta(tool_calls=[_tc(id="c1", name="bash", arguments='and": "ls"}')]),
+        _usage_chunk(1, 1),
+    ]
+    provider = OpenAIProvider(client=_stream_client(chunks), model="m", max_tokens=9)
+    events = [e async for e in provider.stream(_req())]
+    prog = [e for e in events if isinstance(e, ProviderToolCallProgress)]
+    assert len(prog) == 1
+    assert prog[0].call_id == "c1" and prog[0].name == "bash"
+
+
+async def test_stream_progress_path_arrives_across_fragments(monkeypatch):
+    # path 值的闭引号晚到:此前 path_hint 为空,到齐后提取并缓存
+    _fake_clock(monkeypatch, [10.0, 20.0, 30.0])
+    chunks = [
+        _delta(tool_calls=[_tc(id="c1", name="write_file", arguments='{"pa')]),
+        _delta(tool_calls=[_tc(arguments='th": "src/m')]),
+        _delta(tool_calls=[_tc(arguments='ain.py", "content": "')]),
+        _usage_chunk(1, 1),
+    ]
+    provider = OpenAIProvider(client=_stream_client(chunks), model="m", max_tokens=9)
+    events = [e async for e in provider.stream(_req())]
+    prog = [e for e in events if isinstance(e, ProviderToolCallProgress)]
+    assert [p.path_hint for p in prog] == ["", "", "src/main.py"]
+
+
+async def test_stream_progress_decodes_escaped_path(monkeypatch):
+    _fake_clock(monkeypatch, [10.0])
+    chunks = [
+        _delta(tool_calls=[_tc(id="c1", name="write_file",
+                               arguments='{"path": "we\\"ird.py", "content": "')]),
+        _usage_chunk(1, 1),
+    ]
+    provider = OpenAIProvider(client=_stream_client(chunks), model="m", max_tokens=9)
+    events = [e async for e in provider.stream(_req())]
+    prog = [e for e in events if isinstance(e, ProviderToolCallProgress)]
+    assert prog[0].path_hint == 'we"ird.py'
+
+
+async def test_stream_progress_counts_lines(monkeypatch):
+    _fake_clock(monkeypatch, [10.0])
+    chunks = [
+        _delta(tool_calls=[_tc(id="c1", name="write_file",
+                               arguments='{"path": "a", "content": "l1\\nl2\\nl3')]),
+        _usage_chunk(1, 1),
+    ]
+    provider = OpenAIProvider(client=_stream_client(chunks), model="m", max_tokens=9)
+    events = [e async for e in provider.stream(_req())]
+    prog = [e for e in events if isinstance(e, ProviderToolCallProgress)]
+    assert prog[0].lines == 3  # 两个 \n 转义 + 1
+
+
+async def test_stream_text_only_emits_no_progress():
+    chunks = [_delta(content="he"), _delta(content="llo"), _usage_chunk(1, 1)]
+    provider = OpenAIProvider(client=_stream_client(chunks), model="m", max_tokens=9)
+    events = [e async for e in provider.stream(_req())]
+    assert not any(isinstance(e, ProviderToolCallProgress) for e in events)

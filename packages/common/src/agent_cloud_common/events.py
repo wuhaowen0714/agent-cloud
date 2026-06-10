@@ -16,6 +16,17 @@ class ThinkingDelta:
 
 
 @dataclass
+class ToolCallProgress:
+    """工具调用参数生成中的节流进度(LLM 流式累积分片;不含参数内容本身)。"""
+
+    call_id: str
+    name: str
+    args_chars: int
+    lines: int
+    path_hint: str
+
+
+@dataclass
 class ToolCallStarted:
     call_id: str
     name: str
@@ -37,4 +48,6 @@ class TurnDone:
     context_tokens: int = 0  # 最后一次 LLM 调用的 input_tokens(真实上下文大小,供压缩判阈值)
 
 
-TurnEvent = TextDelta | ThinkingDelta | ToolCallStarted | ToolResultEvent | TurnDone
+TurnEvent = (
+    TextDelta | ThinkingDelta | ToolCallProgress | ToolCallStarted | ToolResultEvent | TurnDone
+)

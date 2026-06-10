@@ -2,6 +2,7 @@ from agent_cloud_common.edit import apply_edits
 from agent_cloud_common.events import (
     TextDelta,
     ThinkingDelta,
+    ToolCallProgress,
     ToolCallStarted,
     ToolResultEvent,
     TurnDone,
@@ -40,6 +41,7 @@ __all__ = [
     "MAX_GRPC_MESSAGE_BYTES",
     "TextDelta",
     "ThinkingDelta",
+    "ToolCallProgress",
     "ToolCallStarted",
     "ToolResultEvent",
     "TurnDone",

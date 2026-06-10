@@ -2,7 +2,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef } from "react"
 import { api } from "../api/client"
 import { cancelTurn, resumeTurn, streamTurn } from "../api/stream"
-import { appendDelta, appendToolCall, attachToolResult } from "../blocks"
+import {
+  appendDelta,
+  appendToolCall,
+  attachToolResult,
+  dropPendingTools,
+  upsertToolProgress,
+} from "../blocks"
 import { useStore } from "../store"
 import type { TurnEvent } from "../types"
 import { Composer } from "./Composer"
@@ -44,6 +50,8 @@ export function ChatView() {
       setLive((t) => ({ ...t, blocks: appendDelta(t.blocks, "thinking", e.text) }))
     else if (e.type === "text_delta")
       setLive((t) => ({ ...t, blocks: appendDelta(t.blocks, "text", e.text) }))
+    else if (e.type === "tool_call_progress")
+      setLive((t) => ({ ...t, blocks: upsertToolProgress(t.blocks, e) }))
     else if (e.type === "tool_call_start")
       setLive((t) => ({
         ...t,
@@ -69,8 +77,10 @@ export function ChatView() {
         recoverable: undefined,
       }))
     else if (e.type === "error")
+      // 终态:剥掉 pending 进度卡(流已死,永远等不到升级),半截文本照旧保留
       setLive((t) => ({
         ...t,
+        blocks: dropPendingTools(t.blocks),
         status: "error",
         errorMessage: e.message,
         recoverable: e.recoverable,
@@ -87,7 +97,12 @@ export function ChatView() {
       // 切走/卸载导致的中断:服务端回合仍在跑,切回再 resume,这里不收尾。
       if (aborted) return
       if (useStore.getState().sessionId === sid)
-        setLive((t) => ({ ...t, status: "error", errorMessage: String(err) }))
+        setLive((t) => ({
+          ...t,
+          blocks: dropPendingTools(t.blocks),
+          status: "error",
+          errorMessage: String(err),
+        }))
     }
     if (inflight.current?.sessionId === sid) inflight.current = null
     const errored = useStore.getState().live?.status === "error"
