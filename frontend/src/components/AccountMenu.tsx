@@ -1,8 +1,9 @@
+import { ChevronDown, Folder, KeyRound, LogOut } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { api } from "../api/client"
 import { useStore } from "../store"
 
-/** 贴底账户区:首字母圆头像 + 邮箱;点开菜单:工作区文件 / 登出。(Provider Keys 入口留待 Plan C。) */
+/** 贴底账户区:首字母圆头像 + 邮箱;点开菜单:工作区文件 / Provider Keys / 登出。 */
 export function AccountMenu() {
   const user = useStore((s) => s.user)
   const logout = useStore((s) => s.logout)
@@ -23,7 +24,7 @@ export function AccountMenu() {
   if (!user) return null
   const initial = user.email.charAt(0).toUpperCase()
   const item =
-    "flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm text-slate-600 hover:bg-slate-100"
+    "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm text-slate-600 hover:bg-slate-100"
 
   const doLogout = async () => {
     setOpen(false)
@@ -42,7 +43,7 @@ export function AccountMenu() {
               setOpen(false)
             }}
           >
-            <span className="w-3.5 shrink-0 text-center">📁</span>
+            <Folder size={15} className="shrink-0 text-slate-400" />
             <span>工作区文件</span>
           </button>
           <button
@@ -52,11 +53,11 @@ export function AccountMenu() {
               setOpen(false)
             }}
           >
-            <span className="w-3.5 shrink-0 text-center">🔑</span>
+            <KeyRound size={15} className="shrink-0 text-slate-400" />
             <span>Provider Keys</span>
           </button>
           <button className={`${item} hover:text-red-600`} onClick={doLogout}>
-            <span className="w-3.5 shrink-0 text-center">⏻</span>
+            <LogOut size={15} className="shrink-0" />
             <span>登出</span>
           </button>
         </div>
@@ -69,7 +70,7 @@ export function AccountMenu() {
           {initial}
         </span>
         <span className="min-w-0 flex-1 truncate text-sm text-slate-700">{user.email}</span>
-        <span className="shrink-0 text-xs text-slate-400">▾</span>
+        <ChevronDown size={14} className="shrink-0 text-slate-400" />
       </button>
     </div>
   )

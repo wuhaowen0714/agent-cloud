@@ -1,10 +1,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { Plus } from "lucide-react"
 import { api } from "../api/client"
 import { useStore } from "../store"
 import { AccountMenu } from "./AccountMenu"
 import { AgentList } from "./AgentList"
 import { SessionList } from "./SessionList"
-import { Button } from "./ui"
 
 export function Sidebar() {
   const userId = useStore((s) => s.userId)
@@ -30,15 +30,16 @@ export function Sidebar() {
         <span className="text-[15px] font-semibold tracking-tight text-slate-800">Agent Cloud</span>
       </div>
 
-      {/* 新对话(无 agent 时禁用)*/}
-      <Button
-        className="w-full"
+      {/* 新对话:幽灵行(无 agent 时禁用)*/}
+      <button
         disabled={!agentId || create.isPending}
         title={agentId ? "" : "先选择 / 新建一个 agent"}
         onClick={() => create.mutate()}
+        className="flex w-full items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-slate-200 disabled:hover:bg-transparent disabled:hover:text-slate-600"
       >
-        ＋ 新对话
-      </Button>
+        <Plus size={16} className="text-slate-400" />
+        新对话
+      </button>
 
       {/* agent 列表(直接点选,无下拉)*/}
       <AgentList />

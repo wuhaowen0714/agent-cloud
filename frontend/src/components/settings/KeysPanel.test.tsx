@@ -26,7 +26,8 @@ describe("KeysPanel", () => {
 
   it("lists existing credentials by mask (never plaintext)", async () => {
     render(wrap(<KeysPanel />))
-    expect(await screen.findByText("sk-…1234")).toBeInTheDocument()
+    // 掩码与 base_url 现在同在一行 hint 里,用包含匹配(仍验证显示掩码、非明文)
+    expect(await screen.findByText(/sk-…1234/)).toBeInTheDocument()
     expect(screen.getByText("openrouter")).toBeInTheDocument()
   })
 
