@@ -184,3 +184,24 @@ def test_upload_plain_basename_unchanged(client):
     r = client.post("/files/upload", files=[("files", ("plain.txt", b"p", "text/plain"))])
     assert r.status_code == 201
     assert r.json()[0]["path"] == "plain.txt"
+
+
+def test_upload_rejects_overlong_path_segment(client):
+    # ENAMETOOLONG 等 OSError → 400(围栏内的非法路径形态,不该 500)
+    r = client.post(
+        "/files/upload", files=[("files", ("a" * 300 + "/x.txt", b"x", "text/plain"))]
+    )
+    assert r.status_code == 400
+
+
+def test_sanitize_rel_upload_path_edge_cases():
+    import pytest
+    from agent_cloud_backend.api.files import _sanitize_rel_upload_path
+    from agent_cloud_backend.files.errors import PathEscape
+
+    with pytest.raises(PathEscape):
+        _sanitize_rel_upload_path("a\0b.txt")  # null 字节
+    with pytest.raises(PathEscape):
+        _sanitize_rel_upload_path("a/../b.txt")  # 夹在中间的父引用
+    # 绝对路径被锚定为围栏内相对路径(首空段丢弃)
+    assert _sanitize_rel_upload_path("/etc/passwd") == "etc/passwd"

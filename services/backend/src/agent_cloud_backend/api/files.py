@@ -29,6 +29,10 @@ def _http_from(exc: Exception) -> HTTPException:
     # FileExistsError:把文件当目录用(move/upload 到 file/inner)→ 4xx 而非 500(I1)
     if isinstance(exc, (FileExistsError, NotADirectoryError, IsADirectoryError)):
         return HTTPException(status.HTTP_400_BAD_REQUEST, "wrong file type")
+    # 其余 OSError(如 ENAMETOOLONG:超长段/超深嵌套):围栏内的非法路径形态,
+    # 是客户端输入问题 → 400 而非 500。必须放在上面更具体的 OSError 子类之后。
+    if isinstance(exc, OSError):
+        return HTTPException(status.HTTP_400_BAD_REQUEST, "invalid path")
     raise exc  # 未知错误 → 冒泡成 500
 
 
