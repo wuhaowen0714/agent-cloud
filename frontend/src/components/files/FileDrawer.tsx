@@ -60,7 +60,10 @@ export function FileDrawer() {
           拖拽文件到此处上传
         </div>
       </aside>
-      {preview && <FilePreview entry={preview} onClose={() => setPreview(null)} />}
+      {/* key=path:换文件必重挂,杜绝 text/view/err 状态从上个文件残留 */}
+      {preview && (
+        <FilePreview key={preview.path} entry={preview} onClose={() => setPreview(null)} />
+      )}
     </>
   )
 }
