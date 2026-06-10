@@ -22,3 +22,6 @@ venv/
 .DS_Store
 .idea/
 .vscode/
+
+# Git worktrees(多 agent 并行开发的本地隔离目录)
+/.worktrees/
