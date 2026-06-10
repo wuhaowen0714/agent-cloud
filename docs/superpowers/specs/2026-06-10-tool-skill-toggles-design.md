@@ -16,7 +16,7 @@
 - **popover**:`createPortal` 到 body + fixed 定位(沿用 RowMenu 模式,规避 TopBar `backdrop-blur` 的 containing-block 陷阱);Esc / 点外关闭;一次只开一个。
 - **工具 popover**(`ToolsMenu`):`BUILTIN_TOOLS`(agentConfig.ts)逐行 name + desc + `Switch`;勾选态 = `enabledToChecked(agent.enabled_tools)`(空=全部语义沿用);切换 → `checkedToEnabled` 规范化 → `api.updateAgent(PATCH enabled_tools)`,成功后 invalidate `["agents"]`(乐观更新:本地先翻,失败回滚)。
 - **技能 popover**(`SkillsMenu`):列表 = `GET /skills`(全部已安装);checked = skill.id ∈ `GET /agent-configs/{id}/skills` 启用集;切换 → 集合增删 → `PUT /agent-configs/{id}/skills`(全量替换),invalidate `["agentSkills", agentId]`;空态「技能池为空」(内置 ensure 后正常不会出现)。
-- **client.ts**:补 `listAgentSkills(agentId)`(目前 AgentSettings 内联取数,提为共享函数,二者共用 query key `["agentSkills", agentId]`)。
+- **client.ts**:已有 `getAgentSkills(agentId)` / `setAgentSkills`,TopBar 与 AgentSettings 共用(query key `["agentSkills", agentId]`),无需新增。
 - **一致性**:TopBar 即点即存 vs 设置页 stage-then-save,最后写入者胜(与现状语义一致,不做并发合并)。
 
 ### 2. 内置技能开箱即用(后端为主)
