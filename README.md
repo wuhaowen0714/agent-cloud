@@ -1,6 +1,6 @@
 # Agent Cloud
 
-> 无状态、多租户的 **Agent Cloud**:用户创建可配置的 AI agent(模型 / Provider / 工具 / 技能),与之多轮对话;每个会话跑在**隔离沙箱**里,拥有持久工作区。后端是唯一访问数据库的服务,LLM 密钥只存在于 worker,沙箱按最小信任设计。
+> 无状态、多租户的 **Agent Cloud**:用户创建可配置的 AI agent(模型 / Provider / 工具 / 技能 / 记忆),与之多轮对话;每个会话跑在**隔离沙箱**里,拥有持久工作区。后端是唯一访问数据库的服务,LLM 调用集中在 worker(密钥按请求注入,绝不进沙箱 / 前端 / 日志),沙箱按最小信任设计。
 
 <p>
   <a href="https://github.com/wuhaowen0714/agent-cloud/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/wuhaowen0714/agent-cloud/actions/workflows/ci.yml/badge.svg"></a>
@@ -49,11 +49,15 @@ Agent Cloud 是一个把"可配置 AI agent + 隔离代码执行"做成多租户
 - 🤖 **可配置 agent**:每个 agent 自带模型、Provider、思考档位、启用的工具、指令(`AGENTS` 文档)、绑定的凭据与技能。
 - 🔑 **BYO-Key(自带密钥)**:每用户的 Provider 凭据用 **AES-256-GCM** 加密存储;回合时按请求把明文密钥注入 worker,**永不**进入沙箱、前端或日志。
 - 💬 **流式对话**:基于 SSE 的回合事件(思考 / 正文 / 工具调用 / 工具结果);**断线可续看**(resume);瞬时错误**透明自动重试**;超窗自动**压缩历史**。
-- 🛠️ **沙箱工具**:`bash`、`read_file`、`write_file`、`edit`(精确字符串替换,多段、保留 CRLF);全部在隔离沙箱内执行。
+- 🛠️ **工具**:沙箱内执行的 `bash`、`read_file`、`write_file`、`edit`(精确字符串替换,多段、保留 CRLF);外加 worker 原生的 `remember`(主动写长期记忆,**不进沙箱**)。
+- 🧠 **智能体记忆**:每作用域一块的**自整合单块**记忆(user 跨 agent 共享 / agent 专属);**空闲 + 压缩前**自动提炼——LLM 读旧块对账重写(增 / 改 / 淘汰),乐观并发版本化;agent 可调 `remember` 主动记;设置内可查看 / 编辑 / 清空。
+- ⌨️ **斜杠命令**:输入 `/` 唤起命令面板(纯客户端动作,不发给 LLM)——`/compact` 手动压缩、`/status`(agent / 会话 / 消息数 / **上下文 tokens**)、`/new`、`/model`、`/help` 与设置导航。
+- 🎛️ **模型切换**:composer 左下模型 chip 即点即切(持久到当前 agent);选项 = 预设(DeepSeek-V4-Pro / DeepSeek-V4-Flash / GLM-5.1)∪ 各 agent 在用 ∪ **用户自定义**(后端持久化、跨设备);创建 agent 免填模型。
+- 🚀 **开箱即用**:注册自动播种默认 agent(`main`)+ 默认会话,登录即可开聊;一键新建 agent(`Agent N`,新建即行内改名);agent / 会话支持行内**重命名**与**二次确认删除**(删 agent 连带其会话,进行中的回合受保护)。
 - 🧩 **技能(Skills)**:从 registry **安装**到用户对象库 → 在 agent 上**启用** → 每回合**物化**进沙箱并注入提示词;内置 `skill-creator`,支持**从工作区一键安装**自制技能。
 - 📁 **文件管理**:每用户持久工作区,经 `/files` 浏览 / 预览 / 上传 / 下载 / 删除 / 重命名 / 建目录(路径越狱防护)。
 - 📦 **沙箱隔离**:`inprocess`(默认 / CI,**无隔离**)与 `docker`(真隔离:内存 / CPU / PIDs 限额、空闲回收、持久 `/workspace` 卷)两种 provisioner。
-- 🎨 **精致前端**:React 19 + Tailwind(浅色 + teal),自绘的 Segmented / Switch / 下拉浮层等控件,Markdown 渲染,响应式聊天界面。
+- 🎨 **精致前端**:React 19 + Tailwind(浅色 + teal,Notion 风侧栏与设置),lucide 线性图标,自绘 Segmented / Switch / 选单浮层 / 命令面板,Markdown 渲染,固定视口布局(只有消息区滚动)。
 
 ## 架构
 
@@ -85,7 +89,7 @@ flowchart LR
 **一个回合(turn)的生命周期**:浏览器 `POST /sessions/{id}/turn/stream` → 后端取得会话锁、解析 agent 配置与凭据、确保沙箱就绪 → 调用 worker `RunTurnStream` → worker 循环(调用 LLM → 解析工具调用 → 经沙箱 `ExecTool` 执行 → 回灌结果)→ 事件经 worker→后端→**SSE** 实时回到浏览器 → 结束后落库新消息,必要时压缩历史。
 
 - **Backend** 是**唯一**访问 Postgres 的服务,对外暴露 REST + SSE,对内用 gRPC 调 worker、并经 provisioner 管理沙箱生命周期(创建 / 复用 / 空闲回收)。
-- **Worker** 跑 agent 主循环、调用 OpenAI 兼容 LLM、把工具调用转交沙箱;**LLM 密钥只在这一层**。
+- **Worker** 跑 agent 主循环、调用 OpenAI 兼容 LLM、把工具调用转交沙箱;**只有这一层调用 LLM**(密钥按请求注入,无 DB、无用户概念)。
 - **Sandbox** 是最小信任层,只暴露 `ExecTool`,在受限容器里执行工具,工作区挂在持久卷。
 - **protos/** 是 gRPC 契约(`worker.proto` / `sandbox.proto`),`packages/common` 是跨服务共享库(编解码、edit 匹配器、事件类型、gRPC 限额等)。
 
@@ -94,7 +98,7 @@ flowchart LR
 | 边界 | 规则 |
 |---|---|
 | 数据库 | 只有 backend 能连 Postgres;worker / sandbox 都不行 |
-| LLM 密钥 | 只存在于 worker 进程;按请求注入,绝不下发前端 / 进沙箱 / 写日志 |
+| LLM 密钥 | 平台默认密钥配置在 worker;BYO-Key 由 backend 解密后**按请求**注入 worker;绝不下发前端 / 进沙箱 / 写日志 |
 | BYO-Key 凭据 | 入库前 AES-256-GCM 加密(主密钥 `AGENT_CLOUD_CREDENTIAL_KEY`);API 只返回掩码 |
 | 租户隔离 | 跨租户访问资源返回 **404**(而非 403),不泄露资源是否存在 |
 | 沙箱 | 最小信任;docker provisioner 下有内存 / CPU / PIDs 限额、网络可控、空闲回收 |
@@ -179,7 +183,12 @@ bash scripts/dev_up.sh
 | `AGENT_CLOUD_CREDENTIAL_KEY` | backend | 空 | BYO-Key 的 AES-GCM 主密钥(base64 的 32 字节);**空则凭据功能不可用** |
 | `AGENT_CLOUD_SANDBOX_PROVISIONER` | backend | `inprocess` | `inprocess`(无隔离)/ `docker`(真隔离) |
 | `AGENT_CLOUD_SANDBOX_IMAGE` | backend | `agent-cloud-sandbox:latest` | 沙箱镜像(由 `deploy/sandbox.Dockerfile` 构建) |
-| `AGENT_CLOUD_COMPACTION_TOKEN_THRESHOLD` | backend | `128000` | 历史压缩阈值(建议设为模型窗口的 ~70–80%) |
+| `AGENT_CLOUD_COMPACTION_TOKEN_THRESHOLD` | backend | `128000` | 历史压缩阈值(建议设为模型窗口的 ~70–80%;可经 `…_THRESHOLDS` 按模型覆盖) |
+| `AGENT_CLOUD_DEFAULT_AGENT_MODEL` | backend | `DeepSeek-V4-Pro` | 注册播种的默认 agent 模型(与前端预设同值) |
+| `AGENT_CLOUD_MEMORY_SOFT_CHARS` | backend | `2000` | 记忆块软上限(引导 LLM,后端不硬截断) |
+| `AGENT_CLOUD_MEMORY_MIN_ROUNDS` | backend | `10` | 空闲提炼闸:自上次提炼新增对话轮次 ≥ 此值才提 |
+| `AGENT_CLOUD_MEMORY_IDLE_SECONDS` | backend | `1800` | 会话空闲多久视为"可提炼" |
+| `AGENT_CLOUD_MEMORY_MAX_VERSIONS` | backend | `20` | 每个记忆块保留的版本快照数 |
 
 生成凭据主密钥:
 
@@ -224,12 +233,14 @@ bash scripts/gen_protos.sh     # 改了 protos/*.proto 后重新生成 gRPC stub
 - **技能(skills)**:`registry`(`skill_registry/<name>/SKILL.md`)→ **安装**到用户对象库(`users/<uid>/skills/<name>`)+ 写 DB → 在某个 agent 上**启用** → **每回合**把启用集合物化进沙箱 `.skills/<name>/` 并把 `<available_skills>` 注入提示词。"安装"≠"在沙箱里";只有**启用且运行**才物化。内置 `skill-creator` 可脚手架一个 `SKILL.md`,并支持**从工作区**把自制技能一键安装。
 - **BYO-Key**:用户在"Provider Keys"里添加凭据 → 加密入库(只回掩码)→ 在 agent 设置里选用某凭据(`key_ref`)→ 回合时后端解出明文,经请求传给 worker 的 provider 工厂;**密钥不落前端、不进沙箱、不入日志**。
 - **沙箱 provisioner**:`inprocess` 把沙箱跑在后端进程内(快、**无隔离**,用于默认/CI);`docker` 为每个会话起受限容器(内存/CPU/PIDs 限额、网络可控),工作区挂持久卷,空闲超时回收。依赖(如 `pip install`)会落在 `/workspace` 卷里持久化。
+- **记忆**:每作用域(user / agent)一块,组装回合时注入**当前块**。两个写入路径:① **自动提炼**——会话空闲(且新增 ≥ N 轮)或压缩折叠前,backend 让 worker 的 LLM 读旧块与新对话**对账重写**(增/改/淘汰,软字数上限),`UNIQUE(scope,owner,version)` 提供乐观并发,解析失败绝不推进水位(不丢事实);② **`remember` 工具**——agent 主动调,worker 本地合成确认,backend 落库时独立校验并按 scope 写块。
+- **斜杠命令**:composer 内输入 `/` 弹出命令面板,命令是**纯客户端动作**(不发给 LLM)。`/compact` 调用受**会话锁**保护的手动压缩端点(回合进行中 409,压缩期间心跳续租);`/status` 显示 agent / 会话 / 消息数与最近一回合的**上下文 tokens**(回合结束随消息同事务落库);`/model` 与模型 chip 共用同一选项源(预设 ∪ 在用 ∪ 自定义)。
 
-更多设计细节见 `docs/architecture.html` 与 `docs/superpowers/specs/`。
+更多设计细节见 [docs/README.md](docs/README.md)(设计文档索引);`docs/architecture.html` 为早期设计快照,现状以本 README 为准。
 
 ## 路线图
 
-见 `docs/roadmap.html`。已落地:数据层与后端骨架、流式 agent 核心、worker、沙箱(含 docker 隔离)、鉴权与多租户、BYO-Key、文件管理、技能系统、`edit` 工具、前端聊天与设置 UI。后续候选:工具调用修复、`grep`/`find` 工具、Web 工具、MCP 接入、长期记忆等。
+见 `docs/roadmap.html`。已落地:数据层与后端骨架、流式 agent 核心、worker、沙箱(含 docker 隔离)、鉴权与多租户、BYO-Key、文件管理、技能系统、`edit` 工具、**智能体记忆(自动提炼 + `remember`)**、**斜杠命令**、**模型切换器**、**注册即用的 agent / 会话生命周期**、前端聊天与设置 UI(Notion 风重设计)。后续候选:工具调用修复、`grep`/`find` 工具、Web 工具、MCP 接入、限流 / 配额、用量面板与可观测等。
 
 ## 许可证
 
