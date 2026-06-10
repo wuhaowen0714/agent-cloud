@@ -34,6 +34,14 @@ _TRUNCATED_CALL_RESULT = (
     "Re-issue the call with a smaller payload — e.g. write the file in smaller "
     "chunks across multiple calls."
 )
+# 参数非法但并非截断(finish_reason ≠ length):别误导模型去"减小负载",如实说 JSON 坏了。
+_MALFORMED_CALL_RESULT = (
+    "[tool-call invalid] The arguments for this call were not valid JSON. "
+    "Re-issue the call with well-formed JSON arguments."
+)
+# 连续这么多轮出现被截断的工具调用就熔断收尾:模型没有接受修复引导,
+# 继续循环只会按 max_iterations 烧满每轮的输出预算。
+_TRUNCATION_FUSE = 2
 
 
 @dataclass
@@ -125,6 +133,7 @@ async def run_turn_stream(
     new_messages: list[Message] = []
     usage = Usage()
     last_input = 0  # 最后一次调用的 input_tokens = 真实上下文大小(供压缩判阈值)
+    truncated_streak = 0  # 连续含截断工具调用的轮数(熔断用)
 
     for _ in range(max_iterations):
         completed: ProviderCompleted | None = None
@@ -158,14 +167,16 @@ async def run_turn_stream(
             )
             return
 
+        truncated_streak = truncated_streak + 1 if completed.truncated_call_ids else 0
+        repair_msg = (
+            _TRUNCATED_CALL_RESULT if completed.length_truncated else _MALFORMED_CALL_RESULT
+        )
         tool_results = []
         for call in assistant.tool_calls:
             yield ToolCallStarted(call_id=call.id, name=call.name, arguments=call.arguments)
             if call.id in completed.truncated_call_ids:
-                # 参数被截断:不执行,回灌修复性错误让模型在回合内重试小块负载
-                result = ToolResult(
-                    call_id=call.id, content=_TRUNCATED_CALL_RESULT, is_error=True
-                )
+                # 参数被截断/非法:不执行,回灌修复性错误让模型在回合内自行重试
+                result = ToolResult(call_id=call.id, content=repair_msg, is_error=True)
             else:
                 result = await executor.execute(call)
             yield ToolResultEvent(
@@ -175,6 +186,15 @@ async def run_turn_stream(
         tool_message = Message(role=Role.TOOL, tool_results=tool_results)
         working.append(tool_message)
         new_messages.append(tool_message)
+
+        if truncated_streak >= _TRUNCATION_FUSE:
+            # 模型连续多轮发出被截断的调用(修复引导无效):熔断,以 length 收尾,
+            # 避免按 max_iterations 把每轮 32k 输出预算烧满。
+            yield TurnDone(
+                new_messages=new_messages, usage=usage, stop_reason="length",
+                context_tokens=last_input,
+            )
+            return
 
     yield TurnDone(
         new_messages=new_messages, usage=usage, stop_reason="max_iterations",

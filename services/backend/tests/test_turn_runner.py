@@ -255,6 +255,14 @@ async def test_runner_appends_truncation_notice_on_length(engine, monkeypatch):
     await _run(sid2, "end_turn", "complete answer")
     assert await _last_text(sid2) == "complete answer"  # 不带标记
 
+    # 末条 assistant 零文本(如思考烧光预算):标记本身作为正文,不能静默空气泡
+    sid3 = await _make_session_row(engine)
+    await _acquire(engine, sid3)
+    await _run(sid3, "length", "")
+    text3 = await _last_text(sid3)
+    assert "内容被截断" in text3
+    assert not text3.startswith("\n")
+
 
 async def test_runner_cancel_emits_cancelled_and_releases(engine, monkeypatch):
     from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub

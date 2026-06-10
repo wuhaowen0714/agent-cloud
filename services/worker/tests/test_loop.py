@@ -464,3 +464,68 @@ async def test_stream_text_truncation_surfaces_length_stop_reason():
     assert isinstance(done, TurnDone)
     assert done.stop_reason == "length"
     assert done.new_messages[-1].text == "half an ans"
+
+
+async def test_stream_truncation_fuse_ends_turn_after_two_rounds():
+    # 连续两轮截断调用 → 熔断收尾(stop_reason="length"),不烧满 max_iterations
+    def _trunc(call_id):
+        return ProviderCompleted(
+            message=Message(
+                role=Role.ASSISTANT,
+                text="",
+                tool_calls=[ToolCall(id=call_id, name="write_file", arguments={})],
+            ),
+            usage=Usage(input_tokens=10, output_tokens=9),
+            length_truncated=True,
+            truncated_call_ids={call_id},
+        )
+
+    executor = _SpyExecutor()
+    events = [
+        e
+        async for e in run_turn_stream(
+            _ScriptedStreamProvider([_trunc("c1"), _trunc("c2"), _trunc("c3")]),
+            executor,
+            system="",
+            history=[],
+            user_message="huge write",
+            max_iterations=10,
+        )
+    ]
+    done = events[-1]
+    assert isinstance(done, TurnDone)
+    assert done.stop_reason == "length"
+    assert executor.executed == []
+    # 只消耗了两轮(熔断),脚本第三条没被取用
+    assert sum(1 for e in events if isinstance(e, ToolResultEvent)) == 2
+
+
+async def test_stream_malformed_args_get_invalid_message_not_truncated_wording():
+    # 非 length 的坏 JSON:回灌「invalid」文案,不误导模型去减小负载
+    bad = ProviderCompleted(
+        message=Message(
+            role=Role.ASSISTANT,
+            text="",
+            tool_calls=[ToolCall(id="c1", name="bash", arguments={})],
+        ),
+        usage=Usage(input_tokens=10, output_tokens=3),
+        length_truncated=False,
+        truncated_call_ids={"c1"},
+    )
+    final = ProviderCompleted(
+        message=Message(role=Role.ASSISTANT, text="fixed"),
+        usage=Usage(input_tokens=10, output_tokens=2),
+    )
+    events = [
+        e
+        async for e in run_turn_stream(
+            _ScriptedStreamProvider([bad, final]),
+            _SpyExecutor(),
+            system="",
+            history=[],
+            user_message="go",
+        )
+    ]
+    results = [e for e in events if isinstance(e, ToolResultEvent)]
+    assert "tool-call invalid" in results[0].content
+    assert "token limit" not in results[0].content

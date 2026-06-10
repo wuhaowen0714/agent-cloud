@@ -20,7 +20,11 @@ from agent_cloud_common.codec import msg_from_proto, msg_to_proto, turn_event_to
 from agent_cloud_worker.context import build_system_prompt
 from agent_cloud_worker.loop import run_turn, run_turn_stream
 from agent_cloud_worker.memory_extract import MemoryParseError, reconcile_user_memory
-from agent_cloud_worker.provider import ContextWindowExceeded, Provider
+from agent_cloud_worker.provider import (
+    CompletionBudgetExceeded,
+    ContextWindowExceeded,
+    Provider,
+)
 from agent_cloud_worker.remember import RememberingExecutor, remember_enabled
 from agent_cloud_worker.sandbox_executor import SandboxToolExecutor
 
@@ -96,6 +100,16 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                     history=history,
                     user_message=request.user_message,
                 )
+            except CompletionBudgetExceeded as exc:
+                # 配置错误(输出预算 ≥ 模型窗口):压缩救不了,绝不能映射成 RESOURCE_EXHAUSTED
+                # 触发后端无效压缩螺旋;FAILED_PRECONDITION = 调低 REQUEST_MAX_TOKENS。
+                logger.warning("completion budget exceeds model window: %s", exc)
+                await context.abort(
+                    grpc.StatusCode.FAILED_PRECONDITION,
+                    "configured request_max_tokens exceeds the model context window; "
+                    "lower AGENT_CLOUD_WORKER_REQUEST_MAX_TOKENS",
+                )
+                return
             except ContextWindowExceeded:
                 # 上下文超窗:可恢复,映射成 RESOURCE_EXHAUSTED(区别于下面的 INTERNAL),
                 # 后端据此触发压缩并提示用户重试(spec §6/§8)。
@@ -160,6 +174,16 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                     user_message=request.user_message,
                 ):
                     yield turn_event_to_proto(event)
+            except CompletionBudgetExceeded as exc:
+                # 配置错误(输出预算 ≥ 模型窗口):压缩救不了,绝不能映射成 RESOURCE_EXHAUSTED
+                # 触发后端无效压缩螺旋;FAILED_PRECONDITION = 调低 REQUEST_MAX_TOKENS。
+                logger.warning("completion budget exceeds model window: %s", exc)
+                await context.abort(
+                    grpc.StatusCode.FAILED_PRECONDITION,
+                    "configured request_max_tokens exceeds the model context window; "
+                    "lower AGENT_CLOUD_WORKER_REQUEST_MAX_TOKENS",
+                )
+                return
             except ContextWindowExceeded:
                 # 上下文超窗:可恢复 → RESOURCE_EXHAUSTED,后端据此触发压缩并提示重试。
                 # 注意:多轮工具循环下,超窗可能发生在本 RPC **已 yield 过前几轮增量之后**
@@ -218,6 +242,16 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
             result = await provider.complete(
                 CompletionRequest(system=system, messages=messages, tools=[])
             )
+        except CompletionBudgetExceeded as exc:
+            # 配置错误(输出预算 ≥ 模型窗口):压缩救不了,绝不能映射成 RESOURCE_EXHAUSTED
+            # 触发后端无效压缩螺旋;FAILED_PRECONDITION = 调低 REQUEST_MAX_TOKENS。
+            logger.warning("completion budget exceeds model window: %s", exc)
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "configured request_max_tokens exceeds the model context window; "
+                "lower AGENT_CLOUD_WORKER_REQUEST_MAX_TOKENS",
+            )
+            return
         except ContextWindowExceeded:
             # 连摘要请求都超窗:可恢复,交给后端用更激进的折叠边界重试(spec §6/§8)。
             logger.info("Summarize context window exceeded")
@@ -268,6 +302,16 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                 messages=messages,
                 soft_max_chars=request.soft_max_chars or 2000,
             )
+        except CompletionBudgetExceeded as exc:
+            # 配置错误(输出预算 ≥ 模型窗口):压缩救不了,绝不能映射成 RESOURCE_EXHAUSTED
+            # 触发后端无效压缩螺旋;FAILED_PRECONDITION = 调低 REQUEST_MAX_TOKENS。
+            logger.warning("completion budget exceeds model window: %s", exc)
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "configured request_max_tokens exceeds the model context window; "
+                "lower AGENT_CLOUD_WORKER_REQUEST_MAX_TOKENS",
+            )
+            return
         except ContextWindowExceeded:
             await context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, "context window exceeded")
             return

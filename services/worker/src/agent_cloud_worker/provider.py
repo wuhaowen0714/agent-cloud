@@ -15,6 +15,15 @@ class ContextWindowExceeded(Exception):
     """
 
 
+class CompletionBudgetExceeded(Exception):
+    """provider 报告:配置的单次输出预算(request_max_tokens)自身放不进模型窗口。
+
+    与 ContextWindowExceeded 必须区分:压缩历史只能缩小 prompt,救不了「completion
+    预算 ≥ 窗口」的 400——若误判成超窗,后端会陷入注定无效的 force_compact 重试螺旋
+    (小窗口 BYO 模型配置即砖)。server 把它映射成 FAILED_PRECONDITION(配置错误)。
+    """
+
+
 class Provider(Protocol):
     async def complete(self, request: CompletionRequest) -> CompletionResult: ...
 
