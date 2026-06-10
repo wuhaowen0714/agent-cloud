@@ -10,3 +10,24 @@ describe("Markdown 代码块对比度", () => {
     expect(container.querySelector("pre code")).not.toBeNull()
   })
 })
+
+describe("Markdown 语法高亮", () => {
+  it("带语言标注的代码块产出 hljs token span", () => {
+    const { container } = render(
+      <Markdown>{"```python\ndef f():\n    return 'hi'\n```"}</Markdown>,
+    )
+    expect(container.querySelector("pre code.hljs")).not.toBeNull()
+    expect(container.querySelector("pre code .hljs-keyword")).not.toBeNull() // def/return
+    expect(container.querySelector("pre code .hljs-string")).not.toBeNull() // 'hi'
+  })
+
+  it("无语言标注的代码块保持纯文本(不做自动探测)", () => {
+    const { container } = render(<Markdown>{"```\nplain text here\n```"}</Markdown>)
+    expect(container.querySelector("pre code [class^='hljs-']")).toBeNull()
+  })
+
+  it("行内 code 不受高亮影响", () => {
+    const { container } = render(<Markdown>{"前缀 `def x` 后缀"}</Markdown>)
+    expect(container.querySelector("p > code .hljs-keyword")).toBeNull()
+  })
+})
