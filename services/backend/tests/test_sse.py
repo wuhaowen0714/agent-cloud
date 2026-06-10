@@ -1,6 +1,12 @@
 import grpc
 from agent_cloud_backend.turn.sse import error_sse, format_sse, turn_event_to_sse
-from agent_cloud_common import TextDelta, ThinkingDelta, ToolCallStarted, ToolResultEvent
+from agent_cloud_common import (
+    TextDelta,
+    ThinkingDelta,
+    ToolCallProgress,
+    ToolCallStarted,
+    ToolResultEvent,
+)
 
 
 def test_text_delta_mapping():
@@ -44,3 +50,17 @@ def test_error_sse_recoverable_codes():
     assert "UNAVAILABLE" not in e["message"]  # generic, no internal detail
     e2 = error_sse(grpc.StatusCode.INVALID_ARGUMENT)
     assert e2["recoverable"] is False
+
+
+def test_tool_call_progress_mapping():
+    out = turn_event_to_sse(
+        ToolCallProgress(call_id="c1", name="write_file", args_chars=1234, lines=5, path_hint="a.py")
+    )
+    assert out == {
+        "type": "tool_call_progress",
+        "call_id": "c1",
+        "tool": "write_file",
+        "args_chars": 1234,
+        "lines": 5,
+        "path": "a.py",
+    }

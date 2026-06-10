@@ -3,7 +3,13 @@ from __future__ import annotations
 import json
 
 import grpc
-from agent_cloud_common import TextDelta, ThinkingDelta, ToolCallStarted, ToolResultEvent
+from agent_cloud_common import (
+    TextDelta,
+    ThinkingDelta,
+    ToolCallProgress,
+    ToolCallStarted,
+    ToolResultEvent,
+)
 
 _RECOVERABLE = {
     grpc.StatusCode.UNAVAILABLE,
@@ -20,6 +26,15 @@ def turn_event_to_sse(event) -> dict:
         return {"type": "text_delta", "text": event.text}
     if isinstance(event, ThinkingDelta):
         return {"type": "thinking_delta", "text": event.text}
+    if isinstance(event, ToolCallProgress):
+        return {
+            "type": "tool_call_progress",
+            "call_id": event.call_id,
+            "tool": event.name,
+            "args_chars": event.args_chars,
+            "lines": event.lines,
+            "path": event.path_hint,
+        }
     if isinstance(event, ToolCallStarted):
         return {
             "type": "tool_call_start",
