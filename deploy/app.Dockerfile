@@ -1,19 +1,19 @@
-# backend 与 worker 共用的应用镜像(同一 uv workspace,装一次;运行命令由 compose 指定)。
+# backend 与 worker 共用的应用镜像(运行命令由 compose 指定)。
 # 从仓库根构建:docker build -f deploy/app.Dockerfile .
+#
+# 用 pip + 阿里镜像而非 `uv sync --frozen`:uv.lock 把下载源锁死在 files.pythonhosted.org
+# (锁文件记录完整 URL,UV_DEFAULT_INDEX 无法改写),国内服务器只有 KB/s 级速度,构建必死;
+# pip 按需解析、全程走镜像,与 sandbox.Dockerfile 同款做法。代价是不锁版本(个人部署可接受)。
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
-    UV_LINK_MODE=copy \
-    UV_COMPILE_BYTECODE=1 \
-    # 国内服务器:PyPI 走阿里云镜像(uv 读 UV_DEFAULT_INDEX)
-    UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple/
-
-RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ uv
+    PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ \
+    PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
-# 完整 workspace:uv sync 需要全部成员的 pyproject;生成的 gRPC 桩已提交在 packages/common。
-COPY pyproject.toml uv.lock ./
-COPY packages ./packages
-COPY services ./services
-# --all-packages:workspace 根的 sync 默认只装根包,必须显式装全部成员(backend/worker/common…)
-RUN uv sync --frozen --no-dev --all-packages
+# 只装运行所需的三个包(sandbox 有自己的镜像);common 在同一命令里从本地路径满足
+# backend/worker 对 agent-cloud-common 的依赖。
+COPY packages/common ./packages/common
+COPY services/backend ./services/backend
+COPY services/worker ./services/worker
+RUN pip install ./packages/common ./services/backend ./services/worker
