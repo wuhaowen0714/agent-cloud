@@ -6,7 +6,7 @@ import { FilePreview } from "./FilePreview"
 
 beforeAll(() => {
   // jsdom 没有 revokeObjectURL;组件 cleanup 会调它
-  if (!URL.revokeObjectURL) (URL as { revokeObjectURL?: () => void }).revokeObjectURL = () => {}
+  URL.revokeObjectURL ??= () => {}
 })
 
 // 用户报障场景:中文名 txt(此前后端 Content-Disposition 塞原始 UTF-8 → 500,
