@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 
@@ -45,6 +45,38 @@ async def test_rename_session(client):
     assert (
         await client.patch(f"/sessions/{sid}", json={"title": "hack"}, headers=h2)
     ).status_code == 404
+
+
+async def test_delete_session_idle_and_guards(client, engine):
+    from agent_cloud_backend.models.session import Session as SessionModel
+
+    h = await _register(client)
+    sid = (await _first_session(client, h))["id"]
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+
+    # running(租约内)→ 409
+    async with maker() as db:
+        await db.execute(
+            update(SessionModel)
+            .where(SessionModel.id == uuid.UUID(sid))
+            .values(status="running", last_active_at=func.now())
+        )
+        await db.commit()
+    assert (await client.delete(f"/sessions/{sid}", headers=h)).status_code == 409
+
+    # 回到 idle → 204,列表消失
+    async with maker() as db:
+        await db.execute(
+            update(SessionModel).where(SessionModel.id == uuid.UUID(sid)).values(status="idle")
+        )
+        await db.commit()
+    assert (await client.delete(f"/sessions/{sid}", headers=h)).status_code == 204
+    assert (await client.get("/sessions", headers=h)).json() == []
+    # 再删 → 404(已不存在);他人删 → 404
+    assert (await client.delete(f"/sessions/{sid}", headers=h)).status_code == 404
+    h2 = await _register(client)
+    sid2 = (await _first_session(client, h2))["id"]
+    assert (await client.delete(f"/sessions/{sid2}", headers=h)).status_code == 404
 
 
 async def test_register_conflict_leaves_no_orphans(client, engine):

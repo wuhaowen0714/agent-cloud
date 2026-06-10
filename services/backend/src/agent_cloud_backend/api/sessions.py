@@ -53,6 +53,18 @@ async def rename_session(
     return s
 
 
+@router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_session(
+    session_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    await owned_session(session_id, user.id, session)  # 404
+    if not await SessionRepository(session).delete_if_idle(session_id):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="session busy")
+    await session.commit()  # messages 由 FK CASCADE 连带删除
+
+
 @router.post("/{session_id}/compact")
 async def compact_session(
     session_id: uuid.UUID,
