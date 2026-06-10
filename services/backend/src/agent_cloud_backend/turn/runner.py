@@ -5,7 +5,7 @@ import logging
 import uuid
 
 import grpc
-from agent_cloud_common import TurnDone
+from agent_cloud_common import Role, TurnDone
 from agent_cloud_common.codec import turn_event_from_proto
 
 from agent_cloud_backend.config import Settings
@@ -25,7 +25,20 @@ from agent_cloud_backend.turn.sse import error_sse, turn_event_to_sse
 logger = logging.getLogger(__name__)
 
 
-async def _persist(session_id: uuid.UUID, new_messages, context_tokens: int) -> list[str]:
+# 文本被单次输出上限掐断时,随消息持久化的提示(markdown 斜体;刷新仍在,前端零改动)。
+_TRUNCATION_NOTICE = "\n\n*(输出已达单次 token 上限,内容被截断——可输入「继续」接着生成)*"
+
+
+async def _persist(
+    session_id: uuid.UUID, new_messages, context_tokens: int, stop_reason: str
+) -> list[str]:
+    # stop_reason="length":给最后一条带文本的 assistant 消息追加截断提示。
+    # (工具参数截断在 worker 回合内自修复,正常以 end_turn 收尾,不走这里。)
+    if stop_reason == "length":
+        for common in reversed(new_messages):
+            if common.role == Role.ASSISTANT and common.text:
+                common.text += _TRUNCATION_NOTICE
+                break
     ids: list[str] = []
     async with get_sessionmaker()() as db:
         repo = MessageRepository(db)
@@ -111,7 +124,7 @@ async def run_turn(
                         if isinstance(event, TurnDone):
                             ctx_tokens = event.context_tokens
                             message_ids = await _persist(
-                                session_id, event.new_messages, ctx_tokens
+                                session_id, event.new_messages, ctx_tokens, event.stop_reason
                             )
                             await active.emit(
                                 {

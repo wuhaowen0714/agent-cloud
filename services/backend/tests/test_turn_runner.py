@@ -199,6 +199,63 @@ async def test_runner_persists_context_tokens(engine, monkeypatch):
     assert tokens == 7
 
 
+async def test_runner_appends_truncation_notice_on_length(engine, monkeypatch):
+    # stop_reason="length"(输出被单次 token 上限掐断)→ 落库的 assistant 文本带截断提示;
+    # 正常 end_turn 不带(spec 2026-06-10-length-handling §3)。
+    from agent_cloud_backend.config import Settings
+    from agent_cloud_backend.models.message import Message as M
+    from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub
+    from agent_cloud_backend.turn.runner import run_turn
+
+    _patch_global_sessionmaker(monkeypatch, engine)
+
+    async def _run(sid, stop_reason, text):
+        async def _gen(endpoint, request):
+            yield turn_event_to_proto(
+                TurnDone(
+                    new_messages=[Message(role=Role.ASSISTANT, text=text)],
+                    usage=Usage(input_tokens=1, output_tokens=2),
+                    stop_reason=stop_reason,
+                    context_tokens=7,
+                )
+            )
+
+        _fake_worker(monkeypatch, _gen)
+        hub = TurnHub()
+        active = ActiveTurn(session_id=sid)
+        hub.register(active)
+        await run_turn(
+            hub, active, worker_endpoint="x", request=_REQ, reassemble=_reassemble,
+            session_id=sid, heartbeat_interval=999, settings=Settings(),
+        )
+
+    async def _last_text(sid):
+        maker = async_sessionmaker(engine, expire_on_commit=False)
+        async with maker() as db:
+            rows = (
+                (
+                    await db.execute(
+                        select(M.content).where(M.session_id == sid).order_by(M.seq)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return rows[-1]["text"]
+
+    sid1 = await _make_session_row(engine)
+    await _acquire(engine, sid1)
+    await _run(sid1, "length", "half an ans")
+    text1 = await _last_text(sid1)
+    assert text1.startswith("half an ans")
+    assert "内容被截断" in text1
+
+    sid2 = await _make_session_row(engine)
+    await _acquire(engine, sid2)
+    await _run(sid2, "end_turn", "complete answer")
+    assert await _last_text(sid2) == "complete answer"  # 不带标记
+
+
 async def test_runner_cancel_emits_cancelled_and_releases(engine, monkeypatch):
     from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub
     from agent_cloud_backend.turn.runner import run_turn
