@@ -6,6 +6,7 @@ from agent_cloud_common import (
     TextDelta,
     ThinkingDelta,
     ToolCall,
+    ToolCallProgress,
     ToolCallStarted,
     ToolResultEvent,
     TurnDone,
@@ -17,6 +18,7 @@ from agent_cloud_worker.provider import (
     ProviderCompleted,
     ProviderTextDelta,
     ProviderThinkingDelta,
+    ProviderToolCallProgress,
 )
 from agent_cloud_worker.tools import LocalToolExecutor, builtin_tools
 
@@ -529,3 +531,25 @@ async def test_stream_malformed_args_get_invalid_message_not_truncated_wording()
     results = [e for e in events if isinstance(e, ToolResultEvent)]
     assert "tool-call invalid" in results[0].content
     assert "token limit" not in results[0].content
+
+
+async def test_stream_forwards_tool_progress(tmp_path):
+    class _ProgressProvider:
+        async def stream(self, request):
+            yield ProviderToolCallProgress(
+                call_id="c1", name="write_file", args_chars=120, lines=4, path_hint="a.py"
+            )
+            yield ProviderCompleted(
+                message=Message(role=Role.ASSISTANT, text="done"),
+                usage=Usage(input_tokens=1, output_tokens=1),
+            )
+
+    events = []
+    async for e in run_turn_stream(
+        _ProgressProvider(), _executor(tmp_path), system="", history=[], user_message="hi"
+    ):
+        events.append(e)
+    prog = [e for e in events if isinstance(e, ToolCallProgress)]
+    assert prog == [
+        ToolCallProgress(call_id="c1", name="write_file", args_chars=120, lines=4, path_hint="a.py")
+    ]

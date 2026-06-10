@@ -9,6 +9,7 @@ from agent_cloud_common import (
     Role,
     TextDelta,
     ThinkingDelta,
+    ToolCallProgress,
     ToolCallStarted,
     ToolResult,
     ToolResultEvent,
@@ -22,6 +23,7 @@ from agent_cloud_worker.provider import (
     ProviderCompleted,
     ProviderTextDelta,
     ProviderThinkingDelta,
+    ProviderToolCallProgress,
     StreamingProvider,
 )
 from agent_cloud_worker.tools import ToolExecutor
@@ -144,6 +146,12 @@ async def run_turn_stream(
                 yield TextDelta(text=event.text)
             elif isinstance(event, ProviderThinkingDelta):
                 yield ThinkingDelta(text=event.text)
+            elif isinstance(event, ProviderToolCallProgress):
+                yield ToolCallProgress(
+                    call_id=event.call_id, name=event.name,
+                    args_chars=event.args_chars, lines=event.lines,
+                    path_hint=event.path_hint,
+                )
             elif isinstance(event, ProviderCompleted):
                 completed = event
         if completed is None:
