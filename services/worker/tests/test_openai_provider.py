@@ -111,9 +111,11 @@ def _stream_client(chunks, captured=None):
     return SimpleNamespace(chat=SimpleNamespace(completions=_Comp()))
 
 
-def _delta(content=None, tool_calls=None, reasoning=None):
+def _delta(content=None, tool_calls=None, reasoning=None, finish_reason=None):
     d = SimpleNamespace(content=content, tool_calls=tool_calls, reasoning_content=reasoning)
-    return SimpleNamespace(choices=[SimpleNamespace(delta=d, finish_reason=None)], usage=None)
+    return SimpleNamespace(
+        choices=[SimpleNamespace(delta=d, finish_reason=finish_reason)], usage=None
+    )
 
 
 def _usage_chunk(pt, ct):
@@ -308,6 +310,69 @@ async def test_stream_maps_context_overflow_to_context_window_exceeded():
             pass
 
 
+async def test_stream_marks_length_truncation():
+    chunks = [_delta(content="half answ"), _delta(finish_reason="length"), _usage_chunk(5, 9)]
+    provider = OpenAIProvider(client=_stream_client(chunks), model="m", max_tokens=9)
+    events = [e async for e in provider.stream(_req())]
+    done = events[-1]
+    assert isinstance(done, ProviderCompleted)
+    assert done.length_truncated is True
+    assert done.truncated_call_ids == set()
+
+
+async def test_stream_tolerates_truncated_tool_call_args():
+    # 参数 JSON 被 length 掐断:不抛 JSONDecodeError,降级为 {} 并报告 call id
+    tc = SimpleNamespace(
+        index=0, id="c1", function=SimpleNamespace(name="write_file", arguments='{"path": "a.t')
+    )
+    chunks = [_delta(tool_calls=[tc], finish_reason="length"), _usage_chunk(1, 9)]
+    provider = OpenAIProvider(client=_stream_client(chunks), model="m", max_tokens=9)
+    events = [e async for e in provider.stream(_req())]
+    done = events[-1]
+    assert isinstance(done, ProviderCompleted)
+    assert done.length_truncated is True
+    assert done.truncated_call_ids == {"c1"}
+    call = done.message.tool_calls[0]
+    assert call.id == "c1" and call.name == "write_file" and call.arguments == {}
+
+
+async def test_stream_synthesizes_id_for_truncated_call_without_id():
+    # 截断发生在 id 分片到达之前:合成 id(纯字母数字,兼容对 call_id 格式严格的端点)
+    import re as _re
+
+    tc = SimpleNamespace(index=0, id=None, function=SimpleNamespace(name="bash", arguments='{"co'))
+    chunks = [_delta(tool_calls=[tc]), _usage_chunk(1, 9)]
+    provider = OpenAIProvider(client=_stream_client(chunks), model="m", max_tokens=9)
+    events = [e async for e in provider.stream(_req())]
+    done = events[-1]
+    call_id = done.message.tool_calls[0].id
+    assert _re.fullmatch(r"trunc0[0-9a-f]{6}", call_id)
+    assert done.truncated_call_ids == {call_id}
+
+
+async def test_complete_tolerates_truncated_tool_call_args():
+    # 一元路径止血:残缺参数不崩(降级 {}),不做回合内修复
+    resp = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=None,
+                    tool_calls=[
+                        SimpleNamespace(
+                            id="c1",
+                            function=SimpleNamespace(name="bash", arguments='{"comm'),
+                        )
+                    ],
+                )
+            )
+        ],
+        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+    )
+    provider = OpenAIProvider(client=_client(resp), model="m", max_tokens=9)
+    result = await provider.complete(_req())
+    assert result.message.tool_calls[0].arguments == {}
+
+
 async def test_stream_accumulates_reasoning_into_message():
     chunks = [
         _delta(reasoning="th"),
@@ -320,3 +385,59 @@ async def test_stream_accumulates_reasoning_into_message():
     done = events[-1]
     assert done.message.reasoning == "thought"
     assert done.message.text == "answer"
+
+
+# ---- completion 预算 ≥ 窗口的 400:配置错误,绝不能误判成超窗(审查 H1)----
+
+
+def test_completion_budget_error_detected():
+    from agent_cloud_worker.openai_provider import _is_completion_budget_error
+
+    exc = _bad_request(
+        "This model's maximum context length is 8192 tokens. However, you requested "
+        "40000 tokens (7232 in the messages, 32768 in the completion). Please reduce "
+        "the length of the messages or completion."
+    )
+    assert _is_completion_budget_error(exc) is True
+    assert _is_context_window_error(exc) is True  # 文案同样命中超窗 markers → 判序必须预算优先
+
+
+def test_prompt_dominant_overflow_stays_context_window():
+    from agent_cloud_worker.openai_provider import _is_completion_budget_error
+
+    # prompt 撑爆、completion 预算装得下:压缩有效 → 仍走超窗语义
+    exc = _bad_request(
+        "This model's maximum context length is 200000 tokens. However, you requested "
+        "210000 tokens (177232 in the messages, 32768 in the completion)."
+    )
+    assert _is_completion_budget_error(exc) is False
+    assert _is_context_window_error(exc) is True
+
+
+async def test_stream_raises_completion_budget_exceeded():
+    from agent_cloud_worker.provider import CompletionBudgetExceeded
+
+    provider = OpenAIProvider(
+        client=_raising_client(
+            _bad_request(
+                "maximum context length is 8192 tokens. However, you requested 40960 "
+                "tokens (8192 in the messages, 32768 in the completion)."
+            )
+        ),
+        model="m",
+        max_tokens=32768,
+    )
+    with pytest.raises(CompletionBudgetExceeded):
+        async for _ in provider.stream(_req()):
+            pass
+
+
+async def test_stream_length_with_empty_trailing_args_marked_truncated():
+    # length 掐断且末尾 call 参数一个分片都没到:空 args 可"解析成功",但仍按截断处理
+    tc = SimpleNamespace(index=0, id="c1", function=SimpleNamespace(name="bash", arguments=None))
+    chunks = [_delta(tool_calls=[tc], finish_reason="length"), _usage_chunk(1, 9)]
+    provider = OpenAIProvider(client=_stream_client(chunks), model="m", max_tokens=9)
+    events = [e async for e in provider.stream(_req())]
+    done = events[-1]
+    assert done.truncated_call_ids == {"c1"}
+    assert done.message.tool_calls[0].arguments == {}

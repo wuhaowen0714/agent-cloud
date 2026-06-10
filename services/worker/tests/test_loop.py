@@ -370,3 +370,162 @@ async def test_context_tokens_is_last_call_input_not_sum(tmp_path):
     )
     assert result.usage.input_tokens == 350
     assert result.context_tokens == 250
+
+
+# ---- finish_reason=length:截断处理(spec 2026-06-10-length-handling)----
+
+
+class _ScriptedStreamProvider:
+    """逐次调用返回脚本里的下一个 ProviderCompleted(可携带截断信息)。"""
+
+    def __init__(self, completions):
+        self._completions = list(completions)
+
+    async def stream(self, request):
+        completed = self._completions.pop(0)
+        if completed.message.text:
+            yield ProviderTextDelta(text=completed.message.text)
+        yield completed
+
+
+class _SpyExecutor:
+    """记录被执行的 call;永远成功。"""
+
+    def __init__(self):
+        self.executed = []
+
+    def specs(self):
+        return []
+
+    async def execute(self, call):
+        from agent_cloud_common import ToolResult
+
+        self.executed.append(call)
+        return ToolResult(call_id=call.id, content="ok", is_error=False)
+
+
+async def test_stream_truncated_tool_call_repairs_in_turn():
+    truncated = ProviderCompleted(
+        message=Message(
+            role=Role.ASSISTANT,
+            text="",
+            tool_calls=[ToolCall(id="c1", name="write_file", arguments={})],
+        ),
+        usage=Usage(input_tokens=10, output_tokens=9),
+        length_truncated=True,
+        truncated_call_ids={"c1"},
+    )
+    final = ProviderCompleted(
+        message=Message(role=Role.ASSISTANT, text="retried smaller, done"),
+        usage=Usage(input_tokens=10, output_tokens=3),
+    )
+    executor = _SpyExecutor()
+    events = [
+        e
+        async for e in run_turn_stream(
+            _ScriptedStreamProvider([truncated, final]),
+            executor,
+            system="",
+            history=[],
+            user_message="write a huge file",
+        )
+    ]
+    # 截断的 call 不进 executor
+    assert executor.executed == []
+    # 回灌修复性错误,模型在回合内重试
+    results = [e for e in events if isinstance(e, ToolResultEvent)]
+    assert len(results) == 1
+    assert results[0].is_error is True
+    assert "tool-call truncated" in results[0].content
+    # 回合最终正常收尾
+    done = events[-1]
+    assert isinstance(done, TurnDone)
+    assert done.stop_reason == "end_turn"
+    assert done.new_messages[-1].text == "retried smaller, done"
+
+
+async def test_stream_text_truncation_surfaces_length_stop_reason():
+    truncated = ProviderCompleted(
+        message=Message(role=Role.ASSISTANT, text="half an ans"),
+        usage=Usage(input_tokens=10, output_tokens=9),
+        length_truncated=True,
+    )
+    events = [
+        e
+        async for e in run_turn_stream(
+            _ScriptedStreamProvider([truncated]),
+            _SpyExecutor(),
+            system="",
+            history=[],
+            user_message="long essay please",
+        )
+    ]
+    done = events[-1]
+    assert isinstance(done, TurnDone)
+    assert done.stop_reason == "length"
+    assert done.new_messages[-1].text == "half an ans"
+
+
+async def test_stream_truncation_fuse_ends_turn_after_two_rounds():
+    # 连续两轮截断调用 → 熔断收尾(stop_reason="length"),不烧满 max_iterations
+    def _trunc(call_id):
+        return ProviderCompleted(
+            message=Message(
+                role=Role.ASSISTANT,
+                text="",
+                tool_calls=[ToolCall(id=call_id, name="write_file", arguments={})],
+            ),
+            usage=Usage(input_tokens=10, output_tokens=9),
+            length_truncated=True,
+            truncated_call_ids={call_id},
+        )
+
+    executor = _SpyExecutor()
+    events = [
+        e
+        async for e in run_turn_stream(
+            _ScriptedStreamProvider([_trunc("c1"), _trunc("c2"), _trunc("c3")]),
+            executor,
+            system="",
+            history=[],
+            user_message="huge write",
+            max_iterations=10,
+        )
+    ]
+    done = events[-1]
+    assert isinstance(done, TurnDone)
+    assert done.stop_reason == "length"
+    assert executor.executed == []
+    # 只消耗了两轮(熔断),脚本第三条没被取用
+    assert sum(1 for e in events if isinstance(e, ToolResultEvent)) == 2
+
+
+async def test_stream_malformed_args_get_invalid_message_not_truncated_wording():
+    # 非 length 的坏 JSON:回灌「invalid」文案,不误导模型去减小负载
+    bad = ProviderCompleted(
+        message=Message(
+            role=Role.ASSISTANT,
+            text="",
+            tool_calls=[ToolCall(id="c1", name="bash", arguments={})],
+        ),
+        usage=Usage(input_tokens=10, output_tokens=3),
+        length_truncated=False,
+        truncated_call_ids={"c1"},
+    )
+    final = ProviderCompleted(
+        message=Message(role=Role.ASSISTANT, text="fixed"),
+        usage=Usage(input_tokens=10, output_tokens=2),
+    )
+    events = [
+        e
+        async for e in run_turn_stream(
+            _ScriptedStreamProvider([bad, final]),
+            _SpyExecutor(),
+            system="",
+            history=[],
+            user_message="go",
+        )
+    ]
+    results = [e for e in events if isinstance(e, ToolResultEvent)]
+    assert "tool-call invalid" in results[0].content
+    assert "token limit" not in results[0].content

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+import secrets
 from collections.abc import AsyncIterator
 
 import openai
@@ -15,6 +17,7 @@ from agent_cloud_common import (
 )
 
 from agent_cloud_worker.provider import (
+    CompletionBudgetExceeded,
     ContextWindowExceeded,
     ProviderCompleted,
     ProviderEvent,
@@ -35,12 +38,13 @@ _CONTEXT_LEN_MARKERS = (
 _CONTEXT_LEN_CODE = "context_length_exceeded"
 
 
-def _is_context_window_error(exc: Exception) -> bool:
-    if not isinstance(exc, openai.BadRequestError):
-        return False
-    # 真实的 openai.BadRequestError 把上游文案/错误码嵌在 .body 的 error 子对象里;
-    # .code/.message 在带结构化 body 时往往拿不到(.code=None、.message 仅是 "Error code: 400")。
-    # 不同兼容端点/SDK 版本填充位置不一,故从 .code、.body(含 error 子对象)、str(exc) 全都收集。
+def _collect_error_fields(exc: Exception) -> tuple[list[str], str]:
+    """从 BadRequestError 收集错误码与拼接文案(小写)。
+
+    真实的 openai.BadRequestError 把上游文案/错误码嵌在 .body 的 error 子对象里;
+    .code/.message 在带结构化 body 时往往拿不到(.code=None、.message 仅是 "Error code: 400")。
+    不同兼容端点/SDK 版本填充位置不一,故从 .code、.body(含 error 子对象)、str(exc) 全都收集。
+    """
     codes: list[str] = []
     texts: list[str] = [str(exc)]
     if code := getattr(exc, "code", None):
@@ -53,10 +57,39 @@ def _is_context_window_error(exc: Exception) -> bool:
                 codes.append(str(err[key]))
         if err.get("message"):
             texts.append(str(err["message"]))
+    return codes, " ".join(texts).lower()
+
+
+def _is_context_window_error(exc: Exception) -> bool:
+    if not isinstance(exc, openai.BadRequestError):
+        return False
+    codes, text = _collect_error_fields(exc)
     if _CONTEXT_LEN_CODE in codes:
         return True
-    text = " ".join(texts).lower()
     return any(marker in text for marker in _CONTEXT_LEN_MARKERS)
+
+
+# OpenAI/vLLM 超窗 400 的经典形态:
+# "maximum context length is W tokens ... (N in the messages, M in the completion)"
+_BUDGET_PATTERN = re.compile(
+    r"maximum context length is (\d+)[\s\S]{0,200}?(\d+) in the messages"
+    r"[\s\S]{0,80}?(\d+) in the completion"
+)
+
+
+def _is_completion_budget_error(exc: Exception) -> bool:
+    """「completion 预算自身 ≥ 窗口」的 400:压缩历史(只能缩 N)永远救不了。
+
+    只在能解析出三元组数字且 M ≥ W 时判真;解析不出来则保持既有超窗语义,宁可
+    走压缩路径也不把真超窗误判成配置错误。"""
+    if not isinstance(exc, openai.BadRequestError):
+        return False
+    _, text = _collect_error_fields(exc)
+    m = _BUDGET_PATTERN.search(text)
+    if not m:
+        return False
+    window, _messages, completion = (int(g) for g in m.groups())
+    return completion >= window
 
 
 def to_openai_tools(tools: list[ToolSpec]) -> list[dict]:
@@ -109,8 +142,17 @@ def to_openai_messages(request: CompletionRequest) -> list[dict]:
     return out
 
 
+def _loads_or_empty(raw: str) -> dict:
+    """工具参数解析:残缺/非法 JSON(典型:被 finish_reason=length 掐断)降级为 {},
+    绝不让一次截断把整个请求炸成 INTERNAL(那会触发后端对确定性失败的重试风暴)。"""
+    try:
+        return json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return {}
+
+
 def message_from_openai(om) -> Message:
-    """OpenAI 响应 message → 领域 Message(assistant)。tool_call 参数始终 json.loads。
+    """OpenAI 响应 message → 领域 Message(assistant)。
 
     捕获 reasoning_content(思考模式端点),以便回合内后续请求把它回传(DeepSeek 等要求)。
     """
@@ -118,7 +160,7 @@ def message_from_openai(om) -> Message:
         ToolCall(
             id=tc.id,
             name=tc.function.name,
-            arguments=json.loads(tc.function.arguments or "{}"),
+            arguments=_loads_or_empty(tc.function.arguments),
         )
         for tc in (om.tool_calls or [])
     ]
@@ -157,6 +199,8 @@ class OpenAIProvider:
         try:
             resp = await self._client.chat.completions.create(**self._create_kwargs(request))
         except openai.BadRequestError as exc:
+            if _is_completion_budget_error(exc):  # 先于超窗判:其文案同样命中超窗 markers
+                raise CompletionBudgetExceeded(str(exc)) from exc
             if _is_context_window_error(exc):
                 raise ContextWindowExceeded(str(exc)) from exc
             raise
@@ -176,6 +220,8 @@ class OpenAIProvider:
         try:
             stream = await self._client.chat.completions.create(**kwargs)
         except openai.BadRequestError as exc:
+            if _is_completion_budget_error(exc):  # 先于超窗判:其文案同样命中超窗 markers
+                raise CompletionBudgetExceeded(str(exc)) from exc
             if _is_context_window_error(exc):
                 raise ContextWindowExceeded(str(exc)) from exc
             raise
@@ -185,6 +231,7 @@ class OpenAIProvider:
         # index -> {"id","name","args"};按 index 累积分片的 tool_call 参数
         tool_acc: dict[int, dict] = {}
         usage = Usage()
+        finish: str | None = None
 
         async for chunk in stream:
             if chunk.usage is not None:
@@ -194,6 +241,8 @@ class OpenAIProvider:
                 )
             if not chunk.choices:
                 continue
+            if chunk.choices[0].finish_reason:
+                finish = chunk.choices[0].finish_reason
             delta = chunk.choices[0].delta
             reasoning = getattr(delta, "reasoning_content", None)
             if reasoning:
@@ -211,14 +260,34 @@ class OpenAIProvider:
                 if tcd.function and tcd.function.arguments:
                     slot["args"] += tcd.function.arguments
 
-        tool_calls = [
-            ToolCall(id=s["id"], name=s["name"], arguments=json.loads(s["args"] or "{}"))
-            for _, s in sorted(tool_acc.items())
-        ]
+        # 组装 tool_calls:参数 JSON 解析失败(典型:被 length 掐断)的 call 降级为
+        # arguments={} 并记入 truncated_call_ids,由 loop 跳过执行、回灌修复性错误。
+        # id 分片可能还没到就被掐断 → 合成 id(纯字母数字,兼容对 call_id 格式严格的端点)。
+        tool_calls: list[ToolCall] = []
+        truncated_call_ids: set[str] = set()
+        last_index = max(tool_acc) if tool_acc else None
+        for index, s in sorted(tool_acc.items()):
+            call_id = s["id"] or f"trunc{index}{secrets.token_hex(3)}"
+            try:
+                arguments = json.loads(s["args"] or "{}")
+            except json.JSONDecodeError:
+                arguments = {}
+                truncated_call_ids.add(call_id)
+            # 被 length 掐断且末尾 call 的参数一个分片都没到:空 args 能"解析成功",
+            # 但那是模型从未说完的调用——同样按截断处理,不能拿 {} 真执行。
+            if finish == "length" and index == last_index and not s["args"]:
+                arguments = {}
+                truncated_call_ids.add(call_id)
+            tool_calls.append(ToolCall(id=call_id, name=s["name"], arguments=arguments))
         message = Message(
             role=Role.ASSISTANT,
             text="".join(text_parts),
             tool_calls=tool_calls,
             reasoning="".join(reasoning_parts),
         )
-        yield ProviderCompleted(message=message, usage=usage)
+        yield ProviderCompleted(
+            message=message,
+            usage=usage,
+            length_truncated=finish == "length",
+            truncated_call_ids=truncated_call_ids,
+        )
