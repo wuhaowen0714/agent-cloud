@@ -20,7 +20,7 @@ from agent_cloud_backend.schemas.skill import (
 )
 from agent_cloud_backend.skills.deps import get_object_store, get_skill_registry_root
 from agent_cloud_backend.skills.manifest import SkillManifestError
-from agent_cloud_backend.skills.service import install_skill_from_dir
+from agent_cloud_backend.skills.service import ensure_builtin_skills, install_skill_from_dir
 from agent_cloud_backend.skills.store import ObjectStore
 
 router = APIRouter(prefix="/skills", tags=["skills"])
@@ -52,9 +52,18 @@ def _locate_skill_root(extract_dir: Path) -> Path | None:
 @router.get("", response_model=list[SkillRead])
 async def list_skills(
     session: AsyncSession = Depends(get_session),
+    store: ObjectStore = Depends(get_object_store),
+    registry_root: Path = Depends(get_skill_registry_root),
     user: User = Depends(get_current_user),
 ):
-    return await SkillRepository(session).list_by_user(user.id)
+    # GET 带幂等副作用(有意取舍):补装缺失的内置技能,存量用户任何一次
+    # UI 加载即收敛(开箱即用),免做迁移;无缺失时零写入。
+    repo = SkillRepository(session)
+    if await ensure_builtin_skills(
+        user_id=user.id, registry_root=registry_root, repo=repo, store=store
+    ):
+        await session.commit()
+    return await repo.list_by_user(user.id)
 
 
 @router.get("/registry", response_model=list[str])

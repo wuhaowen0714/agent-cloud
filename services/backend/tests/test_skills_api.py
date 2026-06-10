@@ -79,11 +79,18 @@ async def test_upload_zip_slip_rejected(client, monkeypatch):
     assert r.status_code == 422
 
 
-async def test_delete_skill(client):
+async def test_delete_skill(client, monkeypatch):
+    # 纯删除语义用非内置(uploaded)技能验证——内置删了会被 ensure 补回(另测)
+    monkeypatch.setenv("AGENT_CLOUD_ALLOW_UPLOADED_ARCHIVES", "true")
     await _auth(client)
-    sid = (await client.post("/skills/install", json={"name": "skill-creator"})).json()["id"]
+    sid = (
+        await client.post(
+            "/skills/upload", files={"file": ("s.zip", _zip_bytes(), "application/zip")}
+        )
+    ).json()["id"]
     assert (await client.delete(f"/skills/{sid}")).status_code == 204
-    assert (await client.get("/skills")).json() == []
+    # zippy 已删不再出现;内置 skill-creator 被本次列表的 ensure 补装
+    assert [s["name"] for s in (await client.get("/skills")).json()] == ["skill-creator"]
     assert (await client.delete(f"/skills/{sid}")).status_code == 404
 
 
@@ -197,3 +204,39 @@ async def test_install_from_workspace_rejects_symlinks(client, tmp_path):
     os.symlink("/etc/hosts", ws / "leak")  # 指向围栏外的宿主文件
     r = await client.post("/skills/install-from-workspace", json={"path": "symskill"})
     assert r.status_code == 400
+
+
+# ---- 内置技能自动补装(GET /skills 幂等 ensure)----
+
+
+async def test_list_skills_auto_installs_builtins(client):
+    # 新用户首次 GET /skills:内置技能(skill-creator)被自动补装
+    await _auth(client)
+    r = await client.get("/skills")
+    assert r.status_code == 200
+    assert [s["name"] for s in r.json()] == ["skill-creator"]
+    assert r.json()[0]["source"] == "registry"
+
+
+async def test_list_skills_ensure_is_idempotent(client):
+    await _auth(client)
+    await client.get("/skills")
+    r = await client.get("/skills")
+    assert [s["name"] for s in r.json()] == ["skill-creator"]  # 不重复安装
+
+
+async def test_install_after_auto_ensure_conflicts(client):
+    await _auth(client)
+    await client.get("/skills")
+    r = await client.post("/skills/install", json={"name": "skill-creator"})
+    assert r.status_code == 409  # 已被 ensure 装好
+
+
+async def test_deleted_builtin_comes_back_on_next_list(client):
+    # 内置技能没有"真删除":前端不暴露删除入口,后端就算删了,下次列表 ensure 即恢复(新 id)
+    await _auth(client)
+    sid = (await client.get("/skills")).json()[0]["id"]
+    assert (await client.delete(f"/skills/{sid}")).status_code == 204
+    relisted = (await client.get("/skills")).json()
+    assert [s["name"] for s in relisted] == ["skill-creator"]
+    assert relisted[0]["id"] != sid

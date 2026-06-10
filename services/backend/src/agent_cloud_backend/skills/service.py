@@ -56,3 +56,33 @@ async def install_skill_from_dir(
     await repo.create(skill)
     store.put_dir(prefix, src_dir)
     return skill
+
+
+async def ensure_builtin_skills(
+    *,
+    user_id: uuid.UUID,
+    registry_root: Path,
+    repo: SkillRepository,
+    store: ObjectStore,
+) -> list[Skill]:
+    """把 registry 里该用户缺失的内置技能补装(幂等)。返回本次新装的。
+
+    GET /skills 与注册时调用:无缺失时只有一次目录扫描 + 名字比对,零写入。
+    目录名预筛、manifest.name 终判;并发 ensure 撞 ValueError(已装)视为达成。
+    """
+    if not registry_root.exists():
+        return []
+    installed = {s.name for s in await repo.list_by_user(user_id)}
+    out: list[Skill] = []
+    for p in sorted(registry_root.iterdir()):
+        if not p.is_dir() or not (p / "SKILL.md").is_file() or p.name in installed:
+            continue
+        try:
+            out.append(
+                await install_skill_from_dir(
+                    user_id=user_id, src_dir=p, source="registry", repo=repo, store=store
+                )
+            )
+        except ValueError:
+            pass
+    return out
