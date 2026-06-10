@@ -69,6 +69,19 @@ describe("AgentList 菜单", () => {
     expect(await screen.findByDisplayValue("main")).toBeInTheDocument()
   })
 
+  it("IME 组合中的回车不提交改名", async () => {
+    const patch = vi.spyOn(api, "patchAgent")
+    render(wrap(<AgentList />))
+    await screen.findByText("main")
+    fireEvent.click(screen.getByRole("button", { name: "main 更多操作" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "重命名" }))
+    const input = await screen.findByDisplayValue("main")
+    fireEvent.change(input, { target: { value: "我的" } })
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true }) // 选字回车
+    expect(patch).not.toHaveBeenCalled()
+    expect(screen.getByDisplayValue("我的")).toBeInTheDocument() // 仍在改名态
+  })
+
   it("删除两次点击,删当前选中则落位到剩余第一个", async () => {
     const A2 = { ...A1, id: "a2", name: "second" }
     agents = [A1, A2]

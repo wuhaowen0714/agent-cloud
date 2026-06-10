@@ -64,4 +64,28 @@ describe("Sidebar", () => {
     await waitFor(() => expect(useStore.getState().agentId).toBe("a1"))
     await waitFor(() => expect(useStore.getState().sessionId).toBe("s1"))
   })
+
+  it("自愈:残留 agentId 指向已删 agent → 落回第一个", async () => {
+    vi.mocked(api.listAgents).mockResolvedValue([
+      {
+        id: "a1",
+        user_id: "u1",
+        name: "main",
+        model: "m",
+        provider: "p",
+        thinking_level: null,
+        enabled_tools: [],
+        permissions: {},
+        key_ref: null,
+      },
+    ] as never)
+    useStore.setState({
+      user: { id: "u1", email: "alice@example.com" },
+      userId: "u1",
+      agentId: "ghost-deleted",
+      sessionId: null,
+    })
+    render(wrap(<Sidebar />))
+    await waitFor(() => expect(useStore.getState().agentId).toBe("a1"))
+  })
 })

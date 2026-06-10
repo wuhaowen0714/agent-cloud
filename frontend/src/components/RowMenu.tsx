@@ -19,15 +19,26 @@ export function RowMenu({
   visible?: boolean
 }) {
   const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState({ top: 0, right: 8 })
   const [confirming, setConfirming] = useState<number | null>(null)
   const [failed, setFailed] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const close = () => {
+    if (timer.current) clearTimeout(timer.current) // 失败定时器不许跨次开关残留
     setOpen(false)
     setConfirming(null)
     setFailed(false)
+  }
+
+  const openMenu = () => {
+    // fixed 定位:列表容器是 overflow-auto,absolute 浮层会被裁剪(单 agent 时菜单完全不可见)。
+    // 打开瞬间按触发钮定位;开着滚动属边缘情况,点外面即收起。
+    const r = triggerRef.current?.getBoundingClientRect()
+    if (r) setPos({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) })
+    setOpen(true)
   }
 
   useEffect(() => {
@@ -73,11 +84,12 @@ export function RowMenu({
       }}
     >
       <button
+        ref={triggerRef}
         type="button"
         aria-label={ariaLabel}
         aria-haspopup="menu"
         aria-expanded={open}
-        onClick={() => (open ? close() : setOpen(true))}
+        onClick={() => (open ? close() : openMenu())}
         className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-white hover:text-slate-700 ${
           visible || open ? "opacity-100" : "opacity-0 group-hover:opacity-100"
         }`}
@@ -87,7 +99,8 @@ export function RowMenu({
       {open && (
         <div
           role="menu"
-          className="absolute right-0 top-full z-30 mt-1 w-44 rounded-xl border border-slate-200 bg-white p-1 shadow-pop"
+          style={{ top: pos.top, right: pos.right }}
+          className="fixed z-30 w-44 rounded-xl border border-slate-200 bg-white p-1 shadow-pop"
         >
           {failed ? (
             <div className="px-2.5 py-1.5 text-xs text-red-600">进行中,无法删除</div>

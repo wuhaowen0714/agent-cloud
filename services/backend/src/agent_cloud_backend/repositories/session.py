@@ -28,7 +28,12 @@ class SessionRepository(BaseRepository[Session]):
         return s
 
     async def list_by_user(self, user_id: uuid.UUID) -> list[Session]:
-        result = await self.session.execute(select(Session).where(Session.user_id == user_id))
+        # 稳定排序:回合/改名都会 UPDATE 行导致堆序漂移;前端「最近一条 = 列表末尾」依赖此序
+        result = await self.session.execute(
+            select(Session)
+            .where(Session.user_id == user_id)
+            .order_by(Session.created_at, Session.id)
+        )
         return list(result.scalars().all())
 
     async def user_ids_with_running_session(self, user_ids: list[uuid.UUID]) -> set[uuid.UUID]:

@@ -46,8 +46,12 @@ export function AgentList() {
     const name = value.trim()
     setRenamingId(null)
     if (!name || name === original) return
-    await api.patchAgent(id, { name })
-    await invalidate()
+    try {
+      await api.patchAgent(id, { name })
+      await invalidate()
+    } catch {
+      // 改名失败(网络/422):保持原名即可,不打断;maxLength 已挡住超长
+    }
   }
 
   const removeAgent = async (id: string) => {
@@ -55,7 +59,9 @@ export function AgentList() {
     await invalidate()
     await qc.invalidateQueries({ queryKey: ["sessions", userId] })
     if (useStore.getState().agentId === id) {
-      const rest = agents.filter((a) => a.id !== id)
+      // 从失效后的新鲜缓存取剩余(闭包里的 agents 是删除前的旧列表)
+      const fresh = qc.getQueryData<typeof agents>(["agents", userId]) ?? []
+      const rest = fresh.filter((a) => a.id !== id)
       setAgent(rest[0]?.id ?? null)
     }
   }
@@ -78,10 +84,13 @@ export function AgentList() {
                 <input
                   autoFocus
                   defaultValue={a.name}
+                  maxLength={200}
                   aria-label={`重命名 ${a.name}`}
                   onFocus={(e) => e.target.select()}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") void commitRename(a.id, e.currentTarget.value, a.name)
+                    // isComposing:IME 选字的回车不算确认(否则中文名打一半就被提交)
+                    if (e.key === "Enter" && !e.nativeEvent.isComposing)
+                      void commitRename(a.id, e.currentTarget.value, a.name)
                     else if (e.key === "Escape") setRenamingId(null)
                   }}
                   onBlur={() => setRenamingId(null)}
@@ -91,7 +100,10 @@ export function AgentList() {
                 <>
                   <button
                     className="flex min-w-0 flex-1 items-center px-2.5 py-2 text-left"
-                    onClick={() => setAgent(a.id)}
+                    onClick={() => {
+                      // 点已选中的 agent 不重置(setAgent 会清掉当前会话选择)
+                      if (a.id !== agentId) setAgent(a.id)
+                    }}
                   >
                     <span className="min-w-0 flex-1 truncate">
                       <span

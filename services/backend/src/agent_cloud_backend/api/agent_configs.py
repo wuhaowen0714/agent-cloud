@@ -2,7 +2,9 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import delete as sql_delete
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.exc import StaleDataError
 
 from agent_cloud_backend.api.deps import get_current_user, get_session
 from agent_cloud_backend.api.ownership import owned_agent, owned_credential
@@ -66,6 +68,11 @@ async def update_agent_config(
     fields = body.model_dump(exclude_unset=True)
     if "key_ref" in fields:
         await _validate_key_ref(fields["key_ref"], user.id, session)
+    if "name" in fields:  # 改名是一等 UI 操作:服务端兜底校验(与 session title 同规)
+        name = (fields["name"] or "").strip()
+        if not name or len(name) > 200:
+            raise HTTPException(status_code=422, detail="name must be 1-200 chars")
+        fields["name"] = name
     for field, value in fields.items():
         setattr(agent, field, value)
     await session.commit()
@@ -99,4 +106,11 @@ async def delete_agent_config(
         )
     )
     await session.delete(agent)
-    await session.commit()
+    try:
+        await session.commit()
+    except StaleDataError as exc:
+        # 并发双删:败者的 ORM DELETE 匹配 0 行 → 当作"已不存在"而非 500
+        raise HTTPException(status_code=404, detail="agent config not found") from exc
+    except IntegrityError as exc:
+        # 与并发 POST /sessions 撞 FK(RESTRICT):有人正往该 agent 下建会话 → 当 busy
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="agent busy") from exc

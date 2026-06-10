@@ -33,8 +33,12 @@ export function SessionList() {
     const title = value.trim()
     setRenamingId(null)
     if (!title || title === original) return
-    await api.patchSession(id, { title })
-    await invalidate()
+    try {
+      await api.patchSession(id, { title })
+      await invalidate()
+    } catch {
+      // 改名失败:保持原标题,不打断;maxLength 已挡住超长
+    }
   }
 
   const removeSession = async (id: string) => {
@@ -66,10 +70,13 @@ export function SessionList() {
               <input
                 autoFocus
                 defaultValue={label(s)}
+                maxLength={200}
                 aria-label={`重命名 ${label(s)}`}
                 onFocus={(e) => e.target.select()}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") void commitRename(s.id, e.currentTarget.value, label(s))
+                  // isComposing:IME 选字的回车不算确认
+                  if (e.key === "Enter" && !e.nativeEvent.isComposing)
+                    void commitRename(s.id, e.currentTarget.value, label(s))
                   else if (e.key === "Escape") setRenamingId(null)
                 }}
                 onBlur={() => setRenamingId(null)}

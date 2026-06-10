@@ -23,11 +23,12 @@ export function Sidebar() {
     },
   })
 
-  const { data: agents = [] } = useQuery({
+  const agentsQ = useQuery({
     queryKey: ["agents", userId],
     queryFn: () => api.listAgents(),
     enabled: !!userId,
   })
+  const agents = agentsQ.data ?? []
   const { data: sessions = [] } = useQuery({
     queryKey: ["sessions", userId],
     queryFn: () => api.listSessions(),
@@ -35,9 +36,13 @@ export function Sidebar() {
   })
   // 自动落位:无选中 agent → 选第一个;选中后无会话 → 选该 agent 最近一条。
   // 新注册用户(注册播种 main+会话)登录即可直接打字;删除当前选中后的兜底也走这里。
+  // 自愈:localStorage 残留的 agentId 指向已删 agent(他端删除/换号残留)→ 落回第一个,
+  // 否则会停在「无高亮、列表空、新对话 404」的幽灵选中态。仅在 agents 加载成功后判定。
   useEffect(() => {
+    if (!agentsQ.isSuccess) return
     if (!agentId && agents.length) setAgent(agents[0].id)
-  }, [agentId, agents, setAgent])
+    else if (agentId && !agents.some((a) => a.id === agentId)) setAgent(agents[0]?.id ?? null)
+  }, [agentId, agents, agentsQ.isSuccess, setAgent])
   useEffect(() => {
     if (!agentId || sessionId) return
     const mine = sessions.filter((s) => s.agent_config_id === agentId)
