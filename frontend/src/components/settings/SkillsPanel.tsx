@@ -1,35 +1,24 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
 import { api } from "../../api/client"
 import { useStore } from "../../store"
-import { Button, SelectMenu, SettingGroup, SettingRow } from "../ui"
+import { SettingGroup, SettingRow } from "../ui"
 
+// 技能库:内置技能(source=registry)由后端自动安装与维护,不可删——删了前端无入口
+// 装回(手动 registry 安装界面已砍);uploaded/workspace 来源仍可删。
 export function SkillsPanel() {
   const userId = useStore((s) => s.userId)!
   const qc = useQueryClient()
-  const [pick, setPick] = useState("")
 
   const { data: pool = [] } = useQuery({
     queryKey: ["skills", userId],
     queryFn: () => api.listSkills(),
   })
-  const { data: registry = [] } = useQuery({ queryKey: ["registry"], queryFn: () => api.listRegistry() })
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["skills", userId] })
     qc.invalidateQueries({ queryKey: ["agentSkills"] })
   }
-  const install = useMutation({
-    mutationFn: (name: string) => api.installSkill(name),
-    onSuccess: () => {
-      setPick("")
-      refresh()
-    },
-  })
   const remove = useMutation({ mutationFn: (id: string) => api.deleteSkill(id), onSuccess: refresh })
-
-  const installed = new Set(pool.map((s) => s.name))
-  const available = registry.filter((n) => !installed.has(n))
 
   return (
     <div className="space-y-5">
@@ -39,36 +28,19 @@ export function SkillsPanel() {
         ) : (
           pool.map((sk) => (
             <SettingRow key={sk.id} label={sk.name} hint={sk.description}>
-              <button
-                className="shrink-0 text-xs text-slate-400 transition hover:text-red-600"
-                onClick={() => remove.mutate(sk.id)}
-              >
-                删除
-              </button>
+              {sk.source === "registry" ? (
+                <span className="shrink-0 text-xs text-slate-300">内置</span>
+              ) : (
+                <button
+                  className="shrink-0 text-xs text-slate-400 transition hover:text-red-600"
+                  onClick={() => remove.mutate(sk.id)}
+                >
+                  删除
+                </button>
+              )}
             </SettingRow>
           ))
         )}
-      </SettingGroup>
-
-      <SettingGroup label="从 registry 安装">
-        <div className="space-y-2 p-3.5">
-          <div className="flex items-start gap-2">
-            <div className="min-w-0 flex-1">
-              <SelectMenu
-                value={pick}
-                onChange={setPick}
-                placeholder="选择技能…"
-                options={available.map((n) => ({ value: n, label: n }))}
-              />
-            </div>
-            <Button onClick={() => install.mutate(pick)} disabled={!pick || install.isPending}>
-              安装
-            </Button>
-          </div>
-          {available.length === 0 && registry.length > 0 && (
-            <div className="text-xs text-slate-400">registry 里的技能都装好了</div>
-          )}
-        </div>
       </SettingGroup>
     </div>
   )
