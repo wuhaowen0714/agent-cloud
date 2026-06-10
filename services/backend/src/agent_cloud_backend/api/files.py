@@ -1,5 +1,6 @@
 import mimetypes
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -37,6 +38,16 @@ def _cd_filename(name: str) -> str:
     return name.replace('"', "").replace("\r", "").replace("\n", "")
 
 
+def _content_disposition(disp: str, name: str) -> str:
+    """构造 Content-Disposition:HTTP 头只能 latin-1,非 ASCII 文件名(中文等)塞进
+    filename="…" 会让 Starlette 直接 UnicodeEncodeError → 500(预览/下载双挂)。
+    按 RFC 6266:filename= 放 ASCII 兜底(老客户端),filename*=UTF-8'' 放百分号
+    编码的真名(现代浏览器优先取它,下载落地仍是原文件名)。"""
+    safe = _cd_filename(name)
+    ascii_fallback = safe.encode("ascii", "ignore").decode() or "download"
+    return f"{disp}; filename=\"{ascii_fallback}\"; filename*=UTF-8''{quote(safe, safe='')}"
+
+
 @router.get("", response_model=list[FileEntryRead])
 def list_files(
     path: str = "",
@@ -62,16 +73,18 @@ def raw(
     except Exception as exc:
         raise _http_from(exc) from exc
     if entry.is_dir:
-        name = _cd_filename((entry.name or "workspace") + ".zip")
         return StreamingResponse(
             store.zip_dir(uid, path),
             media_type="application/zip",
-            headers={"Content-Disposition": f'attachment; filename="{name}"'},
+            headers={
+                "Content-Disposition": _content_disposition(
+                    "attachment", (entry.name or "workspace") + ".zip"
+                )
+            },
         )
     fh = store.open_read(uid, path)
     media = mimetypes.guess_type(entry.name)[0] or "application/octet-stream"
     disp = "attachment" if attachment else "inline"
-    name = _cd_filename(entry.name)
 
     def _stream():
         try:
@@ -82,7 +95,7 @@ def raw(
     return StreamingResponse(
         _stream(),
         media_type=media,
-        headers={"Content-Disposition": f'{disp}; filename="{name}"'},
+        headers={"Content-Disposition": _content_disposition(disp, entry.name)},
     )
 
 

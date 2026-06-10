@@ -37,14 +37,18 @@ export function FilePreview({ entry, onClose }: { entry: FileEntry; onClose: () 
   }, [entry.path, kind])
 
   const download = async () => {
-    const u = await api.downloadUrl(entry.path)
-    const a = document.createElement("a")
-    a.href = u
-    a.download = entry.name
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    setTimeout(() => URL.revokeObjectURL(u), 0) // 同步 revoke 可能在某些浏览器取消下载,延后释放
+    try {
+      const u = await api.downloadUrl(entry.path)
+      const a = document.createElement("a")
+      a.href = u
+      a.download = entry.name
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(u), 0) // 同步 revoke 可能在某些浏览器取消下载,延后释放
+    } catch {
+      setErr(true) // 下载失败不再静默(此前裸 await,点击毫无反馈)
+    }
   }
 
   return (
