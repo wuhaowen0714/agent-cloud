@@ -18,3 +18,23 @@ body {
 *::-webkit-scrollbar { width: 8px; height: 8px; }
 *::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }  /* slate-300 */
 *::-webkit-scrollbar-thumb:hover { background: #94a3b8; }                 /* slate-400 */
+
+/* ── 代码块语法高亮(rehype-highlight 产出的 hljs token)──────────────────
+   只作用于 Markdown 组件的深色代码块(.prose pre 内,bg-slate-800);
+   配色取 One Dark 系——专为深底调校,基色仍是 pre 的 text-slate-100。
+   不引入 hljs 主题 CSS:它会带全局 .hljs 背景/前景,与我们的 slate-800 打架。 */
+.prose pre code .hljs-comment, .prose pre code .hljs-quote { color: #7f848e; font-style: italic; }
+.prose pre code .hljs-keyword, .prose pre code .hljs-selector-tag { color: #c678dd; }
+.prose pre code .hljs-string, .prose pre code .hljs-addition,
+.prose pre code .hljs-regexp { color: #98c379; }
+.prose pre code .hljs-number, .prose pre code .hljs-literal,
+.prose pre code .hljs-attr, .prose pre code .hljs-meta { color: #d19a66; }
+.prose pre code .hljs-title, .prose pre code .hljs-name,
+.prose pre code .hljs-selector-id, .prose pre code .hljs-selector-class { color: #61afef; }
+.prose pre code .hljs-title.class_, .prose pre code .hljs-type,
+.prose pre code .hljs-section { color: #e5c07b; }
+.prose pre code .hljs-built_in, .prose pre code .hljs-symbol,
+.prose pre code .hljs-bullet, .prose pre code .hljs-link { color: #56b6c2; }
+.prose pre code .hljs-deletion { color: #e06c75; }
+.prose pre code .hljs-emphasis { font-style: italic; }
+.prose pre code .hljs-strong { font-weight: 600; }

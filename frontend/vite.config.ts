@@ -16,5 +16,8 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test-setup.ts"],
+    // 钉死时区:UTC 的 CI 与 +8 的开发机跑出同样的本地时间断言
+    // (fmtTime 的 UTC→本地回归钉依赖一个确定的非 UTC 时区)
+    env: { TZ: "Asia/Shanghai" },
   },
 })

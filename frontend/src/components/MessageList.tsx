@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef } from "react"
 import { messagesToTurns } from "../blocks"
 import { useStore } from "../store"
+import { fmtTime } from "../time"
 import type { Message } from "../types"
 import { AssistantBubble, UserBubble } from "./Bubble"
 import { TurnBlocks } from "./TurnBlocks"
@@ -32,11 +33,24 @@ export function MessageList({
           turn.userText !== null && turn.blocks.length === 0 && !(i === turns.length - 1 && live)
         return (
           <Fragment key={turn.id}>
-            {turn.userText !== null && <UserBubble text={turn.userText} />}
+            {/* 气泡 + 时间行包成组:父级 space-y-4 作用于组,时间行紧贴自己的气泡 */}
+            {turn.userText !== null && (
+              <div className="space-y-1">
+                <UserBubble text={turn.userText} />
+                {turn.userAt && (
+                  <div className="flex justify-end pr-1 text-[11px] text-slate-400">{fmtTime(turn.userAt)}</div>
+                )}
+              </div>
+            )}
             {turn.blocks.length > 0 && (
-              <AssistantBubble>
-                <TurnBlocks blocks={turn.blocks} />
-              </AssistantBubble>
+              <div className="space-y-1">
+                <AssistantBubble>
+                  <TurnBlocks blocks={turn.blocks} />
+                </AssistantBubble>
+                {turn.doneAt && (
+                  <div className="pl-1 text-[11px] text-slate-400">{fmtTime(turn.doneAt)}</div>
+                )}
+              </div>
             )}
             {unfinished && (
               <div className="text-center text-xs text-slate-400">— 回合未完成 —</div>
@@ -46,8 +60,15 @@ export function MessageList({
       })}
       {live && (
         <>
-          {/* 乐观渲染本回合的用户消息(权威历史在 turn_done 后接管) */}
-          {live.userText && <UserBubble text={live.userText} />}
+          {/* 乐观渲染本回合的用户消息(权威历史在 turn_done 后接管);助手流式中不显示时间 */}
+          {live.userText && (
+            <div className="space-y-1">
+              <UserBubble text={live.userText} />
+              {live.startedAt && (
+                <div className="flex justify-end pr-1 text-[11px] text-slate-400">{fmtTime(live.startedAt)}</div>
+              )}
+            </div>
+          )}
           <AssistantBubble>
             <TurnBlocks blocks={live.blocks} streaming={live.status === "streaming"} />
             {live.status === "error" && (
