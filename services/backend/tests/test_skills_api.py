@@ -23,11 +23,11 @@ def _zip_bytes(name="zippy", description="from zip"):
     return buf.getvalue()
 
 
-async def test_install_from_registry_then_list(client):
+async def test_install_from_registry_conflicts_with_preinstalled(client):
+    # 注册即预装内置技能 → 手动 install 同名必 409(重复);列表已含
     await _auth(client)
     r = await client.post("/skills/install", json={"name": "skill-creator"})
-    assert r.status_code == 201, r.text
-    assert r.json()["source"] == "registry"
+    assert r.status_code == 409
     r = await client.get("/skills")
     assert r.status_code == 200 and [s["name"] for s in r.json()] == ["skill-creator"]
 
@@ -36,13 +36,6 @@ async def test_install_unknown_registry_skill_404(client):
     await _auth(client)
     r = await client.post("/skills/install", json={"name": "does-not-exist"})
     assert r.status_code == 404
-
-
-async def test_install_duplicate_409(client):
-    await _auth(client)
-    body = {"name": "skill-creator"}
-    assert (await client.post("/skills/install", json=body)).status_code == 201
-    assert (await client.post("/skills/install", json=body)).status_code == 409
 
 
 async def test_upload_disabled_by_default_403(client):
@@ -240,3 +233,26 @@ async def test_deleted_builtin_comes_back_on_next_list(client):
     relisted = (await client.get("/skills")).json()
     assert [s["name"] for s in relisted] == ["skill-creator"]
     assert relisted[0]["id"] != sid
+
+
+# ---- 内置技能默认启用(注册种子 main / 新建 agent)----
+
+
+async def test_register_enables_builtins_on_main_agent(client):
+    await _auth(client)
+    agents = (await client.get("/agent-configs")).json()
+    main = next(a for a in agents if a["name"] == "main")
+    r = await client.get(f"/agent-configs/{main['id']}/skills")
+    assert r.status_code == 200
+    assert [s["name"] for s in r.json()] == ["skill-creator"]
+
+
+async def test_new_agent_gets_builtins_enabled(client):
+    await _auth(client)
+    r = await client.post(
+        "/agent-configs", json={"name": "a2", "model": "m", "provider": "openai"}
+    )
+    assert r.status_code == 201, r.text
+    agent_id = r.json()["id"]
+    enabled = (await client.get(f"/agent-configs/{agent_id}/skills")).json()
+    assert [s["name"] for s in enabled] == ["skill-creator"]

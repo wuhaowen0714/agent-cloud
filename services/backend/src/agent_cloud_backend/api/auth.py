@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,9 +14,13 @@ from agent_cloud_backend.models.user import User
 from agent_cloud_backend.repositories.agent_config import AgentConfigRepository
 from agent_cloud_backend.repositories.refresh_token import RefreshTokenRepository
 from agent_cloud_backend.repositories.session import SessionRepository
+from agent_cloud_backend.repositories.skill import AgentSkillEnableRepository, SkillRepository
 from agent_cloud_backend.repositories.user import UserRepository
 from agent_cloud_backend.schemas.auth import LoginBody, RegisterBody, TokenResponse
 from agent_cloud_backend.schemas.user import UserRead
+from agent_cloud_backend.skills.deps import get_object_store, get_skill_registry_root
+from agent_cloud_backend.skills.service import enable_builtin_skills, ensure_builtin_skills
+from agent_cloud_backend.skills.store import ObjectStore
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -55,6 +60,9 @@ async def register(
     response: Response,
     db: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
+    # 经依赖注入(而非直调 deps 函数):测试用 dependency_overrides 换临时 store/registry
+    store: ObjectStore = Depends(get_object_store),
+    registry_root: Path = Depends(get_skill_registry_root),
 ):
     repo = UserRepository(db)
     if await repo.get_by_email(body.email) is not None:
@@ -72,6 +80,15 @@ async def register(
         )
     )
     await SessionRepository(db).create_for(user.id, agent.id, None)
+    # 内置技能开箱即用:补装 + 对种子 main 默认启用(与 user 同事务,同生共死)
+    skill_repo = SkillRepository(db)
+    await ensure_builtin_skills(
+        user_id=user.id, registry_root=registry_root, repo=skill_repo, store=store
+    )
+    await enable_builtin_skills(
+        agent_config_id=agent.id, user_id=user.id,
+        repo=skill_repo, enable_repo=AgentSkillEnableRepository(db),
+    )
     return await _issue(response, user, db, settings)
 
 

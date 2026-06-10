@@ -79,10 +79,10 @@ async def test_enabled_skill_is_materialized_and_readable(skill_stack):
             "/agent-configs", json={"name": "coder", "model": "m", "provider": "fake"}
         )
     ).json()["id"]
-    # 从内置 registry 安装 + 给该 agent 启用
-    skill_id = (
-        await client.post("/skills/install", json={"name": "skill-creator"})
-    ).json()["id"]
+    # 内置技能注册即预装、建 agent 即默认启用;这里仍显式 PUT 一次保持确定性
+    skill_id = next(
+        s["id"] for s in (await client.get("/skills")).json() if s["name"] == "skill-creator"
+    )
     r = await client.put(f"/agent-configs/{aid}/skills", json={"skill_ids": [skill_id]})
     assert r.status_code == 200, r.text
 
@@ -120,8 +120,9 @@ async def test_disabled_skill_not_materialized(skill_stack):
             "/agent-configs", json={"name": "c", "model": "m", "provider": "fake"}
         )
     ).json()["id"]
-    await client.post("/skills/install", json={"name": "skill-creator"})
-    # 不调用 PUT /skills(不启用)
+    # 新建 agent 默认启用内置技能 → 显式清空启用集,还原「装了但未启用」场景
+    r = await client.put(f"/agent-configs/{aid}/skills", json={"skill_ids": []})
+    assert r.status_code == 200, r.text
     sid = (await client.post("/sessions", json={"agent_config_id": aid})).json()["id"]
     # FakeProvider 第一轮会尝试 read_file,读不到 → is_error;第二轮收尾。回合仍 200。
     r = await client.post(f"/sessions/{sid}/turn", json={"content": "x"})

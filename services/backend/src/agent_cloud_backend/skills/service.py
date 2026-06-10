@@ -4,7 +4,7 @@ import uuid
 from pathlib import Path
 
 from agent_cloud_backend.models.skill import Skill
-from agent_cloud_backend.repositories.skill import SkillRepository
+from agent_cloud_backend.repositories.skill import AgentSkillEnableRepository, SkillRepository
 from agent_cloud_backend.skills.manifest import SkillManifestError, parse_skill_md
 from agent_cloud_backend.skills.store import ObjectStore
 
@@ -86,3 +86,19 @@ async def ensure_builtin_skills(
         except ValueError:
             pass
     return out
+
+
+async def enable_builtin_skills(
+    *,
+    agent_config_id: uuid.UUID,
+    user_id: uuid.UUID,
+    repo: SkillRepository,
+    enable_repo: AgentSkillEnableRepository,
+) -> None:
+    """把用户已装的全部内置(registry 来源)技能启用到该 agent。
+
+    注册种子 main 与新建 agent 时调用——内置技能开箱即用;存量 agent 不回填
+    (用户在 TopBar/设置里自行开关)。"""
+    ids = [s.id for s in await repo.list_by_user(user_id) if s.source == "registry"]
+    if ids:
+        await enable_repo.replace_enabled_set(agent_config_id, ids)
