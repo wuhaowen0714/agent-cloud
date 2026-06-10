@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import secrets
+import time
 from collections.abc import AsyncIterator
 
 import openai
@@ -23,7 +24,30 @@ from agent_cloud_worker.provider import (
     ProviderEvent,
     ProviderTextDelta,
     ProviderThinkingDelta,
+    ProviderToolCallProgress,
 )
+
+# 工具参数生成进度:最小发射间隔(秒)。全局单计时器——流里 call 串行到达,
+# 这同时也是整条流进度事件率的上界(回放缓冲量级随之有界)。
+_PROGRESS_INTERVAL = 0.3
+_monotonic = time.monotonic  # 测试可替换的时钟
+_PATH_RE = re.compile(r'"path"\s*:\s*"((?:[^"\\]|\\.)*)"')
+
+
+def _sniff_path(args_prefix: str) -> str:
+    """从累积中的参数 JSON 前缀提取 "path" 字段值(进度展示用)。
+
+    JSON 字符串值内的引号必转义为 \\"——裸 "path" 键只可能是真实键位,不会误匹配
+    content 文本。值要取到闭引号才命中(中途返回 "",下次再试)。
+    """
+    m = _PATH_RE.search(args_prefix)
+    if not m:
+        return ""
+    raw = m.group(1)
+    try:
+        return json.loads(f'"{raw}"')  # 解码 \" \\ \uXXXX 等转义
+    except json.JSONDecodeError:
+        return raw
 
 # 上游对“超出上下文窗口”没有统一表示:OpenAI 用 code=context_length_exceeded,
 # 其它兼容端点常只在 message 里写。markers 只保留**高度专指上下文窗口**的词:像
@@ -228,10 +252,11 @@ class OpenAIProvider:
 
         text_parts: list[str] = []
         reasoning_parts: list[str] = []
-        # index -> {"id","name","args"};按 index 累积分片的 tool_call 参数
+        # index -> {"id","name","args","path"};按 index 累积分片的 tool_call 参数
         tool_acc: dict[int, dict] = {}
         usage = Usage()
         finish: str | None = None
+        last_progress = 0.0  # 上次进度发射时刻(_monotonic);0 → 首个参数分片立即发
 
         async for chunk in stream:
             if chunk.usage is not None:
@@ -252,13 +277,30 @@ class OpenAIProvider:
                 text_parts.append(delta.content)
                 yield ProviderTextDelta(text=delta.content)
             for tcd in delta.tool_calls or []:
-                slot = tool_acc.setdefault(tcd.index, {"id": "", "name": "", "args": ""})
+                slot = tool_acc.setdefault(
+                    tcd.index, {"id": "", "name": "", "args": "", "path": ""}
+                )
                 if tcd.id:
                     slot["id"] = tcd.id
                 if tcd.function and tcd.function.name:
                     slot["name"] = tcd.function.name
                 if tcd.function and tcd.function.arguments:
                     slot["args"] += tcd.function.arguments
+                    now = _monotonic()
+                    # 节流进度:id/name 已知(OpenAI 兼容流首分片即带)才发,否则是
+                    # 无法与后续 ToolCallStarted 配对的孤儿。只发计数不发内容;
+                    # 行数 = \n 转义数 + 1(字面 \\n 会误计,提示用途可接受)。
+                    if slot["id"] and slot["name"] and now - last_progress >= _PROGRESS_INTERVAL:
+                        if not slot["path"]:
+                            slot["path"] = _sniff_path(slot["args"])
+                        last_progress = now
+                        yield ProviderToolCallProgress(
+                            call_id=slot["id"],
+                            name=slot["name"],
+                            args_chars=len(slot["args"]),
+                            lines=slot["args"].count("\\n") + 1,
+                            path_hint=slot["path"],
+                        )
 
         # 组装 tool_calls:参数 JSON 解析失败(典型:被 length 掐断)的 call 降级为
         # arguments={} 并记入 truncated_call_ids,由 loop 跳过执行、回灌修复性错误。
