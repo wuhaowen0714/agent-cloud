@@ -13,27 +13,42 @@
 
 数据持久化:Postgres 在 named volume `agent-cloud_pgdata`、技能对象库在 `agent-cloud_objstore`、工作区在宿主目录——**重新部署(build + up -d)全都不动**。⚠️ 永远不要对该 compose 项目执行 `down -v`。
 
-## 首次部署
+## 代码如何到服务器(重要)
+
+目标机**访问不了 GitHub**(TLS 被掐),所以代码经**服务器上的裸仓库**走 ssh 推送:
+
+```
+本机 git push ali …  →  ali-ecs:/opt/agent-cloud/repo.git(bare)  →  /opt/agent-cloud/app(clone,origin=本地裸仓库)
+```
+
+本机一次性配置:`git remote add ali ali-ecs:/opt/agent-cloud/repo.git`。
+
+## 首次部署(已完成,留档)
 
 ```bash
+# 本机
+git push ali main
+# 服务器
 ssh ali-ecs
-git clone https://github.com/wuhaowen0714/agent-cloud.git /opt/agent-cloud/app
+git init --bare /opt/agent-cloud/repo.git   # 若尚未存在
+git clone /opt/agent-cloud/repo.git /opt/agent-cloud/app
 cd /opt/agent-cloud/app
 cp .env.example .env   # 填 LLM 凭据,并追加:
-# AGENT_CLOUD_AUTH_SECRET=$(openssl rand -base64 48)
+# AGENT_CLOUD_AUTH_SECRET=$(openssl rand -hex 48)
 # AGENT_CLOUD_CREDENTIAL_KEY=$(openssl rand -base64 32)
 bash deploy/deploy.sh
 ```
 
-阿里云控制台安全组放行 **8080/tcp** 后,访问 `http://<公网IP>:8080`。
+另:小内存机建议配 2G swap(已配,`/swapfile` + fstab)。阿里云控制台安全组放行 **8080/tcp** 后,访问 `http://<公网IP>:8080`。
 
-## 重新部署(改代码后)
+## 重新部署(改代码后,两条命令)
 
 ```bash
-ssh ali-ecs '/opt/agent-cloud/app/deploy/deploy.sh'
+git push ali main                                    # 本机:推最新代码到服务器裸仓库
+ssh ali-ecs '/opt/agent-cloud/app/deploy/deploy.sh'  # 服务器:pull → build → up -d
 ```
 
-(= git pull → 构建沙箱/应用/前端镜像 → `compose up -d`;数据库迁移由 backend 容器启动时自动执行 `alembic upgrade head`。)
+(数据库迁移由 backend 容器启动时自动执行 `alembic upgrade head`;pgdata/objstore 卷与工作区目录不受影响。)
 
 ## 组件与网络
 
