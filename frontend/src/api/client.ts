@@ -134,9 +134,6 @@ export const api = {
       body: JSON.stringify({ scope, type, content, ...(agentId ? { agent_id: agentId } : {}) }),
     }),
   listSkills: () => http<Skill[]>("/skills"),
-  listRegistry: () => http<string[]>("/skills/registry"),
-  installSkill: (name: string) =>
-    http<Skill>("/skills/install", { method: "POST", body: JSON.stringify({ name }) }),
   installSkillFromWorkspace: (path: string) =>
     http<Skill>("/skills/install-from-workspace", {
       method: "POST",
