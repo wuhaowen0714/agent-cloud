@@ -54,7 +54,9 @@ def test_error_sse_recoverable_codes():
 
 def test_tool_call_progress_mapping():
     out = turn_event_to_sse(
-        ToolCallProgress(call_id="c1", name="write_file", args_chars=1234, lines=5, path_hint="a.py")
+        ToolCallProgress(
+            call_id="c1", name="write_file", args_chars=1234, lines=5, path_hint="a.py"
+        )
     )
     assert out == {
         "type": "tool_call_progress",
