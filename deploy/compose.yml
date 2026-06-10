@@ -1,0 +1,73 @@
+# 生产 compose(阿里云单机)。从仓库根运行:docker compose -f deploy/compose.yml up -d
+# 持久化:pgdata / objstore 是 named volume,工作区是宿主目录 —— 重新部署(build + up)不动数据;
+# ⚠️ 永远不要 `down -v`(会删卷)。公开端口只有 web 的 8080。
+name: agent-cloud
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: agent_cloud
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+    restart: unless-stopped
+    # 不发布端口:仅 compose 网络内可达(与宿主上其它 Postgres 互不影响)
+
+  backend:
+    build: { context: .., dockerfile: deploy/app.Dockerfile }
+    image: agent-cloud-app:latest
+    working_dir: /app/services/backend
+    command: sh -c "uv run --no-sync alembic upgrade head && uv run --no-sync uvicorn agent_cloud_backend.main:app --host 0.0.0.0 --port 8000"
+    env_file: ../.env
+    environment:
+      AGENT_CLOUD_DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/agent_cloud
+      AGENT_CLOUD_WORKER_ENDPOINT: worker:50052
+      # DooD 沙箱:network 模式(publish 的 127.0.0.1 端点在容器化 worker 下不可达)
+      AGENT_CLOUD_SANDBOX_PROVISIONER: docker
+      AGENT_CLOUD_SANDBOX_DOCKER_NETWORK_MODE: network
+      AGENT_CLOUD_SANDBOX_DOCKER_NETWORK: agent-cloud-net
+      AGENT_CLOUD_SANDBOX_MEM_LIMIT: 256m # 1.6G 小机,压低单沙箱上限
+      # 工作区:容器内外同一路径(backend makedirs + 沙箱兄弟容器 bind 同一宿主目录)
+      AGENT_CLOUD_SANDBOX_BASE_ROOT: /opt/agent-cloud/data/workspaces
+      AGENT_CLOUD_SANDBOX_HOST_ROOT: /opt/agent-cloud/data/workspaces
+      AGENT_CLOUD_OBJECT_STORE_ROOT: /data/objstore
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock # DooD:经宿主 daemon 起沙箱兄弟容器
+      - /opt/agent-cloud/data/workspaces:/opt/agent-cloud/data/workspaces
+      - objstore:/data/objstore
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build: { context: .., dockerfile: deploy/app.Dockerfile }
+    image: agent-cloud-app:latest
+    working_dir: /app/services/worker
+    command: uv run --no-sync python -m agent_cloud_worker
+    env_file: ../.env # AGENT_CLOUD_WORKER_OPENAI_*(LLM 凭据只进 worker / backend 注入)
+    restart: unless-stopped
+
+  web:
+    build: { context: .., dockerfile: deploy/frontend.Dockerfile }
+    image: agent-cloud-web:latest
+    ports:
+      - "8080:80" # 唯一公开端口(8000 已被宿主上其它服务占用)
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+networks:
+  default:
+    # 固定网络名:DockerProvisioner 按此名把沙箱容器接进来(worker 经容器名直连沙箱)
+    name: agent-cloud-net
+
+volumes:
+  pgdata: # 数据库持久化:重新部署不动;严禁 down -v
+  objstore: # 技能对象库
