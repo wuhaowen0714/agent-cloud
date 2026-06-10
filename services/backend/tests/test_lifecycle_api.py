@@ -79,6 +79,63 @@ async def test_delete_session_idle_and_guards(client, engine):
     assert (await client.delete(f"/sessions/{sid2}", headers=h)).status_code == 404
 
 
+async def test_delete_agent_cascades_and_busy_guard(client, engine):
+    from agent_cloud_backend.models.context_document import ContextDocument
+    from agent_cloud_backend.models.memory_entry import MemoryEntry
+    from agent_cloud_backend.models.session import Session as SessionModel
+
+    h = await _register(client)
+    aid = (await client.get("/agent-configs", headers=h)).json()[0]["id"]
+    sid = (await _first_session(client, h))["id"]
+    # 播种 agent 级记忆 + 指令文档(无 FK,验证连带清理)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        db.add(MemoryEntry(scope="agent", owner_id=uuid.UUID(aid), content="m", version=1))
+        db.add(ContextDocument(scope="agent", type="AGENTS", owner_id=uuid.UUID(aid), content="d"))
+        await db.commit()
+
+    # 任一会话 running → 409,整体回滚(会话仍在)
+    async with maker() as db:
+        await db.execute(
+            update(SessionModel)
+            .where(SessionModel.id == uuid.UUID(sid))
+            .values(status="running", last_active_at=func.now())
+        )
+        await db.commit()
+    assert (await client.delete(f"/agent-configs/{aid}", headers=h)).status_code == 409
+    assert len((await client.get("/sessions", headers=h)).json()) == 1  # 没被偷删
+
+    # idle → 204:会话/记忆/文档全清
+    async with maker() as db:
+        await db.execute(
+            update(SessionModel).where(SessionModel.id == uuid.UUID(sid)).values(status="idle")
+        )
+        await db.commit()
+    assert (await client.delete(f"/agent-configs/{aid}", headers=h)).status_code == 204
+    assert (await client.get("/agent-configs", headers=h)).json() == []
+    assert (await client.get("/sessions", headers=h)).json() == []
+    async with maker() as db:
+        m = (
+            await db.execute(
+                select(func.count())
+                .select_from(MemoryEntry)
+                .where(MemoryEntry.owner_id == uuid.UUID(aid))
+            )
+        ).scalar_one()
+        d = (
+            await db.execute(
+                select(func.count())
+                .select_from(ContextDocument)
+                .where(ContextDocument.owner_id == uuid.UUID(aid))
+            )
+        ).scalar_one()
+    assert m == 0 and d == 0
+    # 他人 → 404
+    h2 = await _register(client)
+    aid2 = (await client.get("/agent-configs", headers=h2)).json()[0]["id"]
+    assert (await client.delete(f"/agent-configs/{aid2}", headers=h)).status_code == 404
+
+
 async def test_register_conflict_leaves_no_orphans(client, engine):
     email = f"{uuid.uuid4()}@e.com"
     await client.post("/auth/register", json={"email": email, "password": "password123"})
