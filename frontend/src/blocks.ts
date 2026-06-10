@@ -62,6 +62,8 @@ export function attachToolResult(blocks: Block[], callId: string, result: ToolRe
 export interface Turn {
   id: string
   userText: string | null
+  userAt: string | null // user 消息时间(提问气泡下显示)
+  doneAt: string | null // 回合最后一条 assistant/tool 消息时间 = 回答完成时间
   blocks: Block[]
 }
 
@@ -71,7 +73,10 @@ export interface Turn {
 // 思考不落库,故历史里没有思考块(仅 live 流式期间可见)。
 export function messagesToTurns(messages: Message[]): Turn[] {
   const turns: Turn[] = []
-  let cur: { id: string; user: string | null; assistants: Message[]; results: Map<string, ToolResult> } | null = null
+  let cur: {
+    id: string; user: string | null; userAt: string | null; lastAt: string | null
+    assistants: Message[]; results: Map<string, ToolResult>
+  } | null = null
 
   const flush = () => {
     if (!cur) return
@@ -82,16 +87,17 @@ export function messagesToTurns(messages: Message[]): Turn[] {
         blocks.push({ kind: "tool", id: c.id, call: c, result: cur.results.get(c.id) })
       }
     }
-    turns.push({ id: cur.id, userText: cur.user, blocks })
+    turns.push({ id: cur.id, userText: cur.user, userAt: cur.userAt, doneAt: cur.lastAt, blocks })
     cur = null
   }
 
   for (const m of messages) {
     if (m.role === "user") {
       flush()
-      cur = { id: m.id, user: m.content.text, assistants: [], results: new Map() }
+      cur = { id: m.id, user: m.content.text, userAt: m.created_at, lastAt: null, assistants: [], results: new Map() }
     } else {
-      if (!cur) cur = { id: m.id, user: null, assistants: [], results: new Map() }
+      if (!cur) cur = { id: m.id, user: null, userAt: null, lastAt: null, assistants: [], results: new Map() }
+      cur.lastAt = m.created_at // 回合内任何 assistant/tool 消息都推进「完成时间」
       if (m.role === "tool") {
         for (const r of m.content.tool_results) cur.results.set(r.call_id, r)
       } else {

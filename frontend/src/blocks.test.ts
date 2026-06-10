@@ -51,7 +51,8 @@ describe("appendToolCall / attachToolResult", () => {
 
 const mk = (over: Partial<Message>): Message => ({
   id: "m", seq: 0, role: "assistant",
-  content: { text: "", tool_calls: [], tool_results: [] }, ...over,
+  content: { text: "", tool_calls: [], tool_results: [] },
+  created_at: "2026-06-10T10:00:00", ...over,
 })
 
 describe("messagesToTurns", () => {
@@ -139,5 +140,35 @@ describe("dropPendingTools(error/cancel 终态)", () => {
     const out = dropPendingTools(b)
     expect(out.map((x) => x.kind)).toEqual(["text", "tool"])
     expect((out[1] as Extract<Block, { kind: "tool" }>).id).toBe("c0")
+  })
+})
+
+describe("messagesToTurns 时间戳", () => {
+  it("userAt 取 user 消息时间,doneAt 取回合最后一条消息时间", () => {
+    const messages: Message[] = [
+      mk({ id: "u1", seq: 0, role: "user", content: { text: "q", tool_calls: [], tool_results: [] }, created_at: "2026-06-10T10:00:00" }),
+      mk({ id: "a1", seq: 1, role: "assistant", content: { text: "checking", tool_calls: [{ id: "c1", name: "bash", arguments: {} }], tool_results: [] }, created_at: "2026-06-10T10:01:00" }),
+      mk({ id: "t1", seq: 2, role: "tool", content: { text: "", tool_calls: [], tool_results: [{ call_id: "c1", content: "ok", is_error: false }] }, created_at: "2026-06-10T10:02:00" }),
+      mk({ id: "a2", seq: 3, role: "assistant", content: { text: "done", tool_calls: [], tool_results: [] }, created_at: "2026-06-10T10:03:00" }),
+    ]
+    const turns = messagesToTurns(messages)
+    expect(turns[0].userAt).toBe("2026-06-10T10:00:00")
+    expect(turns[0].doneAt).toBe("2026-06-10T10:03:00")
+  })
+
+  it("无 user 消息的孤儿回合:userAt 为 null,doneAt 仍取最后一条", () => {
+    const turns = messagesToTurns([
+      mk({ id: "a1", seq: 0, role: "assistant", content: { text: "hi", tool_calls: [], tool_results: [] }, created_at: "2026-06-10T11:00:00" }),
+    ])
+    expect(turns[0].userAt).toBeNull()
+    expect(turns[0].doneAt).toBe("2026-06-10T11:00:00")
+  })
+
+  it("只有 user 消息(未完成回合):doneAt 为 null", () => {
+    const turns = messagesToTurns([
+      mk({ id: "u1", seq: 0, role: "user", content: { text: "q", tool_calls: [], tool_results: [] }, created_at: "2026-06-10T12:00:00" }),
+    ])
+    expect(turns[0].userAt).toBe("2026-06-10T12:00:00")
+    expect(turns[0].doneAt).toBeNull()
   })
 })
