@@ -52,6 +52,7 @@ Agent Cloud 是一个把"可配置 AI agent + 隔离代码执行"做成多租户
 - 🛠️ **工具**:沙箱内执行的 `bash`、`read_file`、`write_file`、`edit`(精确字符串替换,多段、保留 CRLF);外加 worker 原生的 `remember`(主动写长期记忆,**不进沙箱**)。
 - 🧠 **智能体记忆**:每作用域一块的**自整合单块**记忆(user 跨 agent 共享 / agent 专属);**空闲 + 压缩前**自动提炼——LLM 读旧块对账重写(增 / 改 / 淘汰),乐观并发版本化;agent 可调 `remember` 主动记;设置内可查看 / 编辑 / 清空。
 - ⌨️ **斜杠命令**:输入 `/` 唤起命令面板(纯客户端动作,不发给 LLM)——`/compact` 手动压缩、`/status`(agent / 会话 / 消息数 / **上下文 tokens**)、`/new`、`/model`、`/help` 与设置导航。
+- 📎 **`@` 文件引用**:composer 输入 `@` 弹出工作区文件浮层(仿 Codex),边打边过滤(含中文),选中插入 `@相对路径`——agent 看到路径自行 `read_file`,不注入文件内容(token 友好)。
 - 🎛️ **模型切换**:composer 左下模型 chip 即点即切(持久到当前 agent);选项 = 预设(DeepSeek-V4-Pro / DeepSeek-V4-Flash / GLM-5.1)∪ 各 agent 在用 ∪ **用户自定义**(后端持久化、跨设备);创建 agent 免填模型。
 - 🚀 **开箱即用**:注册自动播种默认 agent(`main`)+ 默认会话,登录即可开聊;一键新建 agent(`Agent N`,新建即行内改名);agent / 会话支持行内**重命名**与**二次确认删除**(删 agent 连带其会话,进行中的回合受保护)。
 - 🧩 **技能(Skills)**:从 registry **安装**到用户对象库 → 在 agent 上**启用** → 每回合**物化**进沙箱并注入提示词;内置 `skill-creator`,支持**从工作区一键安装**自制技能。
