@@ -23,6 +23,30 @@ async def test_register_seeds_default_agent_and_session(client):
     assert sessions[0]["agent_config_id"] == agents[0]["id"]
 
 
+async def _first_session(client, h):
+    return (await client.get("/sessions", headers=h)).json()[0]
+
+
+async def test_rename_session(client):
+    h = await _register(client)
+    sid = (await _first_session(client, h))["id"]
+    r = await client.patch(f"/sessions/{sid}", json={"title": "  我的会话  "}, headers=h)
+    assert r.status_code == 200
+    assert r.json()["title"] == "我的会话"  # trim
+    # 校验:空/超长 → 422
+    assert (
+        await client.patch(f"/sessions/{sid}", json={"title": "   "}, headers=h)
+    ).status_code == 422
+    assert (
+        await client.patch(f"/sessions/{sid}", json={"title": "x" * 201}, headers=h)
+    ).status_code == 422
+    # 他人 → 404
+    h2 = await _register(client)
+    assert (
+        await client.patch(f"/sessions/{sid}", json={"title": "hack"}, headers=h2)
+    ).status_code == 404
+
+
 async def test_register_conflict_leaves_no_orphans(client, engine):
     email = f"{uuid.uuid4()}@e.com"
     await client.post("/auth/register", json={"email": email, "password": "password123"})

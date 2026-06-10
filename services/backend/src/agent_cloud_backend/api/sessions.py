@@ -9,7 +9,7 @@ from agent_cloud_backend.config import Settings, get_settings
 from agent_cloud_backend.db import get_sessionmaker
 from agent_cloud_backend.models.user import User
 from agent_cloud_backend.repositories.session import SessionRepository
-from agent_cloud_backend.schemas.session import SessionCreate, SessionRead
+from agent_cloud_backend.schemas.session import SessionCreate, SessionRead, SessionUpdate
 from agent_cloud_backend.turn.compaction import compact
 from agent_cloud_backend.turn.heartbeat import session_heartbeat
 
@@ -34,6 +34,23 @@ async def list_sessions(
     user: User = Depends(get_current_user),
 ):
     return await SessionRepository(session).list_by_user(user.id)
+
+
+@router.patch("/{session_id}", response_model=SessionRead)
+async def rename_session(
+    session_id: uuid.UUID,
+    body: SessionUpdate,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    s = await owned_session(session_id, user.id, session)  # 404
+    title = body.title.strip()
+    if not title or len(title) > 200:
+        raise HTTPException(status_code=422, detail="title must be 1-200 chars")
+    s.title = title
+    await session.commit()
+    await session.refresh(s)
+    return s
 
 
 @router.post("/{session_id}/compact")
