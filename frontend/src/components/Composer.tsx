@@ -1,4 +1,8 @@
+import { useQuery } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
+import { api } from "../api/client"
+import { useStore } from "../store"
+import { ModelMenu } from "./model/ModelMenu"
 import { matchCommands, parseInput } from "./slash/commands"
 import { SlashPalette } from "./slash/SlashPalette"
 import { StatusCard } from "./slash/StatusCard"
@@ -32,6 +36,16 @@ export function Composer({
     showStatus: () => setNotice({ kind: "status" }),
     showHelp: () => setNotice({ kind: "help" }),
   })
+
+  const userId = useStore((s) => s.userId)
+  const agentId = useStore((s) => s.agentId)
+  // 订阅式读取(与 AgentList 共享缓存):patchAgent 失效后 chip 文本自动更新。
+  const { data: agents = [] } = useQuery({
+    queryKey: ["agents", userId],
+    queryFn: () => api.listAgents(),
+    enabled: !!userId,
+  })
+  const currentModel = agents.find((a) => a.id === agentId)?.model
 
   // 由文本派生面板条目(命令模式 / 参数模式)。
   const parsed = parseInput(text)
@@ -108,7 +122,8 @@ export function Composer({
 
   return (
     <div className="border-t border-slate-200 bg-white/80 p-3 backdrop-blur">
-      <div ref={wrapRef} className="relative mx-auto flex max-w-5xl items-end gap-2">
+      <div className="mx-auto max-w-5xl">
+      <div ref={wrapRef} className="relative flex items-end gap-2">
         {notice && (
           <StatusCard
             kind={notice.kind}
@@ -174,6 +189,13 @@ export function Composer({
             发送
           </Button>
         )}
+      </div>
+      {/* 左下模型 chip(仿 Claude Code):即点即切,持久到当前 agent(与 /model 同语义) */}
+      {agentId && currentModel && (
+        <div className="mt-1.5 flex items-center">
+          <ModelMenu variant="chip" value={currentModel} onChange={(m) => void ctx.setModel(m)} />
+        </div>
+      )}
       </div>
     </div>
   )
