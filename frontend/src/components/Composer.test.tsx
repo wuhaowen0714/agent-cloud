@@ -196,4 +196,12 @@ describe("模型 chip", () => {
     fireEvent.click(await screen.findByRole("option", { name: /DeepSeek-V4-Flash/ }))
     expect(spy).toHaveBeenCalledWith("a1", { model: "DeepSeek-V4-Flash" })
   })
+
+  it("切换失败 → flash 提示(不静默)", async () => {
+    vi.spyOn(api, "patchAgent").mockRejectedValue(new Error("net"))
+    setup()
+    fireEvent.click(screen.getByRole("button", { name: /gpt-4o/ }))
+    fireEvent.click(await screen.findByRole("option", { name: /GLM-5\.1/ }))
+    expect(await screen.findByText("切换模型失败")).toBeInTheDocument()
+  })
 })

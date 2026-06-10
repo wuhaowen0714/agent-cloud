@@ -64,10 +64,11 @@ export const DEFAULT_MODEL = "DeepSeek-V4-Pro"
   - `removeModel(id): Promise<void>`(DELETE → 失效 userModels)。
 - 去重复用 `dedupeModels` 思路(trim + Set 保序)。
 
-### 删除语义
+### 删除/添加语义(对抗审查后修订)
 
-- 只有**自定义条目**可删(预设/在用条目无删除按钮)。
-- 删除一个仍被某 agent 使用的自定义模型 → 它会从「在用」派生回列表;不影响任何 agent 的 `model` 字段。
+- 只有**自定义条目**可删(预设/在用条目无删除按钮)。删除只影响列表,不影响任何 agent 的 `model` 字段。
+- 正被某 agent 使用的自定义模型会并入「在用」段、暂不显示删除入口;不再被使用后恢复可删。
+- 添加时若与已有选项(预设/在用/自定义)同名:**直接选中、不再落库**——防止产生被合并去重吞掉、列表里永不可见的孤儿自定义行。
 
 ## 3. `ModelMenu` 组件(`src/components/model/ModelMenu.tsx`)
 

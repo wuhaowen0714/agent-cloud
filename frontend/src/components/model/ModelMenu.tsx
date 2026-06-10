@@ -19,6 +19,7 @@ export function ModelMenu({
   const [up, setUp] = useState(false)
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState("")
+  const [addFailed, setAddFailed] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
 
@@ -39,6 +40,7 @@ export function ModelMenu({
     }
     setAdding(false)
     setDraft("")
+    setAddFailed(false)
     setOpen(true)
   }
   const close = () => {
@@ -48,9 +50,20 @@ export function ModelMenu({
   const submitAdd = async () => {
     const m = draft.trim()
     if (!m) return
-    const saved = await addModel(m)
-    onChange(saved) // 添加即选中
-    close()
+    // 与已有选项同名(预设/在用/自定义):直接选中、不落库——否则会产生被合并去重
+    // 吞掉、列表里永不可见也删不掉的孤儿自定义行。
+    if (options.some((o) => o.model === m)) {
+      onChange(m)
+      close()
+      return
+    }
+    try {
+      const saved = await addModel(m)
+      onChange(saved) // 添加即选中
+      close()
+    } catch {
+      setAddFailed(true) // 422/409/网络:就地提示,保留输入供修改
+    }
   }
 
   const triggerCls =
@@ -116,8 +129,8 @@ export function ModelMenu({
                 <button
                   type="button"
                   aria-label={`删除 ${o.model}`}
-                  onClick={() => void removeModel(o.custom!.id)}
-                  className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-300 opacity-0 transition hover:bg-slate-100 hover:text-slate-600 group-hover:opacity-100"
+                  onClick={() => void removeModel(o.custom!.id).catch(() => {})}
+                  className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-300 opacity-0 transition hover:bg-slate-100 hover:text-slate-600 focus-visible:opacity-100 group-hover:opacity-100"
                 >
                   <X size={13} />
                 </button>
@@ -126,23 +139,33 @@ export function ModelMenu({
           ))}
           <div className="mt-1 border-t border-slate-100 pt-1">
             {adding ? (
-              <input
-                autoFocus
-                value={draft}
-                placeholder="模型名,Enter 确认"
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault()
-                    void submitAdd()
-                  } else if (e.key === "Escape") {
-                    e.stopPropagation() // 只退回列表,不关整个浮层
-                    setAdding(false)
-                    setDraft("")
-                  }
-                }}
-                className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
-              />
+              <>
+                <input
+                  autoFocus
+                  value={draft}
+                  maxLength={200}
+                  placeholder="模型名,Enter 确认"
+                  onChange={(e) => {
+                    setDraft(e.target.value)
+                    setAddFailed(false)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault()
+                      void submitAdd()
+                    } else if (e.key === "Escape") {
+                      e.stopPropagation() // 只退回列表,不关整个浮层
+                      setAdding(false)
+                      setDraft("")
+                      setAddFailed(false)
+                    }
+                  }}
+                  className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
+                />
+                {addFailed && (
+                  <div className="px-2.5 pt-1 text-xs text-red-600">添加失败,请重试</div>
+                )}
+              </>
             ) : (
               <button
                 type="button"

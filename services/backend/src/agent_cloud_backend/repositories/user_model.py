@@ -11,7 +11,9 @@ class UserModelRepository(BaseRepository[UserModel]):
 
     async def list_by_user(self, user_id: uuid.UUID) -> list[UserModel]:
         result = await self.session.execute(
-            select(UserModel).where(UserModel.user_id == user_id).order_by(UserModel.created_at)
+            select(UserModel)
+            .where(UserModel.user_id == user_id)
+            .order_by(UserModel.created_at, UserModel.id)  # id 次序键:同秒创建时顺序稳定
         )
         return list(result.scalars().all())
 

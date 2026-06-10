@@ -74,6 +74,30 @@ describe("ModelMenu", () => {
     await waitFor(() => expect(onChange).toHaveBeenCalledWith("new-m"))
   })
 
+  it("添加已存在的名字:直接选中,不落库(防孤儿行)", async () => {
+    const spy = vi.spyOn(api, "addModel")
+    const { onChange } = setup()
+    openMenu()
+    fireEvent.click(await screen.findByText("添加模型…"))
+    const input = screen.getByPlaceholderText("模型名,Enter 确认")
+    fireEvent.change(input, { target: { value: "GLM-5.1" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith("GLM-5.1"))
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it("添加失败:就地提示,不回调 onChange", async () => {
+    vi.spyOn(api, "addModel").mockRejectedValue(new Error("boom"))
+    const { onChange } = setup()
+    openMenu()
+    fireEvent.click(await screen.findByText("添加模型…"))
+    const input = screen.getByPlaceholderText("模型名,Enter 确认")
+    fireEvent.change(input, { target: { value: "new-m" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(await screen.findByText("添加失败,请重试")).toBeInTheDocument()
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
   it("自定义条目可删,删除不触发 onChange", async () => {
     const del = vi.spyOn(api, "deleteModel").mockResolvedValue(undefined)
     const { onChange } = setup()

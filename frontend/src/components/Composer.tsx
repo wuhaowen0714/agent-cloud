@@ -190,10 +190,15 @@ export function Composer({
           </Button>
         )}
       </div>
-      {/* 左下模型 chip(仿 Claude Code):即点即切,持久到当前 agent(与 /model 同语义) */}
+      {/* 左下模型 chip(仿 Claude Code):即点即切,持久到当前 agent(与 /model 同语义)。
+          streaming 中跟随输入区一起禁用;失败走 flash 反馈(与斜杠路径对齐)。 */}
       {agentId && currentModel && (
-        <div className="mt-1.5 flex items-center">
-          <ModelMenu variant="chip" value={currentModel} onChange={(m) => void ctx.setModel(m)} />
+        <div className={`mt-1.5 flex items-center ${disabled ? "pointer-events-none opacity-50" : ""}`}>
+          <ModelMenu
+            variant="chip"
+            value={currentModel}
+            onChange={(m) => void ctx.setModel(m).catch(() => ctx.notify("切换模型失败"))}
+          />
         </div>
       )}
       </div>
