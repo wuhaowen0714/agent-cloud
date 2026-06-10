@@ -7,6 +7,7 @@ from agent_cloud.v1 import worker_pb2
 from agent_cloud_common.events import (
     TextDelta,
     ThinkingDelta,
+    ToolCallProgress,
     ToolCallStarted,
     ToolResultEvent,
     TurnDone,
@@ -59,6 +60,14 @@ def turn_event_to_proto(event: TurnEvent) -> worker_pb2.TurnEvent:
         return worker_pb2.TurnEvent(text_delta=worker_pb2.TextDelta(text=event.text))
     if isinstance(event, ThinkingDelta):
         return worker_pb2.TurnEvent(thinking_delta=worker_pb2.ThinkingDelta(text=event.text))
+    if isinstance(event, ToolCallProgress):
+        return worker_pb2.TurnEvent(
+            tool_call_progress=worker_pb2.ToolCallProgress(
+                call_id=event.call_id, name=event.name,
+                args_chars=event.args_chars, lines=event.lines,
+                path_hint=event.path_hint,
+            )
+        )
     if isinstance(event, ToolCallStarted):
         return worker_pb2.TurnEvent(
             tool_call_started=worker_pb2.ToolCallStarted(
@@ -91,6 +100,12 @@ def turn_event_from_proto(proto: worker_pb2.TurnEvent) -> TurnEvent:
         return TextDelta(text=proto.text_delta.text)
     if which == "thinking_delta":
         return ThinkingDelta(text=proto.thinking_delta.text)
+    if which == "tool_call_progress":
+        t = proto.tool_call_progress
+        return ToolCallProgress(
+            call_id=t.call_id, name=t.name, args_chars=t.args_chars,
+            lines=t.lines, path_hint=t.path_hint,
+        )
     if which == "tool_call_started":
         t = proto.tool_call_started
         return ToolCallStarted(

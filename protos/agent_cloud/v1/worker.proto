@@ -85,6 +85,14 @@ message ToolCallStarted {
   string name = 2;
   string arguments_json = 3;
 }
+// 参数生成中的节流进度(worker 在 LLM 分片累积时发;不含参数内容)。
+message ToolCallProgress {
+  string call_id = 1;
+  string name = 2;
+  int64 args_chars = 3;
+  int64 lines = 4;
+  string path_hint = 5;
+}
 message ToolResultEvent {
   string call_id = 1;
   string content = 2;
@@ -104,6 +112,7 @@ message TurnEvent {
     ToolCallStarted tool_call_started = 3;
     ToolResultEvent tool_result = 4;
     TurnDone turn_done = 5;
+    ToolCallProgress tool_call_progress = 6;
   }
 }
 

@@ -3,6 +3,7 @@ from agent_cloud.v1 import worker_pb2
 from agent_cloud_common import (
     TextDelta,
     ThinkingDelta,
+    ToolCallProgress,
     ToolCallStarted,
     ToolResultEvent,
     TurnDone,
@@ -86,3 +87,11 @@ def test_round_trip_turn_done():
     assert isinstance(e, TurnDone)
     assert e.new_messages[0].text == "done" and e.new_messages[0].role == Role.ASSISTANT
     assert e.usage.output_tokens == 4 and e.stop_reason == "end_turn"
+
+
+def test_round_trip_tool_call_progress():
+    e = ToolCallProgress(
+        call_id="c1", name="write_file", args_chars=1234, lines=5, path_hint="src/a.py"
+    )
+    back = turn_event_from_proto(turn_event_to_proto(e))
+    assert back == e
