@@ -11,7 +11,8 @@ async def test_agent_config_crud(auth_client):
     r = await auth_client.patch(f"/agent-configs/{aid}", json={"name": "coder2"})
     assert r.status_code == 200 and r.json()["name"] == "coder2"
     r = await auth_client.get("/agent-configs")
-    assert r.status_code == 200 and len(r.json()) == 1
+    assert r.status_code == 200 and len(r.json()) == 2  # +1: 注册播种的 main
+    assert {a["name"] for a in r.json()} == {"main", "coder2"}
 
 
 async def test_session_and_messages(auth_client):
@@ -118,9 +119,10 @@ async def test_agent_config_patch_jsonb_fields(auth_client):
     assert patched["permissions"] == {"net": True, "fs": "ro"}
     assert patched["updated_at"] >= created["updated_at"]
 
-    listed = (await auth_client.get("/agent-configs")).json()
-    assert listed[0]["enabled_tools"] == ["bash", "read"]
-    assert listed[0]["permissions"] == {"net": True, "fs": "ro"}
+    # 按本测试创建的 id 过滤(列表里还有注册播种的 main)
+    mine = next(a for a in (await auth_client.get("/agent-configs")).json() if a["id"] == aid)
+    assert mine["enabled_tools"] == ["bash", "read"]
+    assert mine["permissions"] == {"net": True, "fs": "ro"}
 
 
 async def test_message_seq_ordering_three_rows(auth_client):

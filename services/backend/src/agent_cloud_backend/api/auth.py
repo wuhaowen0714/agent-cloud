@@ -8,8 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agent_cloud_backend.api.deps import get_current_user, get_session
 from agent_cloud_backend.auth import security
 from agent_cloud_backend.config import Settings, get_settings
+from agent_cloud_backend.models.agent_config import AgentConfig
 from agent_cloud_backend.models.user import User
+from agent_cloud_backend.repositories.agent_config import AgentConfigRepository
 from agent_cloud_backend.repositories.refresh_token import RefreshTokenRepository
+from agent_cloud_backend.repositories.session import SessionRepository
 from agent_cloud_backend.repositories.user import UserRepository
 from agent_cloud_backend.schemas.auth import LoginBody, RegisterBody, TokenResponse
 from agent_cloud_backend.schemas.user import UserRead
@@ -59,6 +62,16 @@ async def register(
     user = await repo.create(
         User(email=body.email, password_hash=security.hash_password(body.password))
     )
+    # 新用户开箱即用:默认 agent(main)+ 一条默认会话;与 user 同一事务,同生共死。
+    agent = await AgentConfigRepository(db).create(
+        AgentConfig(
+            user_id=user.id,
+            name="main",
+            model=settings.default_agent_model,
+            provider="openai",
+        )
+    )
+    await SessionRepository(db).create_for(user.id, agent.id, None)
     return await _issue(response, user, db, settings)
 
 

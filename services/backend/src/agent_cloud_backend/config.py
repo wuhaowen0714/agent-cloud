@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     memory_idle_seconds: int = 1800  # 空闲多久算"可提炼"(默认同沙箱 idle TTL)
     memory_max_versions: int = 20  # 每块保留版本数,超出裁剪
 
+    # 注册播种:新用户自动获得的默认 agent(开箱即用;与前端 DEFAULT_MODEL 同值)。
+    default_agent_model: str = "DeepSeek-V4-Pro"
+
     def compaction_threshold_for(self, model: str) -> int:
         """该模型的压缩阈值:优先 per-model 覆盖,否则回退全局默认。"""
         return self.compaction_token_thresholds.get(model, self.compaction_token_threshold)

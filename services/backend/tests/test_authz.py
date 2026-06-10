@@ -86,5 +86,6 @@ async def test_agent_configs_isolated_per_user(client):
     await client.post(
         "/agent-configs", json={"name": "a", "model": "m", "provider": "p"}, headers=_h(ta)
     )
-    # B 列表为空(看不到 A 的 agent)
-    assert (await client.get("/agent-configs", headers=_h(tb))).json() == []
+    # B 看不到 A 的 agent(B 只有自己注册播种的 main)
+    b_agents = (await client.get("/agent-configs", headers=_h(tb))).json()
+    assert [x["name"] for x in b_agents] == ["main"]
