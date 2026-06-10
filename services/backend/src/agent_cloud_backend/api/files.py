@@ -79,6 +79,18 @@ def list_files(
         raise _http_from(exc) from exc
 
 
+@router.get("/index", response_model=list[str])
+def index_files(
+    store: FileStore = Depends(get_file_store),
+    user: User = Depends(get_current_user),
+):
+    """工作区全部文件的相对路径(composer @ 文件引用的索引)。无路径入参,无越狱面。"""
+    try:
+        return store.walk(str(user.id))
+    except Exception as exc:
+        raise _http_from(exc) from exc
+
+
 @router.get("/raw")
 def raw(
     path: str,

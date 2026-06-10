@@ -31,6 +31,7 @@ class FileStore(Protocol):
     def move(self, user_id: str, src: str, dst: str) -> FileEntry: ...
     def delete(self, user_id: str, rel_path: str) -> None: ...
     def zip_dir(self, user_id: str, rel_path: str) -> Iterator[bytes]: ...
+    def walk(self, user_id: str, limit: int = 2000) -> list[str]: ...
 
 
 _CHUNK = 1024 * 1024
@@ -165,6 +166,20 @@ class LocalFileStore:
             shutil.rmtree(target)
         else:
             target.unlink()
+
+    def walk(self, user_id: str, limit: int = 2000) -> list[str]:
+        """递归列出工作区全部文件的相对 posix 路径(仅文件;composer @ 文件引用的索引)。
+        跳过符号链接(与 zip_dir 同款,防越狱读);排序后截断到 limit(防巨型工作区)。"""
+        root = self._user_root(user_id).resolve()
+        if not root.exists():
+            return []  # 全新用户:空工作区,读操作不创建目录(I3)
+        out: list[str] = []
+        for p in sorted(root.rglob("*")):
+            if p.is_file() and not p.is_symlink():
+                out.append(p.relative_to(root).as_posix())
+                if len(out) >= limit:
+                    break
+        return out
 
     def zip_dir(self, user_id: str, rel_path: str) -> Iterator[bytes]:
         target = self._resolve(user_id, rel_path)
