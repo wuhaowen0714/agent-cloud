@@ -41,7 +41,9 @@ export default function App() {
   if (!user) return <AuthGate />
 
   return (
-    <div className="flex h-full">
+    // overflow-hidden:应用是「固定视口外壳,只有指定面板滚动」;兜底保证任何内部溢出
+    // 都不会把 document 撑出滚动条(滚动应发生在 MessageList / 列表等 overflow-auto 里)。
+    <div className="flex h-full overflow-hidden">
       <Sidebar />
       <main className="flex min-w-0 flex-1 flex-col bg-gradient-to-b from-slate-50 to-slate-100/40">
         <ChatView />
