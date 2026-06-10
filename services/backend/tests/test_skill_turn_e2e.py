@@ -26,7 +26,7 @@ async def skill_stack(engine, tmp_path):
                         ToolCall(
                             id="c1",
                             name="read_file",
-                            arguments={"path": ".skills/example-greeting/SKILL.md"},
+                            arguments={"path": ".skills/skill-creator/SKILL.md"},
                         )
                     ],
                 ),
@@ -81,7 +81,7 @@ async def test_enabled_skill_is_materialized_and_readable(skill_stack):
     ).json()["id"]
     # 从内置 registry 安装 + 给该 agent 启用
     skill_id = (
-        await client.post("/skills/install", json={"name": "example-greeting"})
+        await client.post("/skills/install", json={"name": "skill-creator"})
     ).json()["id"]
     r = await client.put(f"/agent-configs/{aid}/skills", json={"skill_ids": [skill_id]})
     assert r.status_code == 200, r.text
@@ -92,16 +92,16 @@ async def test_enabled_skill_is_materialized_and_readable(skill_stack):
     assert r.json()["stop_reason"] == "end_turn"
 
     # 1) skill 物化到了用户级共享工作空间
-    md = base / str(uid) / "workspace" / ".skills" / "example-greeting" / "SKILL.md"
+    md = base / str(uid) / "workspace" / ".skills" / "skill-creator" / "SKILL.md"
     assert md.is_file()
-    assert "example-greeting" in md.read_text()
+    assert "skill-creator" in md.read_text()
 
     # 2) agent 确实读到了它(tool 消息回填了 SKILL.md 内容)
     listed = (await client.get(f"/sessions/{sid}/messages")).json()
     assert [m["role"] for m in listed] == ["user", "assistant", "tool", "assistant"]
     tool_msg = listed[2]
     results = tool_msg["content"]["tool_results"]
-    assert results and "example-greeting" in results[0]["content"]
+    assert results and "skill-creator" in results[0]["content"]
     assert results[0]["is_error"] is False
 
 
@@ -120,7 +120,7 @@ async def test_disabled_skill_not_materialized(skill_stack):
             "/agent-configs", json={"name": "c", "model": "m", "provider": "fake"}
         )
     ).json()["id"]
-    await client.post("/skills/install", json={"name": "example-greeting"})
+    await client.post("/skills/install", json={"name": "skill-creator"})
     # 不调用 PUT /skills(不启用)
     sid = (await client.post("/sessions", json={"agent_config_id": aid})).json()["id"]
     # FakeProvider 第一轮会尝试 read_file,读不到 → is_error;第二轮收尾。回合仍 200。

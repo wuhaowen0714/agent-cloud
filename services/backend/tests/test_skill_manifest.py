@@ -63,13 +63,11 @@ def test_requires_must_be_mapping():
         parse_skill_md("---\nname: ok\ndescription: d\nrequires: [bash]\n---\nx\n")
 
 
-def test_bundled_registry_example_parses():
+def test_bundled_registry_skill_creator_parses():
     from pathlib import Path
 
     import agent_cloud_backend
 
-    root = Path(agent_cloud_backend.__file__).parent / "skill_registry" / "example-greeting"
+    root = Path(agent_cloud_backend.__file__).parent / "skill_registry" / "skill-creator"
     m = parse_skill_md((root / "SKILL.md").read_text())
-    assert m.name == "example-greeting"
-    assert m.requires == {"bins": ["bash"]}
-    assert (root / "scripts" / "greet.sh").is_file()
+    assert m.name == "skill-creator"

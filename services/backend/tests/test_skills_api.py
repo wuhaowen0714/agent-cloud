@@ -25,11 +25,11 @@ def _zip_bytes(name="zippy", description="from zip"):
 
 async def test_install_from_registry_then_list(client):
     await _auth(client)
-    r = await client.post("/skills/install", json={"name": "example-greeting"})
+    r = await client.post("/skills/install", json={"name": "skill-creator"})
     assert r.status_code == 201, r.text
     assert r.json()["source"] == "registry"
     r = await client.get("/skills")
-    assert r.status_code == 200 and [s["name"] for s in r.json()] == ["example-greeting"]
+    assert r.status_code == 200 and [s["name"] for s in r.json()] == ["skill-creator"]
 
 
 async def test_install_unknown_registry_skill_404(client):
@@ -40,7 +40,7 @@ async def test_install_unknown_registry_skill_404(client):
 
 async def test_install_duplicate_409(client):
     await _auth(client)
-    body = {"name": "example-greeting"}
+    body = {"name": "skill-creator"}
     assert (await client.post("/skills/install", json=body)).status_code == 201
     assert (await client.post("/skills/install", json=body)).status_code == 409
 
@@ -81,7 +81,7 @@ async def test_upload_zip_slip_rejected(client, monkeypatch):
 
 async def test_delete_skill(client):
     await _auth(client)
-    sid = (await client.post("/skills/install", json={"name": "example-greeting"})).json()["id"]
+    sid = (await client.post("/skills/install", json={"name": "skill-creator"})).json()["id"]
     assert (await client.delete(f"/skills/{sid}")).status_code == 204
     assert (await client.get("/skills")).json() == []
     assert (await client.delete(f"/skills/{sid}")).status_code == 404
@@ -118,7 +118,7 @@ async def test_upload_macos_zip_with_dunder_macosx(client, monkeypatch):
 async def test_list_registry_skills(auth_client):
     r = await auth_client.get("/skills/registry")
     assert r.status_code == 200
-    assert "example-greeting" in r.json()  # 仓库内置 registry 技能
+    assert "skill-creator" in r.json()  # 仓库内置 registry 技能
 
 
 _WS_SKILL_MD = (
