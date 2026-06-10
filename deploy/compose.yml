@@ -23,7 +23,7 @@ services:
     build: { context: .., dockerfile: deploy/app.Dockerfile }
     image: agent-cloud-app:latest
     working_dir: /app/services/backend
-    command: sh -c "uv run --no-sync alembic upgrade head && uv run --no-sync uvicorn agent_cloud_backend.main:app --host 0.0.0.0 --port 8000"
+    command: sh -c "alembic upgrade head && uvicorn agent_cloud_backend.main:app --host 0.0.0.0 --port 8000"
     env_file: ../.env
     environment:
       AGENT_CLOUD_DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/agent_cloud
@@ -50,7 +50,7 @@ services:
     build: { context: .., dockerfile: deploy/app.Dockerfile }
     image: agent-cloud-app:latest
     working_dir: /app/services/worker
-    command: uv run --no-sync python -m agent_cloud_worker
+    command: python -m agent_cloud_worker
     env_file: ../.env # AGENT_CLOUD_WORKER_OPENAI_*(LLM 凭据只进 worker / backend 注入)
     restart: unless-stopped
 
