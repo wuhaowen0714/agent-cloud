@@ -32,10 +32,17 @@ class Settings(BaseSettings):
     file_upload_max_bytes: int = 100 * 1024 * 1024
 
     # 会话压缩(spec §11):回合后用模型返回的真实 context_tokens 判阈值,超此则折叠历史。
-    compaction_token_threshold: int = 128000  # 全局默认(建议设为所用模型 window 的 ~70-80%)
-    # 按模型覆盖阈值(模型名 → 阈值);未列出的模型回退 compaction_token_threshold。
+    compaction_token_threshold: int = 128000  # 全局默认(未配置窗口/覆盖的模型用它)
+    # 按模型显式覆盖阈值(模型名 → 阈值);优先级最高。
     # 经环境变量配置(JSON):AGENT_CLOUD_COMPACTION_TOKEN_THRESHOLDS='{"DeepSeek-V4-Pro": 200000}'。
     compaction_token_thresholds: dict[str, int] = {}
+    # 模型上下文窗口(tokens):无显式覆盖时,阈值 = 窗口 × compaction_trigger_ratio。
+    model_context_windows: dict[str, int] = {
+        "DeepSeek-V4-Pro": 1_000_000,
+        "DeepSeek-V4-Flash": 1_000_000,
+        "GLM-5.1": 200_000,
+    }
+    compaction_trigger_ratio: float = 0.75  # 上下文占用到窗口的 75% 触发自动压缩
     compaction_keep_recent: int = 8  # 压缩时保留逐字的最近消息条数
 
     # 回合失败透明自动重试(spec: turn-recovery-auto-retry)
@@ -66,8 +73,12 @@ class Settings(BaseSettings):
     default_agent_model: str = "DeepSeek-V4-Pro"
 
     def compaction_threshold_for(self, model: str) -> int:
-        """该模型的压缩阈值:优先 per-model 覆盖,否则回退全局默认。"""
-        return self.compaction_token_thresholds.get(model, self.compaction_token_threshold)
+        """该模型的压缩阈值,三级解析:显式覆盖 → 窗口 × ratio → 全局默认。"""
+        if model in self.compaction_token_thresholds:
+            return self.compaction_token_thresholds[model]
+        if model in self.model_context_windows:
+            return int(self.model_context_windows[model] * self.compaction_trigger_ratio)
+        return self.compaction_token_threshold
 
     @property
     def effective_sandbox_host_root(self) -> str:

@@ -13,7 +13,9 @@ class WorkerSettings(BaseSettings):
     openai_timeout_seconds: float = 60.0
     openai_max_retries: int = 2
 
-    request_max_tokens: int = 4096
+    # 单次请求输出上限。撞上限(finish_reason=length)有兜底:文本截断会落库提示、
+    # 工具参数截断会回合内自修复(见 loop/_TRUNCATED_CALL_RESULT),但上限给足更省事。
+    request_max_tokens: int = 32768
     # 经典 chat completions 用 "max_tokens";OpenAI 推理模型(o 系列 / gpt-5)要
     # "max_completion_tokens"。多数兼容端点(vLLM/OpenRouter)用 max_tokens,故默认它;
     # 接 OpenAI 推理模型时把本项设为 "max_completion_tokens"。

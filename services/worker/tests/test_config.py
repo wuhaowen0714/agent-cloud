@@ -7,7 +7,7 @@ def test_defaults():
     assert s.grpc_port == 50052
     assert s.openai_base_url == "https://api.openai.com/v1"
     assert s.openai_max_retries == 2
-    assert s.request_max_tokens == 4096
+    assert s.request_max_tokens == 32768
 
 
 def test_env_override(monkeypatch):
