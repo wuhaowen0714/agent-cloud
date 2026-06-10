@@ -28,4 +28,12 @@ describe("previewKind", () => {
     expect(previewKind({ name: "a.txt", size: 100 })).toBe("text")
     expect(previewKind({ name: "big.bin", size: 5_000_000 })).toBe("download")
   })
+  it("markdown/html 走渲染类(同受 1MB 上限)", () => {
+    expect(previewKind({ name: "README.md", size: 100 })).toBe("markdown")
+    expect(previewKind({ name: "n.markdown", size: 100 })).toBe("markdown")
+    expect(previewKind({ name: "hello_world.html", size: 100 })).toBe("html")
+    expect(previewKind({ name: "h.htm", size: 100 })).toBe("html")
+    expect(previewKind({ name: "big.md", size: 2_000_000 })).toBe("download")
+    expect(previewKind({ name: "big.html", size: 2_000_000 })).toBe("download")
+  })
 })

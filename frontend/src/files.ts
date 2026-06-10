@@ -22,10 +22,15 @@ export function splitBreadcrumb(path: string): Crumb[] {
 }
 
 const IMG = new Set(["png", "jpg", "jpeg", "gif", "svg", "webp"])
+const MD = new Set(["md", "markdown"])
+const HTML = new Set(["html", "htm"])
 const TEXT_MAX = 1024 * 1024 // 1 MB:超过只给下载
-export type PreviewKind = "image" | "text" | "download"
+export type PreviewKind = "image" | "text" | "markdown" | "html" | "download"
 export function previewKind(entry: { name: string; size: number }): PreviewKind {
   const ext = entry.name.split(".").pop()?.toLowerCase() ?? ""
   if (IMG.has(ext)) return "image"
-  return entry.size <= TEXT_MAX ? "text" : "download"
+  if (entry.size > TEXT_MAX) return "download"
+  if (MD.has(ext)) return "markdown" // 渲染展示(可切源码)
+  if (HTML.has(ext)) return "html" // 沙箱 iframe 渲染(可切源码)
+  return "text"
 }
