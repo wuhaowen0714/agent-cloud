@@ -6,6 +6,7 @@ import { ChatView } from "./components/ChatView"
 import { FileDrawer } from "./components/files/FileDrawer"
 import { SettingsDrawer } from "./components/settings/SettingsDrawer"
 import { Sidebar } from "./components/Sidebar"
+import { TopBar } from "./components/TopBar"
 import { useStore } from "./store"
 
 // 模块级一次性闸:StrictMode(dev)会双跑 effect;只 bootstrap 一次,避免重复 refresh/me。
@@ -46,6 +47,7 @@ export default function App() {
     <div className="flex h-full overflow-hidden">
       <Sidebar />
       <main className="flex min-w-0 flex-1 flex-col bg-gradient-to-b from-slate-50 to-slate-100/40">
+        <TopBar />
         <ChatView />
       </main>
       <FileDrawer />

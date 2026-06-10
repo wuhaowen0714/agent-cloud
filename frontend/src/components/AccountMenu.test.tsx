@@ -19,7 +19,9 @@ describe("AccountMenu", () => {
     expect(screen.getByText("alice@example.com")).toBeInTheDocument()
     fireEvent.click(screen.getByText("alice@example.com"))
     expect(screen.getByText("登出")).toBeInTheDocument()
-    expect(screen.getByText("工作区文件")).toBeInTheDocument()
+    expect(screen.getByText("Provider Keys")).toBeInTheDocument()
+    // 工作区文件入口已迁往主区顶栏(TopBar),菜单里不应再有
+    expect(screen.queryByText("工作区文件")).not.toBeInTheDocument()
   })
 
   it("logs out: calls api.logout then clears the store user", async () => {

@@ -1,13 +1,13 @@
-import { ChevronDown, Folder, KeyRound, LogOut } from "lucide-react"
+import { ChevronDown, KeyRound, LogOut } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { api } from "../api/client"
 import { useStore } from "../store"
 
-/** 贴底账户区:首字母圆头像 + 邮箱;点开菜单:工作区文件 / Provider Keys / 登出。 */
+/** 贴底账户区:首字母圆头像 + 邮箱;点开菜单:Provider Keys / 登出。
+ * (工作区文件入口在主区顶栏 TopBar。) */
 export function AccountMenu() {
   const user = useStore((s) => s.user)
   const logout = useStore((s) => s.logout)
-  const toggleFileDrawer = useStore((s) => s.toggleFileDrawer)
   const openSettings = useStore((s) => s.openSettings)
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -36,16 +36,6 @@ export function AccountMenu() {
     <div ref={ref} className="relative">
       {open && (
         <div className="absolute bottom-full left-0 right-0 z-30 mb-1.5 rounded-xl border border-slate-200 bg-white p-1.5 shadow-pop">
-          <button
-            className={item}
-            onClick={() => {
-              toggleFileDrawer()
-              setOpen(false)
-            }}
-          >
-            <Folder size={15} className="shrink-0 text-slate-400" />
-            <span>工作区文件</span>
-          </button>
           <button
             className={item}
             onClick={() => {
