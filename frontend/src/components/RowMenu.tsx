@@ -1,5 +1,6 @@
 import { MoreHorizontal } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 
 export interface RowMenuItem {
   label: string
@@ -23,6 +24,7 @@ export function RowMenu({
   const [confirming, setConfirming] = useState<number | null>(null)
   const [failed, setFailed] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -34,7 +36,9 @@ export function RowMenu({
   }
 
   const openMenu = () => {
-    // fixed 定位:列表容器是 overflow-auto,absolute 浮层会被裁剪(单 agent 时菜单完全不可见)。
+    // 浮层 portal 到 body + fixed 定位:列表容器 overflow-auto 会裁剪 absolute 浮层;
+    // 而留在侧栏内的 fixed 又会被 aside 的 backdrop-blur 变成「相对侧栏」解析坐标
+    // (backdrop-filter 与 transform 同款地成为 fixed 后代的包含块)→ 飞出屏幕外。
     // 打开瞬间按触发钮定位;开着滚动属边缘情况,点外面即收起。
     const r = triggerRef.current?.getBoundingClientRect()
     if (r) setPos({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) })
@@ -44,7 +48,9 @@ export function RowMenu({
   useEffect(() => {
     if (!open) return
     const onDoc = (e: Event) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) close()
+      const t = e.target as Node
+      // 菜单在 portal 里,不再是触发钮的 DOM 后代 → 两个 ref 都要查
+      if (!ref.current?.contains(t) && !menuRef.current?.contains(t)) close()
     }
     document.addEventListener("pointerdown", onDoc)
     return () => document.removeEventListener("pointerdown", onDoc)
@@ -96,12 +102,14 @@ export function RowMenu({
       >
         <MoreHorizontal size={14} />
       </button>
-      {open && (
-        <div
-          role="menu"
-          style={{ top: pos.top, right: pos.right }}
-          className="fixed z-30 w-44 rounded-xl border border-slate-200 bg-white p-1 shadow-pop"
-        >
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            style={{ top: pos.top, right: pos.right }}
+            className="fixed z-30 w-44 rounded-xl border border-slate-200 bg-white p-1 shadow-pop"
+          >
           {failed ? (
             <div className="px-2.5 py-1.5 text-xs text-red-600">进行中,无法删除</div>
           ) : (
@@ -123,8 +131,9 @@ export function RowMenu({
               </button>
             ))
           )}
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }
