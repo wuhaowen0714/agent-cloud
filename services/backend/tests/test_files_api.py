@@ -55,9 +55,7 @@ def test_mkdir_move_delete(client):
     client.post(
         "/files/upload", params={"path": "d"}, files=[("files", ("a.txt", b"x", "text/plain"))]
     )
-    assert (
-        client.post("/files/move", json={"src": "d/a.txt", "dst": "d/b.txt"}).status_code == 200
-    )
+    assert client.post("/files/move", json={"src": "d/a.txt", "dst": "d/b.txt"}).status_code == 200
     assert client.request("DELETE", "/files", params={"path": "d"}).status_code == 204
     assert client.get("/files").json() == []
 
@@ -107,3 +105,36 @@ def test_content_disposition_filename_sanitized(client, tmp_path):
     r = client.get("/files/raw", params={"path": 'a"b.txt'})
     assert r.status_code == 200
     assert r.headers["content-disposition"].count('"') == 2
+
+
+# ---- 非 ASCII 文件名:Content-Disposition 必须走 RFC 6266 filename*(用户报障:
+# 「小说_最后一盏灯.txt」预览/下载双挂——HTTP 头仅 latin-1,塞原始 UTF-8 直接 500)----
+
+
+def test_raw_supports_non_ascii_filenames(client):
+    name = "小说_最后一盏灯.txt"
+    r = client.post("/files/upload", files=[("files", (name, b"once upon", "text/plain"))])
+    assert r.status_code == 201
+
+    r = client.get("/files/raw", params={"path": name})
+    assert r.status_code == 200
+    assert r.content == b"once upon"
+    cd = r.headers["content-disposition"]
+    assert cd.startswith("inline")
+    assert "filename*=UTF-8''" in cd  # RFC 6266 编码名(现代浏览器优先取它)
+
+    r = client.get("/files/raw", params={"path": name, "attachment": "true"})
+    assert r.status_code == 200
+    assert r.headers["content-disposition"].startswith("attachment")
+
+
+def test_raw_zip_dir_with_non_ascii_name(client):
+    client.post("/files/mkdir", json={"path": "中文目录"})
+    client.post(
+        "/files/upload",
+        params={"path": "中文目录"},
+        files=[("files", ("a.txt", b"x", "text/plain"))],
+    )
+    r = client.get("/files/raw", params={"path": "中文目录"})
+    assert r.status_code == 200
+    assert "filename*=UTF-8''" in r.headers["content-disposition"]
