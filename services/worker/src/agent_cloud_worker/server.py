@@ -27,6 +27,7 @@ from agent_cloud_worker.provider import (
 )
 from agent_cloud_worker.remember import RememberingExecutor, remember_enabled
 from agent_cloud_worker.sandbox_executor import SandboxToolExecutor
+from agent_cloud_worker.title import TITLE_SYSTEM, clean_title
 
 logger = logging.getLogger(__name__)
 
@@ -263,6 +264,43 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
             return
         return worker_pb2.SummarizeResponse(
             summary=result.message.text,
+            input_tokens=result.usage.input_tokens,
+            output_tokens=result.usage.output_tokens,
+        )
+
+    async def GenerateTitle(
+        self, request: worker_pb2.GenerateTitleRequest, context: grpc.aio.ServicerContext
+    ) -> worker_pb2.GenerateTitleResponse:
+        # 基于首条用户提问起 ≤16 字短名。一次小 LLM 调用,不用工具;清洗在 worker 侧。
+        text = request.user_message.strip()
+        if not text:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "empty user_message")
+            return
+        try:
+            provider = self._provider_factory(
+                request.agent.model,
+                request.agent.provider,
+                request.agent.api_key,
+                request.agent.base_url,
+            )
+        except Exception as exc:  # noqa: BLE001 — 同 Summarize:工厂任意失败收敛为状态码
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, f"provider unavailable: {exc}")
+            return
+        try:
+            result = await provider.complete(
+                CompletionRequest(
+                    system=TITLE_SYSTEM,
+                    # 起名不需要全文:截前 2000 字符,长提问不白烧 token
+                    messages=[Message(role=Role.USER, text=text[:2000])],
+                    tools=[],
+                )
+            )
+        except Exception:
+            logger.exception("GenerateTitle failed")
+            await context.abort(grpc.StatusCode.INTERNAL, "title generation failed")
+            return
+        return worker_pb2.GenerateTitleResponse(
+            title=clean_title(result.message.text),
             input_tokens=result.usage.input_tokens,
             output_tokens=result.usage.output_tokens,
         )
