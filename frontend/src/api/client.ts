@@ -88,6 +88,8 @@ export const api = {
 
   // ── files ──
   listFiles: (path: string) => http<FileEntry[]>(`/files?path=${encodeURIComponent(path)}`),
+  // 工作区全部文件的相对路径(composer @ 文件引用的索引;仅文件,后端截断 2000)
+  indexFiles: () => http<string[]>("/files/index"),
   previewUrl: (path: string) => _blobUrl(path, false),
   downloadUrl: (path: string) => _blobUrl(path, true),
   uploadFiles: async (path: string, files: File[]) => {
