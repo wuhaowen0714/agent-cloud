@@ -2,6 +2,7 @@
 // now 可注入仅为测试确定性;生产调用走默认值。
 export function fmtTime(iso: string, now: Date = new Date()): string {
   const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return "" // 坏值不上屏 NaN(正常通路 DB/Pydantic 已保证非空合法)
   const p = (n: number) => String(n).padStart(2, "0")
   const hm = `${p(d.getHours())}:${p(d.getMinutes())}`
   const sameDay =

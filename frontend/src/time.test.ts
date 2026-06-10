@@ -17,4 +17,14 @@ describe("fmtTime", () => {
   it("跨年:全量日期", () => {
     expect(fmtTime("2025-12-31T23:59:00", now)).toBe("2025-12-31 23:59")
   })
+
+  it("后端真实形态(Z 后缀 + 微秒):按本地时区显示(vitest 钉 TZ=Asia/Shanghai)", () => {
+    // UTC 12:34 → 上海 20:34;若实现退化成字符串切片(不转本地),此处立即红
+    expect(fmtTime("2026-06-10T12:34:56.789012Z", now)).toBe("20:34")
+  })
+
+  it("坏值不上屏 NaN:返回空串", () => {
+    expect(fmtTime("not-a-date", now)).toBe("")
+    expect(fmtTime("", now)).toBe("")
+  })
 })
