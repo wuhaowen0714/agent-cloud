@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { COMMANDS, dedupeModels, matchCommands, parseInput } from "./commands"
+import { COMMANDS, matchCommands, parseInput } from "./commands"
 
 describe("parseInput", () => {
   it("命令模式:斜杠 + 前缀", () => {
@@ -41,12 +41,6 @@ describe("matchCommands", () => {
     expect(matchCommands("se").map((c) => c.name)).toEqual(["settings"])
     expect(matchCommands("sk").map((c) => c.name)).toEqual(["skills"])
     expect(matchCommands("st").map((c) => c.name)).toEqual(["status"])
-  })
-})
-
-describe("dedupeModels", () => {
-  it("去空 + 去重 + 保序", () => {
-    expect(dedupeModels(["a", "a", " b ", "", null, undefined, "c", "b"])).toEqual(["a", "b", "c"])
   })
 })
 

@@ -18,6 +18,7 @@ from agent_cloud_backend.api import (
     sessions,
     skills,
     turn,
+    user_models,
 )
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,7 @@ def create_app() -> FastAPI:
         agent_skills,
         files,
         credentials,
+        user_models,
     ):
         app.include_router(module.router)
 

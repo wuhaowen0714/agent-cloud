@@ -2,7 +2,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { BUILTIN_TOOLS, checkedToEnabled, enabledToChecked } from "../../agentConfig"
 import { api } from "../../api/client"
+import { DEFAULT_MODEL } from "../../models"
 import { useStore } from "../../store"
+import { ModelMenu } from "../model/ModelMenu"
 import {
   Button,
   Input,
@@ -21,10 +23,10 @@ export function AgentSettings() {
   const setAgent = useStore((s) => s.setAgent)
   const qc = useQueryClient()
 
-  // 新建模式:没有选中 agent
-  const [draft, setDraft] = useState({ name: "", model: "", provider: "openai" })
+  // 新建模式:没有选中 agent。模型不让填——预设 DEFAULT_MODEL,建完可随时切换。
+  const [draft, setDraft] = useState({ name: "", provider: "openai" })
   const createAgent = useMutation({
-    mutationFn: () => api.createAgent({ ...draft }),
+    mutationFn: () => api.createAgent({ ...draft, model: DEFAULT_MODEL }),
     onSuccess: (a) => {
       qc.invalidateQueries({ queryKey: ["agents", userId] })
       setAgent(a.id)
@@ -32,25 +34,28 @@ export function AgentSettings() {
   })
 
   if (!agentId) {
-    const labels = { name: "名称", model: "模型", provider: "Provider" } as const
+    const labels = { name: "名称", provider: "Provider" } as const
     return (
       <form
         className="space-y-3"
         onSubmit={(e) => {
           e.preventDefault()
-          if (draft.name && draft.model) createAgent.mutate()
+          if (draft.name) createAgent.mutate()
         }}
       >
         <SettingGroup label="新建 Agent">
-          {(["name", "model", "provider"] as const).map((k) => (
+          {(["name", "provider"] as const).map((k) => (
             <SettingRow key={k} label={labels[k]} block>
               <Input
-                placeholder={k === "model" ? "model(如 DeepSeek-V4-Pro)" : k}
+                placeholder={k}
                 value={draft[k]}
                 onChange={(e) => setDraft({ ...draft, [k]: e.target.value })}
               />
             </SettingRow>
           ))}
+          <div className="px-3.5 py-2 text-xs text-slate-400">
+            模型预设为 {DEFAULT_MODEL},创建后可随时切换。
+          </div>
         </SettingGroup>
         <Button type="submit">创建</Button>
       </form>
@@ -138,7 +143,8 @@ function AgentEditor({ agentId, userId }: { agentId: string; userId: string }) {
           <Input value={form.name} placeholder="名称" onChange={(e) => setForm({ ...form, name: e.target.value })} />
         </SettingRow>
         <SettingRow label="模型" block>
-          <Input value={form.model} placeholder="模型" onChange={(e) => setForm({ ...form, model: e.target.value })} />
+          {/* 与 composer 同一选单;这里改的是本地草稿,点保存才落库(与其它字段一致) */}
+          <ModelMenu value={form.model} onChange={(m) => setForm({ ...form, model: m })} />
         </SettingRow>
         <SettingRow label="Provider" block>
           <Input

@@ -37,19 +37,6 @@ export interface SlashCommand {
   runWithArg?: (ctx: SlashContext, arg: string) => void | Promise<void>
 }
 
-export function dedupeModels(models: (string | null | undefined)[]): string[] {
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const m of models) {
-    const t = m?.trim()
-    if (t && !seen.has(t)) {
-      seen.add(t)
-      out.push(t)
-    }
-  }
-  return out
-}
-
 export const COMMANDS: SlashCommand[] = [
   {
     name: "compact",

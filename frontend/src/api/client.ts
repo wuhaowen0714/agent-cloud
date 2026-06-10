@@ -8,6 +8,7 @@ import type {
   Session,
   Skill,
   User,
+  UserModel,
 } from "../types"
 import { authedFetch, setAccess } from "./auth"
 
@@ -158,4 +159,10 @@ export const api = {
     http<MemoryBlock>(`/memory?scope=${scope}${agentId ? `&agent_id=${agentId}` : ""}`, {
       method: "DELETE",
     }),
+
+  // ── 模型选单(预设之外的用户自定义模型)──
+  listModels: () => http<UserModel[]>("/models"),
+  addModel: (model: string) =>
+    http<UserModel>("/models", { method: "POST", body: JSON.stringify({ model }) }),
+  deleteModel: (id: string) => http<void>(`/models/${id}`, { method: "DELETE" }),
 }

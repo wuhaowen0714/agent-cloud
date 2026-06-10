@@ -9,7 +9,8 @@ export function SettingGroup({ label, children }: { label?: string; children: Re
           {label}
         </div>
       )}
-      <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200/80 bg-white">
+      {/* 不用 overflow-hidden 收圆角:行本身无背景,裁剪反而会把行内浮层(ModelMenu/SelectMenu)切残 */}
+      <div className="divide-y divide-slate-100 rounded-xl border border-slate-200/80 bg-white">
         {children}
       </div>
     </section>

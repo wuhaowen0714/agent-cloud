@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agent_cloud_backend.models.agent_config import AgentConfig
 from agent_cloud_backend.models.provider_credential import ProviderCredential
 from agent_cloud_backend.models.session import Session
+from agent_cloud_backend.models.user_model import UserModel
 
 
 async def owned_session(session_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSession) -> Session:
@@ -48,3 +49,12 @@ async def owned_credential(
     if c is None or c.user_id != user_id:
         raise HTTPException(status_code=404, detail="credential not found")
     return c
+
+
+async def owned_user_model(
+    model_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSession
+) -> UserModel:
+    m = await db.get(UserModel, model_id)
+    if m is None or m.user_id != user_id:
+        raise HTTPException(status_code=404, detail="model not found")
+    return m
