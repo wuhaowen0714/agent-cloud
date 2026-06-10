@@ -1,13 +1,19 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import delete as sql_delete
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.exc import StaleDataError
 
 from agent_cloud_backend.api.deps import get_current_user, get_session
 from agent_cloud_backend.api.ownership import owned_agent, owned_credential
 from agent_cloud_backend.models.agent_config import AgentConfig
+from agent_cloud_backend.models.context_document import ContextDocument
+from agent_cloud_backend.models.memory_entry import MemoryEntry
 from agent_cloud_backend.models.user import User
 from agent_cloud_backend.repositories.agent_config import AgentConfigRepository
+from agent_cloud_backend.repositories.session import SessionRepository
 from agent_cloud_backend.schemas.agent_config import (
     AgentConfigCreate,
     AgentConfigRead,
@@ -62,8 +68,49 @@ async def update_agent_config(
     fields = body.model_dump(exclude_unset=True)
     if "key_ref" in fields:
         await _validate_key_ref(fields["key_ref"], user.id, session)
+    if "name" in fields:  # 改名是一等 UI 操作:服务端兜底校验(与 session title 同规)
+        name = (fields["name"] or "").strip()
+        if not name or len(name) > 200:
+            raise HTTPException(status_code=422, detail="name must be 1-200 chars")
+        fields["name"] = name
     for field, value in fields.items():
         setattr(agent, field, value)
     await session.commit()
     await session.refresh(agent)
     return agent
+
+
+@router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_agent_config(
+    agent_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    """删除 agent 并连带其全部会话(消息 CASCADE)、agent 级记忆与指令文档。
+
+    任一会话仍在跑(原子守卫删不掉)→ 409 并整体回滚(get_session 依赖丢弃未提交事务);
+    agent_skill_enables 由 FK CASCADE 自动清。"""
+    agent = await owned_agent(agent_id, user.id, session)  # 404
+    srepo = SessionRepository(session)
+    await srepo.delete_idle_for_agent(agent_id)
+    if await srepo.count_for_agent(agent_id) > 0:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="agent busy")
+    await session.execute(
+        sql_delete(MemoryEntry).where(
+            MemoryEntry.scope == "agent", MemoryEntry.owner_id == agent_id
+        )
+    )
+    await session.execute(
+        sql_delete(ContextDocument).where(
+            ContextDocument.scope == "agent", ContextDocument.owner_id == agent_id
+        )
+    )
+    await session.delete(agent)
+    try:
+        await session.commit()
+    except StaleDataError as exc:
+        # 并发双删:败者的 ORM DELETE 匹配 0 行 → 当作"已不存在"而非 500
+        raise HTTPException(status_code=404, detail="agent config not found") from exc
+    except IntegrityError as exc:
+        # 与并发 POST /sessions 撞 FK(RESTRICT):有人正往该 agent 下建会话 → 当 busy
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="agent busy") from exc

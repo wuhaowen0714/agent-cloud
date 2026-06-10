@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { BUILTIN_TOOLS, checkedToEnabled, enabledToChecked } from "../../agentConfig"
 import { api } from "../../api/client"
-import { DEFAULT_MODEL } from "../../models"
 import { useStore } from "../../store"
 import { ModelMenu } from "../model/ModelMenu"
 import {
@@ -20,45 +19,13 @@ import { MemoryPanel } from "./MemoryPanel"
 export function AgentSettings() {
   const userId = useStore((s) => s.userId)!
   const agentId = useStore((s) => s.agentId)
-  const setAgent = useStore((s) => s.setAgent)
-  const qc = useQueryClient()
 
-  // 新建模式:没有选中 agent。模型不让填——预设 DEFAULT_MODEL,建完可随时切换。
-  const [draft, setDraft] = useState({ name: "", provider: "openai" })
-  const createAgent = useMutation({
-    mutationFn: () => api.createAgent({ ...draft, model: DEFAULT_MODEL }),
-    onSuccess: (a) => {
-      qc.invalidateQueries({ queryKey: ["agents", userId] })
-      setAgent(a.id)
-    },
-  })
-
+  // 创建职责在侧栏 AgentList(一键直创);设置页只编辑已选中的 agent。
   if (!agentId) {
-    const labels = { name: "名称", provider: "Provider" } as const
     return (
-      <form
-        className="space-y-3"
-        onSubmit={(e) => {
-          e.preventDefault()
-          if (draft.name) createAgent.mutate()
-        }}
-      >
-        <SettingGroup label="新建 Agent">
-          {(["name", "provider"] as const).map((k) => (
-            <SettingRow key={k} label={labels[k]} block>
-              <Input
-                placeholder={k}
-                value={draft[k]}
-                onChange={(e) => setDraft({ ...draft, [k]: e.target.value })}
-              />
-            </SettingRow>
-          ))}
-          <div className="px-3.5 py-2 text-xs text-slate-400">
-            模型预设为 {DEFAULT_MODEL},创建后可随时切换。
-          </div>
-        </SettingGroup>
-        <Button type="submit">创建</Button>
-      </form>
+      <div className="px-1 py-10 text-center text-sm text-slate-400">
+        在左侧选择或新建一个 agent
+      </div>
     )
   }
   return <AgentEditor key={agentId} agentId={agentId} userId={userId} />

@@ -9,6 +9,10 @@ class SessionCreate(BaseModel):
     title: str | None = None
 
 
+class SessionUpdate(BaseModel):
+    title: str
+
+
 class SessionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID

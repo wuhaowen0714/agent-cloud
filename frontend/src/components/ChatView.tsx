@@ -27,10 +27,15 @@ export function ChatView() {
 
   // 选中的会话已被删 / 不属于当前用户(后端 404)→ 丢弃这个悬空选择,回到空态,
   // 避免对着一个不存在的会话渲染聊天面板、甚至向其 POST 回合(如换用户后 localStorage 残留的会话)。
+  // 同时失效 sessions 缓存:否则 Sidebar 自动落位会从陈旧列表再次选中这条已删会话,
+  // 形成「404 → 清空 → 又选中 → 404」的无界循环(典型:另一标签页删掉了本页选中的会话)。
   useEffect(() => {
     const err = messagesQ.error as { status?: number } | null
-    if (err?.status === 404) useStore.getState().setSession(null)
-  }, [messagesQ.error])
+    if (err?.status === 404) {
+      useStore.getState().setSession(null)
+      void qc.invalidateQueries({ queryKey: ["sessions"] })
+    }
+  }, [messagesQ.error, qc])
 
   // 把一个回合事件灌进 live(仅当仍停留在该会话,丢弃切走会话的残余事件)
   const feed = (sid: string, e: TurnEvent) => {

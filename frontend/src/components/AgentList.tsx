@@ -1,17 +1,24 @@
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Plus, Settings2 } from "lucide-react"
+import { useState } from "react"
+import { nextAgentName } from "../agentConfig"
 import { api } from "../api/client"
+import { DEFAULT_MODEL } from "../models"
 import { useStore } from "../store"
+import { RowMenu } from "./RowMenu"
 
 /**
- * 侧栏的 agent 列表(替换原来的下拉切换器):agent 是一等导航项,直接点选,选中高亮,
- * 悬停/选中露出设置图标进设置。会话列表(SessionList)只显示当前选中 agent 的对话。
+ * 侧栏 agent 列表:一等导航项,点选切换。底部幽灵行一键新建(默认名 Agent N,
+ * 成功即选中并进入行内改名态);行尾 hover:⚙ 设置 + … 菜单(重命名 / 二次确认删除,
+ * 删除连带该 agent 的全部会话,由后端保证)。
  */
 export function AgentList() {
   const userId = useStore((s) => s.userId)
   const agentId = useStore((s) => s.agentId)
   const setAgent = useStore((s) => s.setAgent)
   const openSettings = useStore((s) => s.openSettings)
+  const qc = useQueryClient()
+  const [renamingId, setRenamingId] = useState<string | null>(null)
 
   const { data: agents = [] } = useQuery({
     queryKey: ["agents", userId],
@@ -19,74 +26,135 @@ export function AgentList() {
     enabled: !!userId,
   })
 
-  const newAgent = () => {
-    setAgent(null)
-    openSettings()
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["agents", userId] })
+
+  const create = useMutation({
+    mutationFn: () =>
+      api.createAgent({
+        name: nextAgentName(agents.map((a) => a.name)),
+        model: DEFAULT_MODEL,
+        provider: "openai",
+      }),
+    onSuccess: async (a) => {
+      await invalidate()
+      setAgent(a.id)
+      setRenamingId(a.id) // 新建即改名:想改顺手改,不想改 Esc 留默认名
+    },
+  })
+
+  const commitRename = async (id: string, value: string, original: string) => {
+    const name = value.trim()
+    setRenamingId(null)
+    if (!name || name === original) return
+    try {
+      await api.patchAgent(id, { name })
+      await invalidate()
+    } catch {
+      // 改名失败(网络/422):保持原名即可,不打断;maxLength 已挡住超长
+    }
+  }
+
+  const removeAgent = async (id: string) => {
+    await api.deleteAgent(id) // 409 → 抛 HttpError,由 RowMenu 原位提示
+    await invalidate()
+    await qc.invalidateQueries({ queryKey: ["sessions", userId] })
+    if (useStore.getState().agentId === id) {
+      // 从失效后的新鲜缓存取剩余(闭包里的 agents 是删除前的旧列表)
+      const fresh = qc.getQueryData<typeof agents>(["agents", userId]) ?? []
+      const rest = fresh.filter((a) => a.id !== id)
+      setAgent(rest[0]?.id ?? null)
+    }
   }
 
   return (
     <div className="flex flex-col">
-      <div className="mb-1 flex items-center justify-between px-1">
-        <span className="text-xs font-medium tracking-wide text-slate-400">Agents</span>
-        <button
-          className="flex h-5 w-5 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-          title="新建 agent"
-          aria-label="新建 agent"
-          onClick={newAgent}
-        >
-          <Plus size={15} />
-        </button>
-      </div>
+      <div className="mb-1 px-1 text-xs font-medium tracking-wide text-slate-400">Agents</div>
 
-      {agents.length === 0 ? (
-        <button
-          className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-left text-xs text-slate-400 transition hover:border-slate-300 hover:text-slate-600"
-          onClick={newAgent}
-        >
-          还没有 agent — 新建一个
-        </button>
-      ) : (
-        <ul className="max-h-52 space-y-0.5 overflow-auto">
-          {agents.map((a) => {
-            const active = a.id === agentId
-            return (
-              <li
-                key={a.id}
-                className={`group flex items-center gap-1 rounded-lg pr-1 transition ${
-                  active ? "bg-brand-50" : "hover:bg-slate-100"
-                }`}
-              >
-                <button
-                  className="flex min-w-0 flex-1 items-center px-2.5 py-2 text-left"
-                  onClick={() => setAgent(a.id)}
-                >
-                  <span className="min-w-0 flex-1 truncate">
-                    <span
-                      className={`text-sm font-medium ${active ? "text-brand-800" : "text-slate-700"}`}
-                    >
-                      {a.name}
-                    </span>
-                    <span className="ml-1.5 text-xs text-slate-400">{a.model}</span>
-                  </span>
-                </button>
-                <button
-                  className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-white hover:text-slate-700 ${
-                    active ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-                  }`}
-                  title="agent 设置"
-                  aria-label={`${a.name} 设置`}
-                  onClick={() => {
-                    setAgent(a.id)
-                    openSettings()
+      <ul className="max-h-52 space-y-0.5 overflow-auto">
+        {agents.map((a) => {
+          const active = a.id === agentId
+          return (
+            <li
+              key={a.id}
+              className={`group flex items-center gap-1 rounded-lg pr-1 transition ${
+                active ? "bg-brand-50" : "hover:bg-slate-100"
+              }`}
+            >
+              {renamingId === a.id ? (
+                <input
+                  autoFocus
+                  defaultValue={a.name}
+                  maxLength={200}
+                  aria-label={`重命名 ${a.name}`}
+                  onFocus={(e) => e.target.select()}
+                  onKeyDown={(e) => {
+                    // isComposing:IME 选字的回车不算确认(否则中文名打一半就被提交)
+                    if (e.key === "Enter" && !e.nativeEvent.isComposing)
+                      void commitRename(a.id, e.currentTarget.value, a.name)
+                    else if (e.key === "Escape") setRenamingId(null)
                   }}
-                >
-                  <Settings2 size={14} />
-                </button>
-              </li>
-            )
-          })}
-        </ul>
-      )}
+                  onBlur={() => setRenamingId(null)}
+                  className="mx-1 my-1 w-full rounded-lg border border-brand-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-brand-100"
+                />
+              ) : (
+                <>
+                  <button
+                    className="flex min-w-0 flex-1 items-center px-2.5 py-2 text-left"
+                    onClick={() => {
+                      // 点已选中的 agent 不重置(setAgent 会清掉当前会话选择)
+                      if (a.id !== agentId) setAgent(a.id)
+                    }}
+                  >
+                    <span className="min-w-0 flex-1 truncate">
+                      <span
+                        className={`text-sm font-medium ${active ? "text-brand-800" : "text-slate-700"}`}
+                      >
+                        {a.name}
+                      </span>
+                      <span className="ml-1.5 text-xs text-slate-400">{a.model}</span>
+                    </span>
+                  </button>
+                  <button
+                    className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-white hover:text-slate-700 ${
+                      active ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                    }`}
+                    title="agent 设置"
+                    aria-label={`${a.name} 设置`}
+                    onClick={() => {
+                      setAgent(a.id)
+                      openSettings()
+                    }}
+                  >
+                    <Settings2 size={14} />
+                  </button>
+                  <RowMenu
+                    ariaLabel={`${a.name} 更多操作`}
+                    visible={active}
+                    items={[
+                      { label: "重命名", onSelect: () => setRenamingId(a.id) },
+                      {
+                        label: "删除",
+                        danger: true,
+                        confirmLabel: "连同全部会话删除?",
+                        onSelect: () => removeAgent(a.id),
+                      },
+                    ]}
+                  />
+                </>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+
+      <button
+        disabled={create.isPending}
+        onClick={() => create.mutate()}
+        className="mt-1 flex w-full items-center gap-2 rounded-xl border border-slate-200 px-3 py-1.5 text-sm text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 disabled:opacity-50"
+      >
+        <Plus size={15} className="text-slate-400" />
+        新建 Agent
+      </button>
     </div>
   )
 }

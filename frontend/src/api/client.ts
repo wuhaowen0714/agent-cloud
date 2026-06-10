@@ -81,6 +81,10 @@ export const api = {
   listMessages: (sessionId: string) => http<Message[]>(`/sessions/${sessionId}/messages`),
   compactSession: (id: string) =>
     http<{ compacted: boolean }>(`/sessions/${id}/compact`, { method: "POST" }),
+  patchSession: (id: string, body: { title: string }) =>
+    http<Session>(`/sessions/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteSession: (id: string) => http<void>(`/sessions/${id}`, { method: "DELETE" }),
+  deleteAgent: (id: string) => http<void>(`/agent-configs/${id}`, { method: "DELETE" }),
 
   // ── files ──
   listFiles: (path: string) => http<FileEntry[]>(`/files?path=${encodeURIComponent(path)}`),
