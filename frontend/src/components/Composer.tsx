@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { api } from "../api/client"
+import { atTokenAt, filterPaths } from "../fileRef"
 import { useStore } from "../store"
 import { ModelMenu } from "./model/ModelMenu"
 import { matchCommands, parseInput } from "./slash/commands"
@@ -26,10 +27,13 @@ export function Composer({
   onStop?: () => void
 }) {
   const [text, setText] = useState("")
+  const [caret, setCaret] = useState(0) // @ 文件引用按「光标所在词」判定,需跟踪 caret
   const [sel, setSel] = useState(0)
   const [dismissed, setDismissed] = useState(false) // Esc 关面板,保留文本走直通
+  const [atDismissed, setAtDismissed] = useState<number | null>(null) // Esc 时 @ 词的 start;同词内不再弹
   const [notice, setNotice] = useState<Notice>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
+  const taRef = useRef<HTMLTextAreaElement>(null)
 
   const ctx = useSlashCommands({
     notify: (msg) => setNotice({ kind: "flash", flash: msg }),
@@ -47,10 +51,57 @@ export function Composer({
   })
   const currentModel = agents.find((a) => a.id === agentId)?.model
 
-  // 由文本派生面板条目(命令模式 / 参数模式)。
+  // @ 文件引用:光标所在 @ 词活跃才拉索引(staleTime 内打字不抖动,新文件最迟 30s 可见)。
+  // retry 1:浮层场景要快速反馈;失败提示后,下个 @ 词重新激活 enabled 时会再拉。
+  const atToken = atTokenAt(text, caret)
+  const {
+    data: fileIndex = [],
+    isLoading: indexLoading,
+    isError: indexError,
+  } = useQuery({
+    queryKey: ["fileIndex", userId],
+    queryFn: () => api.indexFiles(),
+    enabled: !!userId && !!atToken,
+    staleTime: 30_000,
+    retry: 1,
+  })
+
+  // 选中:把 [start, caret) 换成 "@路径 ",光标落在尾空格后(焦点保持)。
+  const insertPath = (p: string) => {
+    if (!atToken) return
+    const next = `${text.slice(0, atToken.start)}@${p} ${text.slice(caret)}`
+    const newCaret = atToken.start + p.length + 2 // "@" + 路径 + " "
+    setText(next)
+    setCaret(newCaret)
+    setSel(0)
+    requestAnimationFrame(() => {
+      taRef.current?.focus()
+      taRef.current?.setSelectionRange(newCaret, newCaret)
+    })
+  }
+
+  // 由文本派生面板条目。@ 词活跃时文件浮层压过斜杠面板(含 /model 参数模式);
+  // 无匹配则两者都不显示(正常打字),避免引用中途斜杠建议突然顶上来。
   const parsed = parseInput(text)
   const entries: Entry[] = []
-  if (!dismissed && !disabled) {
+  if (atToken && !disabled) {
+    if (atDismissed !== atToken.start) {
+      if (indexLoading) {
+        // 占位条目(无操作):加载中 Enter 不该把半截 "@app" 直通发出去(审查 L1)
+        entries.push({ title: "加载文件索引…", exec: () => {} })
+      } else if (indexError) {
+        entries.push({ title: "文件索引加载失败", exec: () => {} })
+      } else {
+        for (const p of filterPaths(fileIndex, atToken.query)) {
+          entries.push({
+            title: p.split("/").pop() ?? p,
+            hint: p,
+            exec: () => insertPath(p),
+          })
+        }
+      }
+    }
+  } else if (!dismissed && !disabled) {
     if (parsed.mode === "command") {
       for (const cmd of matchCommands(parsed.prefix)) {
         entries.push({
@@ -118,6 +169,11 @@ export function Composer({
     if (!t || disabled) return
     onSend(t)
     setText("")
+    // setText 不走 onChange:caret/Esc 豁免须随文本一起归零,否则豁免跨消息泄漏——
+    // 下一条消息开头的 @(同样 start=0)会被旧豁免压住、浮层永不弹(审查 M1)。
+    setCaret(0)
+    setSel(0)
+    setAtDismissed(null)
   }
 
   return (
@@ -141,16 +197,23 @@ export function Composer({
           />
         )}
         <Textarea
+          ref={taRef}
           className="min-h-[44px] flex-1"
-          placeholder={disabled ? "生成中…" : "说点什么(/ 唤起命令,Enter 发送,Shift+Enter 换行)"}
+          placeholder={disabled ? "生成中…" : "说点什么(/ 命令,@ 引用文件,Enter 发送)"}
           rows={1}
           value={text}
           disabled={disabled}
           onChange={(e) => {
-            setText(e.target.value)
+            const v = e.target.value
+            const c = e.target.selectionStart ?? v.length
+            setText(v)
+            setCaret(c)
             setSel(0)
             setDismissed(false)
+            // @ 词消失或换位 → 解除 Esc 豁免(同词内继续打字保持关闭)
+            if (atDismissed !== null && atTokenAt(v, c)?.start !== atDismissed) setAtDismissed(null)
           }}
+          onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
           onKeyDown={(e) => {
             // IME 组词中的回车(选字)不应触发命令执行/发送。
             if (e.nativeEvent.isComposing) return
@@ -166,7 +229,8 @@ export function Composer({
                 entries[safeSel]?.exec()
               } else if (e.key === "Escape") {
                 e.preventDefault()
-                setDismissed(true)
+                if (atToken) setAtDismissed(atToken.start)
+                else setDismissed(true)
                 setNotice(null) // 一并收起通知卡(若有)
               }
               return

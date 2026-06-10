@@ -30,6 +30,8 @@ const AGENTS = [
   },
 ]
 
+const FILE_INDEX = ["src/app.py", "docs/读我.md", "README.md"]
+
 function setup(opts?: { disabled?: boolean }) {
   const qc = new QueryClient()
   useStore.setState({ userId: USER, agentId: "a1", sessionId: "s1" })
@@ -38,6 +40,7 @@ function setup(opts?: { disabled?: boolean }) {
   // 否则会把预填缓存覆盖空、chip 消失(flaky)。userModels 同理 mock 防真网络。
   vi.spyOn(api, "listAgents").mockResolvedValue(AGENTS as never)
   vi.spyOn(api, "listModels").mockResolvedValue([])
+  vi.spyOn(api, "indexFiles").mockResolvedValue(FILE_INDEX)
   qc.setQueryData(
     ["sessions", USER],
     [
@@ -184,6 +187,119 @@ describe("斜杠面板", () => {
     type("/compact")
     fireEvent.keyDown(box(), { key: "Enter" })
     expect(await screen.findByText("会话正忙(回合进行中),稍后再试")).toBeInTheDocument()
+  })
+})
+
+describe("@ 文件引用", () => {
+  it("@ 弹出文件浮层:title=文件名,hint=完整路径", async () => {
+    setup()
+    type("@")
+    expect(await screen.findByRole("option", { name: /app\.py.*src\/app\.py/ })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: /读我\.md/ })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: /README\.md/ })).toBeInTheDocument()
+  })
+
+  it("@读 过滤到中文命中项", async () => {
+    setup()
+    type("@")
+    await screen.findByRole("option", { name: /app\.py/ })
+    type("@读")
+    expect(screen.queryByRole("option", { name: /app\.py/ })).not.toBeInTheDocument()
+    expect(screen.getByRole("option", { name: /读我\.md/ })).toBeInTheDocument()
+  })
+
+  it("Enter 选中 → 替换 @词为 @完整路径 + 空格", async () => {
+    setup()
+    type("看下 @app")
+    await screen.findByRole("option", { name: /app\.py/ })
+    fireEvent.keyDown(box(), { key: "Enter" })
+    expect(box()).toHaveValue("看下 @src/app.py ")
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
+  })
+
+  it("鼠标点选插入路径", async () => {
+    setup()
+    type("@")
+    const opt = await screen.findByRole("option", { name: /README/ })
+    fireEvent.mouseDown(opt)
+    expect(box()).toHaveValue("@README.md ")
+  })
+
+  it("Esc 关浮层,同一 @ 词内不再弹;清空后新 @ 再弹", async () => {
+    setup()
+    type("@a")
+    await screen.findByRole("listbox")
+    fireEvent.keyDown(box(), { key: "Escape" })
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
+    type("@ap") // 同词(start=0)继续打字 → 仍不弹
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
+    type("") // 删光:@ 词消失,豁免解除
+    type("@")
+    expect(await screen.findByRole("listbox")).toBeInTheDocument()
+  })
+
+  it("@ 词活跃时压过斜杠面板(/model 参数模式)", async () => {
+    setup()
+    type("/model @")
+    expect(await screen.findByRole("option", { name: /app\.py/ })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: /DeepSeek-V4-Flash/ })).not.toBeInTheDocument()
+  })
+
+  it("无匹配 query → 无浮层,Enter 直通发送", async () => {
+    const { onSend } = setup()
+    type("@")
+    await screen.findByRole("listbox") // 先等索引到位(缓存)
+    type("@zzz")
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
+    fireEvent.keyDown(box(), { key: "Enter" })
+    expect(onSend).toHaveBeenCalledWith("@zzz")
+  })
+
+  it("邮箱不触发浮层", () => {
+    setup()
+    type("发邮件给 a@b.com")
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
+  })
+
+  it("IME 组词回车不选中", async () => {
+    const { onSend } = setup()
+    type("@")
+    await screen.findByRole("listbox")
+    fireEvent.keyDown(box(), { key: "Enter", isComposing: true })
+    expect(onSend).not.toHaveBeenCalled()
+    expect(box()).toHaveValue("@")
+  })
+
+  it("发送后 Esc 豁免重置:新消息开头的 @ 正常弹层(审查 M1)", async () => {
+    const { onSend } = setup()
+    type("@a")
+    await screen.findByRole("listbox")
+    fireEvent.keyDown(box(), { key: "Escape" }) // 豁免 start=0
+    fireEvent.keyDown(box(), { key: "Enter" }) // 直通发送 "@a"
+    expect(onSend).toHaveBeenCalledWith("@a")
+    type("@") // 新消息开头同样 start=0,不应被旧豁免压住
+    expect(await screen.findByRole("listbox")).toBeInTheDocument()
+  })
+
+  it("索引加载中:显示占位,Enter 不直通发送(审查 L1)", async () => {
+    const { onSend } = setup()
+    let resolve!: (v: string[]) => void
+    vi.spyOn(api, "indexFiles").mockImplementation(
+      () => new Promise<string[]>((r) => (resolve = r)),
+    )
+    type("@app")
+    expect(await screen.findByText("加载文件索引…")).toBeInTheDocument()
+    fireEvent.keyDown(box(), { key: "Enter" })
+    expect(onSend).not.toHaveBeenCalled()
+    resolve(FILE_INDEX)
+    expect(await screen.findByRole("option", { name: /app\.py/ })).toBeInTheDocument()
+  })
+
+  it("索引加载失败:显示失败提示而非静默(审查 L1)", async () => {
+    setup()
+    vi.spyOn(api, "indexFiles").mockRejectedValue(new Error("net"))
+    type("@")
+    expect(await screen.findByText("文件索引加载失败", undefined, { timeout: 4000 })).toBeInTheDocument()
   })
 })
 

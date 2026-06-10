@@ -31,9 +31,13 @@ class FileStore(Protocol):
     def move(self, user_id: str, src: str, dst: str) -> FileEntry: ...
     def delete(self, user_id: str, rel_path: str) -> None: ...
     def zip_dir(self, user_id: str, rel_path: str) -> Iterator[bytes]: ...
+    def walk(self, user_id: str, limit: int = 2000) -> list[str]: ...
 
 
 _CHUNK = 1024 * 1024
+
+# walk(@ 文件索引)不下钻的非隐藏目录:依赖/字节码缓存,量大且无引用价值
+_INDEX_SKIP_DIRS = {"node_modules", "__pycache__"}
 
 
 class LocalFileStore:
@@ -165,6 +169,48 @@ class LocalFileStore:
             shutil.rmtree(target)
         else:
             target.unlink()
+
+    def walk(self, user_id: str, limit: int = 2000) -> list[str]:
+        """递归列出工作区文件的相对 posix 路径(仅文件;composer @ 文件引用的索引)。
+
+        - 剪枝点目录与 node_modules/__pycache__(整棵不下钻):沙箱把 HOME/pip/npm
+          缓存路由进工作区(.home 等),点目录又按字节序排最前——不剪的话一次
+          pip install 的数千缓存文件就把 limit 配额全部吃光,真实文件一条都进不了
+          索引。顶层点【文件】(.env 等)保留,可被 @ 引用。
+        - 目录符号链接不下钻(os.walk 默认),文件符号链接跳过(与 zip_dir 同款,
+          防越狱读)。
+        - 名字无法 UTF-8 round-trip 的跳过:Linux 下 surrogateescape 文件名会让
+          JSON 响应渲染时 UnicodeEncodeError → 整个端点永久 500;这类文件纯文本
+          @ 也无法引用,跳过自洽。
+        - 排序后截断 limit;遍历自带 10×limit 熔断,防巨型工作区全树枚举。
+        """
+        root = self._user_root(user_id).resolve()
+        if not root.exists():
+            return []  # 全新用户:空工作区,读操作不创建目录(I3)
+        fuse = limit * 10
+        out: list[str] = []
+        for dirpath, dirnames, filenames in os.walk(root):
+            # 原地改 dirnames 才能阻止 os.walk 下钻;排序让熔断截到的子集确定
+            dirnames[:] = sorted(
+                d for d in dirnames if not d.startswith(".") and d not in _INDEX_SKIP_DIRS
+            )
+            base = Path(dirpath)
+            for name in sorted(filenames):
+                p = base / name
+                if not p.is_file() or p.is_symlink():
+                    continue
+                rel = p.relative_to(root).as_posix()
+                try:
+                    rel.encode("utf-8")
+                except UnicodeEncodeError:
+                    continue
+                out.append(rel)
+                if len(out) >= fuse:
+                    break
+            if len(out) >= fuse:
+                break
+        out.sort()
+        return out[:limit]
 
     def zip_dir(self, user_id: str, rel_path: str) -> Iterator[bytes]:
         target = self._resolve(user_id, rel_path)
