@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest"
-import { BUILTIN_TOOLS, checkedToEnabled, enabledToChecked } from "./agentConfig"
+import { BUILTIN_TOOLS, checkedToEnabled, enabledToChecked, nextAgentName } from "./agentConfig"
+
+describe("nextAgentName", () => {
+  it("空表 → Agent 1", () => {
+    expect(nextAgentName([])).toBe("Agent 1")
+  })
+  it("取 Agent k 最大值 +1,忽略非模式名", () => {
+    expect(nextAgentName(["main", "Agent 2", "Agent 9", "agentx"])).toBe("Agent 10")
+  })
+})
 
 describe("tool helpers", () => {
   it("empty enabled_tools means all checked", () => {

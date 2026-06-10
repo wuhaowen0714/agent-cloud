@@ -17,3 +17,13 @@ export function checkedToEnabled(checked: Set<string>): string[] {
   const list = ALL.filter((n) => checked.has(n))
   return list.length === ALL.length ? [] : list
 }
+
+// 一键新建 agent 的默认名:现有「Agent k」最大 k+1(无则 1);其它名字(main 等)不参与。
+export function nextAgentName(existing: string[]): string {
+  let max = 0
+  for (const n of existing) {
+    const m = /^Agent (\d+)$/.exec(n.trim())
+    if (m) max = Math.max(max, Number(m[1]))
+  }
+  return `Agent ${max + 1}`
+}
