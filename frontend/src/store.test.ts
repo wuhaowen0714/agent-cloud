@@ -29,6 +29,7 @@ describe("store 压缩状态(per-session)", () => {
 
   it("多会话互不影响", () => {
     s().startCompaction("A")
+    s().startCompaction("B")
     s().finishCompaction("B", "error")
     expect(s().compactions.A).toEqual({ phase: "running" })
     expect(s().compactions.B).toEqual({ phase: "result", result: "error" })
@@ -46,5 +47,12 @@ describe("store 压缩状态(per-session)", () => {
     s().startCompaction("A")
     s().logout()
     expect(s().compactions).toEqual({})
+  })
+
+  it("finishCompaction 不复活已被清掉的条目(logout/切用户竞态)", () => {
+    s().startCompaction("A")
+    s().logout() // 压缩进行中登出 → compactions 清空
+    s().finishCompaction("A", "error") // 迟到的 in-flight 结果回写
+    expect(s().compactions.A).toBeUndefined() // 不该复活
   })
 })

@@ -246,6 +246,18 @@ describe("压缩反馈(per-session)", () => {
     })
     expect(await screen.findByText("已压缩当前会话上下文")).toBeInTheDocument()
   })
+
+  it("结果 flash 不滞留到别的会话:A 显示后切到 B 立即消失", async () => {
+    vi.spyOn(api, "compactSession").mockResolvedValue({ compacted: true })
+    setup() // sessionId = "s1"
+    type("/compact")
+    fireEvent.keyDown(box(), { key: "Enter" })
+    expect(await screen.findByText("已压缩当前会话上下文")).toBeInTheDocument()
+    act(() => {
+      useStore.setState({ sessionId: "s2" })
+    })
+    expect(screen.queryByText("已压缩当前会话上下文")).not.toBeInTheDocument()
+  })
 })
 
 describe("@ 文件引用", () => {

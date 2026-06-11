@@ -52,6 +52,13 @@ export function Composer({
   // 压缩进行中等同回合占用:禁用输入,发不出消息 → 不会撞同会话 409。
   const busy = disabled || compacting
 
+  // 切会话先清掉上个会话遗留的通知卡(notice 是 Composer 本地态、不随会话):否则一条压缩结果
+  // flash 会滞留到切过去的会话(≤4s)。必须声明在下面的结果 effect 之前——effect 按声明序执行,
+  // 「切入一个有待显示结果的会话」时才能先清后弹。
+  useEffect(() => {
+    setNotice(null)
+  }, [sessionId])
+
   // 当前会话的压缩转为「结果」→ 弹一行 flash(复用通知槽,4s 自动消失),并清掉 store 里的
   // 结果态。若压缩完成时用户不在该会话,这里不触发;切回该会话时再弹(故结果留在 store 直到被看到)。
   useEffect(() => {

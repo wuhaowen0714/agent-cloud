@@ -107,7 +107,13 @@ export const useStore = create<AppState>((set, get) => ({
   startCompaction: (sessionId) =>
     set((s) => ({ compactions: { ...s.compactions, [sessionId]: { phase: "running" } } })),
   finishCompaction: (sessionId, result) =>
-    set((s) => ({ compactions: { ...s.compactions, [sessionId]: { phase: "result", result } } })),
+    // 仅当该会话仍有进行中条目才写回结果:压缩进行中遇 logout/切用户会清空 compactions,
+    // 此时迟到的 in-flight 结果不应复活条目(否则重新登录回到该会话会弹陈旧 flash)。
+    set((s) =>
+      s.compactions[sessionId]
+        ? { compactions: { ...s.compactions, [sessionId]: { phase: "result", result } } }
+        : {},
+    ),
   clearCompaction: (sessionId) =>
     set((s) => {
       const { [sessionId]: _, ...rest } = s.compactions

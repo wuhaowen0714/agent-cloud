@@ -16,6 +16,8 @@ export function MessageList({
   onRetry?: () => void
 }) {
   const live = useStore((s) => s.live)
+  // 当前会话正在压缩 → 藏掉「重试」:重试会触发回合,而压缩与回合同锁,必撞 409(onSend 也兜底拦)。
+  const compacting = useStore((s) => !!s.sessionId && s.compactions[s.sessionId]?.phase === "running")
   const endRef = useRef<HTMLDivElement>(null)
   // 粘底跟随:在底部才自动滚,上翻即停(spec 2026-06-11-scroll-follow)。
   // followRef 是权威值(effect 读,不触发渲染);following state 只驱动浮钮显隐。
@@ -134,7 +136,7 @@ export function MessageList({
                 ) : (
                   <span>
                     ⚠ {live.errorMessage ?? "回合失败"}
-                    {onRetry && (
+                    {onRetry && !compacting && (
                       <button
                         type="button"
                         onClick={onRetry}

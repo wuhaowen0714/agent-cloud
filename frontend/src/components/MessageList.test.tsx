@@ -5,7 +5,7 @@ import type { Message } from "../types"
 import { MessageList } from "./MessageList"
 
 afterEach(() => {
-  useStore.setState({ live: null })
+  useStore.setState({ live: null, sessionId: null, compactions: {} })
 })
 
 function setErrorLive(recoverable?: boolean) {
@@ -36,6 +36,13 @@ describe("MessageList error recovery", () => {
     render(<MessageList messages={[]} onRetry={() => {}} />)
     expect(screen.queryByText("重试")).not.toBeInTheDocument()
     expect(screen.getByText(/开新会话/)).toBeInTheDocument()
+  })
+
+  it("当前会话正在压缩 → 隐藏重试(压缩与回合同锁,重试会撞 409)", () => {
+    setErrorLive(true)
+    useStore.setState({ sessionId: "s1", compactions: { s1: { phase: "running" } } })
+    render(<MessageList messages={[]} onRetry={() => {}} />)
+    expect(screen.queryByText("重试")).not.toBeInTheDocument()
   })
 })
 
