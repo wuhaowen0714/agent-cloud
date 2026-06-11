@@ -81,6 +81,16 @@ export const api = {
   listMessages: (sessionId: string) => http<Message[]>(`/sessions/${sessionId}/messages`),
   compactSession: (id: string) =>
     http<{ compacted: boolean }>(`/sessions/${id}/compact`, { method: "POST" }),
+  rollbackSession: (id: string, messageId: string) =>
+    http<{ deleted_count: number; user_text: string }>(`/sessions/${id}/rollback`, {
+      method: "POST",
+      body: JSON.stringify({ message_id: messageId }),
+    }),
+  forkSession: (id: string, messageId: string) =>
+    http<{ new_session_id: string; user_text: string }>(`/sessions/${id}/fork`, {
+      method: "POST",
+      body: JSON.stringify({ message_id: messageId }),
+    }),
   patchSession: (id: string, body: { title: string }) =>
     http<Session>(`/sessions/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteSession: (id: string) => http<void>(`/sessions/${id}`, { method: "DELETE" }),

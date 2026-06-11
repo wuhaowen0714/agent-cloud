@@ -11,9 +11,24 @@ const reset = () =>
     sessionId: null,
     live: null,
     compactions: {},
+    composerDraft: null,
     fileDrawerOpen: false,
     settingsOpen: false,
   })
+
+describe("store composerDraft(回滚/fork 回填)", () => {
+  beforeEach(reset)
+
+  it("set/clear,logout 重置", () => {
+    s().setComposerDraft("回填文本")
+    expect(s().composerDraft).toBe("回填文本")
+    s().setComposerDraft(null)
+    expect(s().composerDraft).toBeNull()
+    s().setComposerDraft("x")
+    s().logout()
+    expect(s().composerDraft).toBeNull()
+  })
+})
 
 describe("store 压缩状态(per-session)", () => {
   beforeEach(reset)
