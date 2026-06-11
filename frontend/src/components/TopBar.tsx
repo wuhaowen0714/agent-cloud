@@ -60,7 +60,7 @@ export function TopBar() {
         className={CHIP_BTN}
       >
         <Wrench size={14} className="text-slate-400" />
-        工具
+        <span className="hidden sm:inline">工具</span>
       </button>
       <button
         ref={skillsBtn}
@@ -72,7 +72,7 @@ export function TopBar() {
         className={CHIP_BTN}
       >
         <Sparkles size={14} className="text-slate-400" />
-        技能
+        <span className="hidden sm:inline">技能</span>
       </button>
       <button
         type="button"
@@ -82,7 +82,8 @@ export function TopBar() {
         className={CHIP_BTN}
       >
         <Folder size={14} className="text-slate-400" />
-        文件
+        {/* 窄屏退化回纯图标:三 chip shrink-0,不退化会把面包屑挤没、裁掉文件入口 */}
+        <span className="hidden sm:inline">文件</span>
       </button>
       {open === "tools" && agent && (
         <TogglePopover anchorRef={toolsBtn} title="工具" onClose={() => setOpen(null)}>
