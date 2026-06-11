@@ -8,6 +8,11 @@ const sess = (title: string | null): Session => ({
   work_subdir: "workspace", last_context_tokens: null,
 })
 
+// 只在精确 key ["sessions","u1"] 下返回数据;读错 key → undefined。这样若实现把读取
+// key 写错(如漏 userId),「拿到即停」会读不到 title → 退化为烧满 maxAttempts,测试即红。
+const dataAtSessionsKey = (get: () => Session[]) => (key: unknown) =>
+  JSON.stringify(key) === JSON.stringify(["sessions", "u1"]) ? get() : undefined
+
 describe("pollSessionTitle", () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
@@ -15,7 +20,9 @@ describe("pollSessionTitle", () => {
   it("轮询刷新 sessions,直到该会话拿到 title 就停", async () => {
     const qc = new QueryClient()
     let title: string | null = null
-    vi.spyOn(qc, "getQueryData").mockImplementation(() => [sess(title)] as never)
+    vi.spyOn(qc, "getQueryData").mockImplementation(
+      dataAtSessionsKey(() => [sess(title)]) as never,
+    )
     const inv = vi.spyOn(qc, "invalidateQueries").mockResolvedValue(undefined as never)
 
     pollSessionTitle(qc, "u1", "s1", { intervalMs: 2000, maxAttempts: 5 })
@@ -33,7 +40,9 @@ describe("pollSessionTitle", () => {
 
   it("title 始终 null:到 maxAttempts 兜底停(不无限轮询)", async () => {
     const qc = new QueryClient()
-    vi.spyOn(qc, "getQueryData").mockReturnValue([sess(null)] as never)
+    vi.spyOn(qc, "getQueryData").mockImplementation(
+      dataAtSessionsKey(() => [sess(null)]) as never,
+    )
     const inv = vi.spyOn(qc, "invalidateQueries").mockResolvedValue(undefined as never)
 
     pollSessionTitle(qc, "u1", "s1", { intervalMs: 1000, maxAttempts: 3 })
