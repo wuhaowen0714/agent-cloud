@@ -9,11 +9,15 @@ from agent_cloud_worker.tools import ToolExecutor
 REMEMBER_SPEC = ToolSpec(
     name="remember",
     description=(
-        "Save a durable, cross-session fact to long-term memory. Use for stable facts worth "
-        "recalling in future conversations: the user's identity / role / lasting preferences "
-        "(scope='user', shared across all of their agents), or facts specific to THIS agent's "
-        "work or project (scope='agent'). Do NOT use for transient or one-off details. "
-        "Keep each entry short."
+        "Save a durable, cross-session fact to long-term memory. Pick the layer by asking: "
+        "would this still be true for the user's OTHER agents? Yes -> scope='user' (shared "
+        "across all of their agents): facts about the person — identity, role, language, "
+        "lasting preferences, long-term projects. No -> scope='agent' (private to you): facts "
+        "about YOU or this specific collaboration — e.g. the user names you or sets your "
+        "persona, conventions agreed for this role, durable notes for your job. "
+        "Do NOT use for transient or one-off details. Keep each entry short, and phrase it to "
+        "be unambiguous when read back later (e.g. scope='agent': \"My name (given by the "
+        'user) is X" — not a first-person note in the shared user layer).'
     ),
     input_schema={
         "type": "object",
@@ -22,10 +26,13 @@ REMEMBER_SPEC = ToolSpec(
             "scope": {
                 "type": "string",
                 "enum": ["user", "agent"],
-                "description": "'user' = about the person; 'agent' = this agent's work.",
+                "description": (
+                    "'user' = about the person, true across all their agents; "
+                    "'agent' = about this agent only (its name/persona/conventions)."
+                ),
             },
         },
-        "required": ["content"],
+        "required": ["content", "scope"],
     },
 )
 

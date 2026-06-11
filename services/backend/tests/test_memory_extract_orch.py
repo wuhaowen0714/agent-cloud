@@ -9,7 +9,7 @@ from agent_cloud_backend.models.message import Message
 from agent_cloud_backend.models.session import Session
 from agent_cloud_backend.models.user import User
 from agent_cloud_backend.repositories.agent_config import AgentConfigRepository
-from agent_cloud_backend.repositories.memory_entry import MemoryEntryRepository
+from agent_cloud_backend.repositories.memory_entry import MemoryConflict, MemoryEntryRepository
 from agent_cloud_backend.repositories.message import MessageRepository
 from agent_cloud_backend.repositories.session import SessionRepository
 from agent_cloud_backend.repositories.user import UserRepository
@@ -37,23 +37,24 @@ def _patch_sessionmaker(monkeypatch, engine):
     )
 
 
-def _patch_worker(monkeypatch, *, changed: bool, mem: str):
-    calls = {"n": 0}
+def _patch_worker(
+    monkeypatch, *, changed: bool, mem: str, agent_changed: bool = False, agent_mem: str = ""
+):
+    calls = {"n": 0, "req": None}
 
     async def _fake(endpoint, req):
         calls["n"] += 1
+        calls["req"] = req
         return worker_pb2.ExtractMemoryResponse(
             user_memory=mem,
-            agent_memory="",
+            agent_memory=agent_mem,
             user_changed=changed,
-            agent_changed=False,
+            agent_changed=agent_changed,
             input_tokens=1,
             output_tokens=1,
         )
 
-    monkeypatch.setattr(
-        "agent_cloud_backend.turn.memory_extract.extract_memory_via_worker", _fake
-    )
+    monkeypatch.setattr("agent_cloud_backend.turn.memory_extract.extract_memory_via_worker", _fake)
     return calls
 
 
@@ -84,6 +85,18 @@ async def _current(engine, user_id):
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
         return await MemoryEntryRepository(db).get_current("user", user_id)
+
+
+async def _current_scope(engine, scope, owner_id):
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        return await MemoryEntryRepository(db).get_current(scope, owner_id)
+
+
+async def _agent_of(engine, sid):
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        return (await db.get(Session, sid)).agent_config_id
 
 
 async def _watermark(engine, sid) -> int:
@@ -128,6 +141,101 @@ async def test_unchanged_no_write_but_advances_watermark(engine, monkeypatch):
     assert await extract_session_memory(sid, settings=_settings(), reason="idle") is False
     assert await _current(engine, uid) is None  # 未写
     assert await _watermark(engine, sid) == 19  # 但水位线推进(10 rounds → max seq 19)
+
+
+# ---- 双块提炼(spec 2026-06-11-memory-layers):agent 块随 user 块一起对账 ----
+
+
+async def test_request_carries_current_agent_block(engine, monkeypatch):
+    # 请求必须携带 agent 块现值,worker 才能对账/把错层事实搬回正确块
+    _patch_sessionmaker(monkeypatch, engine)
+    calls = _patch_worker(monkeypatch, changed=False, mem="")
+    sid, _uid = await _seed(engine, 2)
+    aid = await _agent_of(engine, sid)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        await MemoryEntryRepository(db).write_version(
+            "agent", aid, "- 名字:nana", sid, expected_version=0
+        )
+        await db.commit()
+    await extract_session_memory(sid, settings=_settings(), reason="compaction")
+    assert calls["req"].agent_memory == "- 名字:nana"
+
+
+async def test_agent_changed_writes_agent_block(engine, monkeypatch):
+    _patch_sessionmaker(monkeypatch, engine)
+    _patch_worker(monkeypatch, changed=False, mem="", agent_changed=True, agent_mem="- 名字:nana")
+    sid, uid = await _seed(engine, 2)
+    aid = await _agent_of(engine, sid)
+    assert await extract_session_memory(sid, settings=_settings(), reason="compaction") is True
+    cur = await _current_scope(engine, "agent", aid)
+    assert cur.content == "- 名字:nana" and cur.version == 1
+    assert await _current(engine, uid) is None  # user 块未动
+    assert await _watermark(engine, sid) == 3
+
+
+async def test_both_blocks_changed_writes_both(engine, monkeypatch):
+    _patch_sessionmaker(monkeypatch, engine)
+    _patch_worker(
+        monkeypatch, changed=True, mem="- 中文回复", agent_changed=True, agent_mem="- 名字:nana"
+    )
+    sid, uid = await _seed(engine, 2)
+    aid = await _agent_of(engine, sid)
+    assert await extract_session_memory(sid, settings=_settings(), reason="compaction") is True
+    assert (await _current(engine, uid)).content == "- 中文回复"
+    assert (await _current_scope(engine, "agent", aid)).content == "- 名字:nana"
+    assert await _watermark(engine, sid) == 3
+
+
+async def test_real_concurrent_winner_rolls_back_user_write(engine, monkeypatch):
+    # 真实 IntegrityError 路径(非 monkeypatch 模拟):并发赢家在 get_current 与
+    # write_version 的窗口抢写 agent v1 → 本次 agent 写撞唯一约束(事务被污染)→
+    # user 那笔 flush 与水位线必须一并回滚,赢家数据保留。
+    _patch_sessionmaker(monkeypatch, engine)
+    sid, uid = await _seed(engine, 2)
+    aid = await _agent_of(engine, sid)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def _fake(endpoint, req):
+        async with maker() as db:  # 独立事务:模拟并发赢家
+            await MemoryEntryRepository(db).write_version(
+                "agent", aid, "- winner", sid, expected_version=0
+            )
+            await db.commit()
+        return worker_pb2.ExtractMemoryResponse(
+            user_memory="- u",
+            agent_memory="- loser",
+            user_changed=True,
+            agent_changed=True,
+            input_tokens=1,
+            output_tokens=1,
+        )
+
+    monkeypatch.setattr("agent_cloud_backend.turn.memory_extract.extract_memory_via_worker", _fake)
+    assert await extract_session_memory(sid, settings=_settings(), reason="compaction") is False
+    assert await _watermark(engine, sid) == -1  # 未推进
+    assert await _current(engine, uid) is None  # user 写一并回滚
+    assert (await _current_scope(engine, "agent", aid)).content == "- winner"  # 赢家保留
+
+
+async def test_any_block_conflict_rolls_back_all_and_keeps_watermark(engine, monkeypatch):
+    # agent 块乐观锁冲突 → 整体回滚:user 块本次写入与水位线都不落库(下次重提,与单块语义一致)
+    _patch_sessionmaker(monkeypatch, engine)
+    _patch_worker(monkeypatch, changed=True, mem="- u", agent_changed=True, agent_mem="- a")
+    sid, uid = await _seed(engine, 2)
+    orig = MemoryEntryRepository.write_version
+
+    async def fake_write(self, scope, owner_id, content, source_session_id, *, expected_version):
+        if scope == "agent":
+            raise MemoryConflict("simulated concurrent writer")
+        return await orig(
+            self, scope, owner_id, content, source_session_id, expected_version=expected_version
+        )
+
+    monkeypatch.setattr(MemoryEntryRepository, "write_version", fake_write)
+    assert await extract_session_memory(sid, settings=_settings(), reason="compaction") is False
+    assert await _watermark(engine, sid) == -1  # 未推进
+    assert await _current(engine, uid) is None  # user 块写入一并回滚
 
 
 async def test_no_new_messages_noop(engine, monkeypatch):
@@ -197,18 +305,14 @@ async def test_compact_extracts_memory_before_folding(engine, monkeypatch):
     async def _fake_summarize(endpoint, req):
         return "summary"
 
-    monkeypatch.setattr(
-        "agent_cloud_backend.turn.compaction.summarize_via_worker", _fake_summarize
-    )
+    monkeypatch.setattr("agent_cloud_backend.turn.compaction.summarize_via_worker", _fake_summarize)
     seen = {}
 
     async def _fake_extract(session_id, *, settings, reason):
         seen["reason"] = reason
         return False
 
-    monkeypatch.setattr(
-        "agent_cloud_backend.turn.compaction.extract_session_memory", _fake_extract
-    )
+    monkeypatch.setattr("agent_cloud_backend.turn.compaction.extract_session_memory", _fake_extract)
     sid, _ = await _seed(engine, 3)  # 6 条消息,keep_recent=1 → 有可折叠
     await compact(sid, worker_endpoint="x", keep_recent=1, settings=_settings())
     assert seen.get("reason") == "compaction"

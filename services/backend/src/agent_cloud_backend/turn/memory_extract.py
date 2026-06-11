@@ -30,10 +30,10 @@ def _rounds(msgs: list) -> int:
     return sum(1 for m in msgs if m.role == "user")
 
 
-async def extract_session_memory(
-    session_id: uuid.UUID, *, settings: Settings, reason: str
-) -> bool:
-    """从某会话自上次水位线以来的新消息提炼记忆,更新 user 块(spec 2026-06-09)。
+async def extract_session_memory(session_id: uuid.UUID, *, settings: Settings, reason: str) -> bool:
+    """从某会话自上次水位线以来的新消息提炼记忆,双块对账:user(跨 agent 共享)与
+    agent(本 agent 专属)各自按 changed 写入,错层事实由 worker 提炼时归位
+    (spec 2026-06-09 / 2026-06-11-memory-layers)。
 
     reason='idle' 受 memory_min_rounds 轮次闸约束;reason='compaction' 不设闸(折叠前必提)。
     返回是否写入了新版本。best-effort:并发冲突则放弃本次(下次再提)。
@@ -58,7 +58,8 @@ async def extract_session_memory(
         # BYO-Key:用本人凭据(无/不属本人 → ("","") 回退全局)。key 仅经 worker。
         api_key, base_url = await resolve_agent_key(db, agent.key_ref or "", s.user_id, settings)
         mem_repo = MemoryEntryRepository(db)
-        cur = await mem_repo.get_current("user", s.user_id)
+        cur_user = await mem_repo.get_current("user", s.user_id)
+        cur_agent = await mem_repo.get_current("agent", s.agent_config_id)
         req = worker_pb2.ExtractMemoryRequest(
             agent=worker_pb2.Agent(
                 model=agent.model,
@@ -67,8 +68,8 @@ async def extract_session_memory(
                 api_key=api_key,
                 base_url=base_url,
             ),
-            user_memory=cur.content if cur else "",
-            agent_memory="",  # v1 不自动提 agent 层
+            user_memory=cur_user.content if cur_user else "",
+            agent_memory=cur_agent.content if cur_agent else "",
             messages=[msg_to_proto(orm_to_common(m)) for m in msgs],
             soft_max_chars=settings.memory_soft_chars,
         )
@@ -76,17 +77,24 @@ async def extract_session_memory(
 
         max_seq = max(m.seq for m in msgs)
         wrote = False
-        if resp.user_changed:
-            expected = cur.version if cur else 0
+        # 双块各自乐观锁写入;任一块冲突 → return(事务整体回滚:另一块的写入与
+        # 水位线都不落库),下次重提——与原单块语义一致,绝不半写推进。
+        for scope, owner_id, changed, content in (
+            ("user", s.user_id, resp.user_changed, resp.user_memory),
+            ("agent", s.agent_config_id, resp.agent_changed, resp.agent_memory),
+        ):
+            if not changed:
+                continue
+            cur = cur_user if scope == "user" else cur_agent
             try:
                 await mem_repo.write_version(
-                    "user", s.user_id, resp.user_memory, s.id, expected_version=expected
+                    scope, owner_id, content, s.id, expected_version=cur.version if cur else 0
                 )
-                await mem_repo.prune("user", s.user_id, settings.memory_max_versions)
+                await mem_repo.prune(scope, owner_id, settings.memory_max_versions)
                 wrote = True
             except MemoryConflict:
                 # 并发赢家已写该版本;放弃本次(不推进水位线,下次再提)。
-                logger.info("memory write conflict for user %s; skipping this pass", s.user_id)
+                logger.info("memory write conflict (scope=%s); skipping this pass", scope)
                 return False
         s.memory_through_seq = max_seq  # 不论写没写都推进,避免反复重提同一批
         await db.commit()

@@ -97,3 +97,31 @@ def test_skill_metadata_is_xml_escaped():
     # 原始未转义片段不应出现
     assert "<tag>" not in out
     assert " & " not in out
+
+
+def test_memory_rendered_in_two_labeled_sections():
+    # 分层渲染:user 块跨 agent 共享(里面的"我"不是这个 agent),agent 块才是它专属;
+    # 标题措辞与 remember 的 scope 语义对应,读写互教。
+    out = build_system_prompt(
+        documents=[],
+        memory=[
+            MemoryItem(scope="user", content="- likes tea\n- 中文回复"),
+            MemoryItem(scope="agent", content="- my name (given by the user) is nana"),
+        ],
+        skills=[],
+    )
+    assert "about the user" in out and "shared across" in out
+    assert "private to you" in out
+    assert "- likes tea" in out and "- 中文回复" in out
+    assert "nana" in out
+    assert out.index("about the user") < out.index("private to you")  # user 节在前
+    # 不再用 "- (scope)" 行前缀(对多行块是畸形嵌套)
+    assert "- (user)" not in out and "- (agent)" not in out
+
+
+def test_memory_single_layer_renders_only_its_section():
+    out = build_system_prompt(
+        documents=[], memory=[MemoryItem(scope="user", content="- t")], skills=[]
+    )
+    assert "about the user" in out
+    assert "private to you" not in out

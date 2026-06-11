@@ -1,5 +1,5 @@
 from agent_cloud_common import ToolCall, ToolResult, ToolSpec
-from agent_cloud_worker.remember import RememberingExecutor, remember_enabled
+from agent_cloud_worker.remember import REMEMBER_SPEC, RememberingExecutor, remember_enabled
 
 
 class _Inner:
@@ -54,3 +54,20 @@ async def test_disabled_rejects_remember_call():
     ex = RememberingExecutor(_Inner(), enabled=False)
     r = await ex.execute(ToolCall(id="1", name="remember", arguments={"content": "x"}))
     assert r.is_error is True
+
+
+def test_spec_requires_scope_and_guides_layering():
+    # scope 必填:强迫模型每次显式决策(默认滑进 user 正是 nana 误写共享块的根因之一)
+    assert set(REMEMBER_SPEC.input_schema["required"]) == {"content", "scope"}
+    text = REMEMBER_SPEC.description + str(REMEMBER_SPEC.input_schema)
+    # 判别句(换一个 agent 还成立吗)与「用户给你起名/设人设 → agent」的显式例子
+    assert "OTHER agents" in text
+    assert "names you" in text or "persona" in text
+
+
+async def test_missing_scope_still_defaults_to_user_at_runtime():
+    # schema 必填只约束模型;运行时对缺 scope 保持宽容(历史消息/不守约模型),默认 user
+    ex = RememberingExecutor(_Inner(), enabled=True)
+    r = await ex.execute(ToolCall(id="1", name="remember", arguments={"content": "x"}))
+    assert r.is_error is False
+    assert "user" in r.content

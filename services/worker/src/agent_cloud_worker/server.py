@@ -19,7 +19,7 @@ from agent_cloud_common.codec import msg_from_proto, msg_to_proto, turn_event_to
 
 from agent_cloud_worker.context import build_system_prompt
 from agent_cloud_worker.loop import run_turn, run_turn_stream
-from agent_cloud_worker.memory_extract import MemoryParseError, reconcile_user_memory
+from agent_cloud_worker.memory_extract import MemoryParseError, reconcile_memory
 from agent_cloud_worker.provider import (
     CompletionBudgetExceeded,
     ContextWindowExceeded,
@@ -315,7 +315,7 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
     async def ExtractMemory(
         self, request: worker_pb2.ExtractMemoryRequest, context: grpc.aio.ServicerContext
     ) -> worker_pb2.ExtractMemoryResponse:
-        # 记忆提炼(v1:仅 user 层)。一次 LLM 调用,不用工具。
+        # 记忆提炼(双块:user + agent,错层归位)。一次 LLM 调用,不用工具。
         try:
             messages = [msg_from_proto(m) for m in request.messages]
         except (ValueError, json.JSONDecodeError) as exc:
@@ -341,9 +341,10 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, f"provider unavailable: {exc}")
             return
         try:
-            mem, changed, usage = await reconcile_user_memory(
+            user_mem, user_changed, agent_mem, agent_changed, usage = await reconcile_memory(
                 provider,
-                current=request.user_memory,
+                user_current=request.user_memory,
+                agent_current=request.agent_memory,
                 messages=messages,
                 soft_max_chars=request.soft_max_chars or 2000,
             )
@@ -370,10 +371,10 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
             await context.abort(grpc.StatusCode.INTERNAL, "extract memory failed")
             return
         return worker_pb2.ExtractMemoryResponse(
-            user_memory=mem,
-            agent_memory=request.agent_memory,
-            user_changed=changed,
-            agent_changed=False,
+            user_memory=user_mem,
+            agent_memory=agent_mem,
+            user_changed=user_changed,
+            agent_changed=agent_changed,
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
         )
