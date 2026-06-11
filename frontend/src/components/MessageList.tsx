@@ -1,5 +1,7 @@
-import { Fragment, useEffect, useMemo, useRef } from "react"
+import { ChevronDown } from "lucide-react"
+import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 import { messagesToTurns } from "../blocks"
+import { isNearBottom } from "../scroll"
 import { useStore } from "../store"
 import { fmtTime } from "../time"
 import type { Message } from "../types"
@@ -15,16 +17,69 @@ export function MessageList({
 }) {
   const live = useStore((s) => s.live)
   const endRef = useRef<HTMLDivElement>(null)
+  // 粘底跟随:在底部才自动滚,上翻即停(spec 2026-06-11-scroll-follow)。
+  // followRef 是权威值(effect 读,不触发渲染);following state 只驱动浮钮显隐。
+  const followRef = useRef(true)
+  const [following, setFollowing] = useState(true)
+  const lastTopRef = useRef(0)
+  const prevLiveRef = useRef(live)
+
+  const setFollow = (v: boolean) => {
+    followRef.current = v
+    setFollowing((prev) => (prev === v ? prev : v)) // 边界翻转才真 setState(滚动事件高频)
+  }
+
+  const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget
+    const near = isNearBottom(el)
+    const scrolledUp = el.scrollTop < lastTopRef.current
+    lastTopRef.current = el.scrollTop
+    // 关跟随的唯一信号:scrollTop 实际下降(用户上翻)且不在底。scroll 事件是异步派发的,
+    // 程序滚动 + 下一个 delta 撑高内容后才到的事件会读到「距底变大但 scrollTop 没降」——
+    // 那不是用户行为,不能熄火(审查 H1:否则流式中跟随会自发停止)。
+    if (scrolledUp && !near) setFollow(false)
+    else if (near) setFollow(true)
+  }
+
+  // 用户发送新回合(startLive 必刷新 startedAt;delta 的 setLive 不动它):强制恢复跟随。
+  // 用 startedAt 而非 null→非空 判定——错误回合的 live 不被清,直接再发是非空→非空(审查 M1)。
+  // resume 续看(startLive("")):userText 为空,不触发。
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" })
+    const prev = prevLiveRef.current
+    prevLiveRef.current = live
+    if (live?.userText && live.startedAt !== prev?.startedAt) {
+      setFollow(true)
+      endRef.current?.scrollIntoView()
+    }
+  }, [live])
+
+  useEffect(() => {
+    // 即时滚动(非 smooth):平滑动画在高频 delta 下排队,正是「拽走」感的帮凶
+    if (followRef.current) endRef.current?.scrollIntoView()
   }, [messages, live])
+
+  const scrollToBottom = () => {
+    setFollow(true)
+    endRef.current?.scrollIntoView()
+  }
 
   // 已落库历史:按回合分组,每个回合 = 一个用户气泡 + 一个助手气泡(块流)。
   // memo:MessageList 订阅 live,流式期间每帧重渲染,避免每帧重算整段历史。
   const turns = useMemo(() => messagesToTurns(messages), [messages])
 
   return (
-    <div className="flex-1 overflow-auto p-4">
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      {!following && (
+        <button
+          type="button"
+          aria-label="回到底部"
+          onClick={scrollToBottom}
+          className="absolute bottom-4 right-6 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-500 shadow-pop ring-1 ring-slate-200 transition hover:text-slate-800"
+        >
+          <ChevronDown size={18} />
+        </button>
+      )}
+      <div data-scroll-container onScroll={onScroll} className="flex-1 overflow-auto p-4">
       <div className="mx-auto max-w-5xl space-y-4">
         {turns.map((turn, i) => {
         // user 消息但没有任何助手块 = 该回合被取消/出错(未完成)。但最后一条且当前
@@ -96,6 +151,7 @@ export function MessageList({
         </>
       )}
         <div ref={endRef} />
+        </div>
       </div>
     </div>
   )
