@@ -77,8 +77,10 @@ class FakeProvider:
     def __init__(self, scripted: list[CompletionResult]) -> None:
         self._scripted = list(scripted)
         self._index = 0
+        self.requests: list[CompletionRequest] = []  # 测试断言 prompt 内容用
 
     async def complete(self, request: CompletionRequest) -> CompletionResult:
+        self.requests.append(request)
         if self._index >= len(self._scripted):
             raise IndexError(f"FakeProvider script exhausted after {len(self._scripted)} calls")
         result = self._scripted[self._index]
@@ -86,6 +88,7 @@ class FakeProvider:
         return result
 
     async def stream(self, request: CompletionRequest) -> AsyncIterator[ProviderEvent]:
+        self.requests.append(request)
         if self._index >= len(self._scripted):
             raise IndexError(f"FakeProvider script exhausted after {len(self._scripted)} calls")
         result = self._scripted[self._index]

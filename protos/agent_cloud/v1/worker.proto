@@ -140,8 +140,9 @@ message SummarizeResponse {
   int64 output_tokens = 3;
 }
 
-// 记忆提炼(后端→worker;LLM key 留 worker)。v1 仅 user 层:worker 只改 user_memory,
-// agent_memory 透传不动。soft_max_chars 是软上限,只引导 LLM,后端不硬截断。
+// 记忆提炼(后端→worker;LLM key 留 worker)。双块对账:user(跨 agent 共享)与
+// agent(单 agent 专属)各自输出 changed + 整块,错层事实归位。soft_max_chars 是软上限,
+// 只引导 LLM,后端不硬截断。
 message ExtractMemoryRequest {
   Agent agent = 1;
   string user_memory = 2;
