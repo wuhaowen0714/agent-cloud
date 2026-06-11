@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.exc import IntegrityError
@@ -15,6 +16,14 @@ logger = logging.getLogger(__name__)
 
 # 返回 endpoint 是否存活。生产 provisioner 注入真实实现(见 sandbox/health.py)。
 HealthCheck = Callable[[str], Awaitable[bool]]
+
+
+@dataclass(frozen=True)
+class SandboxConn:
+    """worker 连沙箱所需:endpoint + gRPC 鉴权 token(token 空=沙箱开放,inprocess/旧)。"""
+
+    endpoint: str
+    token: str
 
 
 class SandboxManager:
@@ -30,7 +39,7 @@ class SandboxManager:
         self._idle_ttl_seconds = idle_ttl_seconds
         self._health_check = health_check
 
-    async def get_endpoint_for_user(self, user_id: uuid.UUID) -> str:
+    async def get_endpoint_for_user(self, user_id: uuid.UUID) -> SandboxConn:
         dead_sandbox_id: uuid.UUID | None = None
         async with self._sessionmaker() as db:
             repo = SandboxRegistryRepository(db)
@@ -42,7 +51,7 @@ class SandboxManager:
                 if self._health_check is None or await self._health_check(existing.endpoint):
                     await repo.touch(existing.id)
                     await db.commit()
-                    return existing.endpoint
+                    return SandboxConn(existing.endpoint, existing.auth_token)
                 await repo.mark_dead(existing.id)
                 await db.commit()
                 dead_sandbox_id = existing.id
@@ -55,11 +64,11 @@ class SandboxManager:
                 logger.exception("failed to stop dead sandbox %s", dead_sandbox_id)
 
         # spawn outside the DB transaction (provisioning may be slow)
-        sandbox_id, endpoint = await self._provisioner.spawn(user_id)
+        sandbox_id, endpoint, token = await self._provisioner.spawn(user_id)
         async with self._sessionmaker() as db:
             repo = SandboxRegistryRepository(db)
             try:
-                await repo.register(sandbox_id, user_id, endpoint)
+                await repo.register(sandbox_id, user_id, endpoint, token)
                 await db.commit()
             except IntegrityError:
                 # Lost the spawn race: a concurrent caller already inserted the
@@ -69,8 +78,8 @@ class SandboxManager:
                 await db.rollback()
                 winner = await repo.get_active_for_user(user_id)
                 await self._provisioner.stop(sandbox_id)
-                return winner.endpoint
-        return endpoint
+                return SandboxConn(winner.endpoint, winner.auth_token)
+        return SandboxConn(endpoint, token)
 
     async def reap_idle(self) -> int:
         """标记并停掉空闲超 TTL 的 sandbox。返回回收数量。

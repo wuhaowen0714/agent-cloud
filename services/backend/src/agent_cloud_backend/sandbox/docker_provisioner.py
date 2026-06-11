@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import secrets
 import uuid
 
 logger = logging.getLogger(__name__)
@@ -57,15 +58,19 @@ class DockerProvisioner:
             self._client = docker.from_env()
         return self._client
 
-    async def spawn(self, user_id: uuid.UUID) -> tuple[uuid.UUID, str]:
+    async def spawn(self, user_id: uuid.UUID) -> tuple[uuid.UUID, str, str]:
         sandbox_id = uuid.uuid4()
         name = f"acsbx-{sandbox_id}"
         host_ws = f"{self._host_root}/{user_id}/workspace"
         os.makedirs(host_ws, exist_ok=True)  # bind 源目录必须存在
+        # 每沙箱一个随机 gRPC 鉴权 token,注入容器 env;沙箱 server 据此校验调用方,
+        # worker 经 RunTurnRequest.sandbox_token 拿到并在 metadata 带上(spec C②)。
+        token = secrets.token_urlsafe(32)
         kwargs: dict = dict(
             image=self._image,
             detach=True,
             name=name,
+            environment={"AGENT_CLOUD_SANDBOX_TOKEN": token},
             volumes={host_ws: {"bind": "/workspace", "mode": "rw"}},
             labels={"managed-by": _LABEL, "user_id": str(user_id)},
             mem_limit=self._mem_limit,
@@ -99,7 +104,7 @@ class DockerProvisioner:
                 logger.exception("failed to remove half-spawned sandbox %s", name)
             raise
         logger.info("spawned sandbox %s for user %s at %s", sandbox_id, user_id, endpoint)
-        return sandbox_id, endpoint
+        return sandbox_id, endpoint, token
 
     async def stop(self, sandbox_id: uuid.UUID) -> None:
         name = f"acsbx-{sandbox_id}"

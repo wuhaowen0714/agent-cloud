@@ -24,7 +24,7 @@ os.environ.setdefault("AGENT_CLOUD_CREDENTIAL_KEY", base64.b64encode(b"\x07" * 3
 
 class _FakeProvisioner:
     async def spawn(self, user_id):
-        return _uuid.uuid4(), f"fake-sandbox:{user_id}"
+        return _uuid.uuid4(), f"fake-sandbox:{user_id}", ""
 
     async def stop(self, sandbox_id):
         return None

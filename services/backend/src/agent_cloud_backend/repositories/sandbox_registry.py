@@ -11,9 +11,11 @@ class SandboxRegistryRepository(BaseRepository[SandboxRegistry]):
     model = SandboxRegistry
 
     async def register(
-        self, sandbox_id: uuid.UUID, user_id: uuid.UUID, endpoint: str
+        self, sandbox_id: uuid.UUID, user_id: uuid.UUID, endpoint: str, token: str = ""
     ) -> SandboxRegistry:
-        sb = SandboxRegistry(id=sandbox_id, user_id=user_id, endpoint=endpoint, status="active")
+        sb = SandboxRegistry(
+            id=sandbox_id, user_id=user_id, endpoint=endpoint, auth_token=token, status="active"
+        )
         self.session.add(sb)
         await self.session.flush()
         return sb

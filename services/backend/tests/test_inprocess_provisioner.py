@@ -8,7 +8,7 @@ from agent_cloud_backend.sandbox.inprocess import InProcessProvisioner
 async def test_spawn_returns_reachable_sandbox(tmp_path):
     prov = InProcessProvisioner(base_root=tmp_path)
     user_id = uuid.uuid4()
-    sandbox_id, endpoint = await prov.spawn(user_id)
+    sandbox_id, endpoint, _ = await prov.spawn(user_id)
     try:
         async with grpc.aio.insecure_channel(endpoint) as channel:
             stub = sandbox_pb2_grpc.SandboxStub(channel)
@@ -30,7 +30,7 @@ async def test_spawn_returns_reachable_sandbox(tmp_path):
 async def test_persistent_workdir_across_respawn(tmp_path):
     prov = InProcessProvisioner(base_root=tmp_path)
     user_id = uuid.uuid4()
-    sid1, ep1 = await prov.spawn(user_id)
+    sid1, ep1, _ = await prov.spawn(user_id)
     async with grpc.aio.insecure_channel(ep1) as ch:
         await sandbox_pb2_grpc.SandboxStub(ch).ExecTool(
             sandbox_pb2.ExecToolRequest(
@@ -42,7 +42,7 @@ async def test_persistent_workdir_across_respawn(tmp_path):
         )
     await prov.stop(sid1)
     # respawn same user -> same base workdir -> file persists
-    sid2, ep2 = await prov.spawn(user_id)
+    sid2, ep2, _ = await prov.spawn(user_id)
     try:
         async with grpc.aio.insecure_channel(ep2) as ch:
             resp = await sandbox_pb2_grpc.SandboxStub(ch).ExecTool(

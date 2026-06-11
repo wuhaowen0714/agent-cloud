@@ -54,7 +54,7 @@ async def test_spawn_publish_mode_mounts_workspace_and_returns_localhost_endpoin
         host_root=str(tmp_path), image="img:1", network_mode="publish", client=client
     )
     uid = uuid.uuid4()
-    sandbox_id, endpoint = await prov.spawn(uid)
+    sandbox_id, endpoint, _ = await prov.spawn(uid)
 
     kw = client.containers.run_kwargs
     assert kw["volumes"] == {f"{tmp_path}/{uid}/workspace": {"bind": "/workspace", "mode": "rw"}}
@@ -77,7 +77,7 @@ async def test_spawn_network_mode_uses_container_name_endpoint(tmp_path):
         host_root=str(tmp_path), image="img:1", network_mode="network",
         network="acnet", client=client,
     )
-    sandbox_id, endpoint = await prov.spawn(uuid.uuid4())
+    sandbox_id, endpoint, _ = await prov.spawn(uuid.uuid4())
     kw = client.containers.run_kwargs
     assert kw["network"] == "acnet"
     assert "ports" not in kw
@@ -93,7 +93,7 @@ async def test_stop_is_idempotent_when_container_missing(tmp_path):
 async def test_stop_stops_and_removes(tmp_path):
     client = _FakeClient()
     prov = DockerProvisioner(host_root=str(tmp_path), image="img:1", client=client)
-    sandbox_id, _ = await prov.spawn(uuid.uuid4())
+    sandbox_id, _, _ = await prov.spawn(uuid.uuid4())
     await prov.stop(sandbox_id)
     c = client.containers.by_name[f"acsbx-{sandbox_id}"]
     assert c.stopped and c.removed

@@ -6,7 +6,7 @@ from agent_cloud_backend.sandbox.inprocess import InProcessProvisioner
 
 async def test_alive_true_for_live_sandbox(tmp_path):
     prov = InProcessProvisioner(base_root=tmp_path)
-    sandbox_id, endpoint = await prov.spawn(uuid.uuid4())
+    sandbox_id, endpoint, _ = await prov.spawn(uuid.uuid4())
     try:
         assert await grpc_endpoint_alive(endpoint) is True
     finally:

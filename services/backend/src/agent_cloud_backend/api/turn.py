@@ -76,7 +76,9 @@ async def run_turn_endpoint(
         await db.commit()
 
         # 3. 组装 + 物化已启用 skill + 调 worker
-        sandbox_endpoint = await manager.get_endpoint_for_user(s.user_id)
+        sandbox_conn = await manager.get_endpoint_for_user(s.user_id)
+        sandbox_endpoint = sandbox_conn.endpoint
+        sandbox_token = sandbox_conn.token
         enabled_skills = await AgentSkillEnableRepository(db).list_enabled_for_agent(
             s.agent_config_id
         )
@@ -95,6 +97,7 @@ async def run_turn_endpoint(
             db,
             s,
             sandbox_endpoint=sandbox_endpoint,
+            sandbox_token=sandbox_token,
             user_message=body.content,
             exclude_message_id=user_msg.id,
             enabled_skills=enabled_skills,
@@ -130,6 +133,7 @@ async def run_turn_endpoint(
                             db,
                             s,
                             sandbox_endpoint=sandbox_endpoint,
+                            sandbox_token=sandbox_token,
                             user_message=body.content,
                             exclude_message_id=user_msg.id,
                             enabled_skills=enabled_skills,
@@ -232,7 +236,9 @@ async def stream_turn_endpoint(
                 ),
             )
             await db.commit()
-            sandbox_endpoint = await manager.get_endpoint_for_user(s.user_id)
+            sandbox_conn = await manager.get_endpoint_for_user(s.user_id)
+            sandbox_endpoint = sandbox_conn.endpoint
+            sandbox_token = sandbox_conn.token
             enabled_skills = await AgentSkillEnableRepository(db).list_enabled_for_agent(
                 s.agent_config_id
             )
@@ -248,6 +254,7 @@ async def stream_turn_endpoint(
                 db,
                 s,
                 sandbox_endpoint=sandbox_endpoint,
+                sandbox_token=sandbox_token,
                 user_message=body.content,
                 exclude_message_id=user_msg.id,
                 enabled_skills=enabled_skills,
@@ -271,6 +278,7 @@ async def stream_turn_endpoint(
                 rdb,
                 rs,
                 sandbox_endpoint=sandbox_endpoint,
+                sandbox_token=sandbox_token,
                 user_message=body.content,
                 exclude_message_id=user_msg.id,
                 enabled_skills=rskills,

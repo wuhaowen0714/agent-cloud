@@ -14,7 +14,7 @@ class InProcessProvisioner:
         self._base_root = Path(base_root)
         self._servers: dict[uuid.UUID, object] = {}
 
-    async def spawn(self, user_id: uuid.UUID) -> tuple[uuid.UUID, str]:
+    async def spawn(self, user_id: uuid.UUID) -> tuple[uuid.UUID, str, str]:
         from agent_cloud_sandbox.server import create_server
 
         sandbox_id = uuid.uuid4()
@@ -22,7 +22,7 @@ class InProcessProvisioner:
         workdir.mkdir(parents=True, exist_ok=True)
         server, port = await create_server(base_workdir=workdir, host="localhost", port=0)
         self._servers[sandbox_id] = server
-        return sandbox_id, f"localhost:{port}"
+        return sandbox_id, f"localhost:{port}", ""  # 进程内无隔离需求 → 空 token(server 开放)
 
     async def stop(self, sandbox_id: uuid.UUID) -> None:
         server = self._servers.pop(sandbox_id, None)

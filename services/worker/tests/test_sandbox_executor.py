@@ -116,7 +116,7 @@ async def test_execute_retries_unavailable_then_succeeds():
             self.fail_times = fail_times
             self.calls = 0
 
-        async def ExecTool(self, req):
+        async def ExecTool(self, req, metadata=None):
             self.calls += 1
             if self.calls <= self.fail_times:
                 raise _Unavailable()
@@ -134,7 +134,7 @@ async def test_execute_gives_up_after_max_attempts():
         def __init__(self):
             self.calls = 0
 
-        async def ExecTool(self, req):
+        async def ExecTool(self, req, metadata=None):
             self.calls += 1
             raise _Unavailable()
 
@@ -143,3 +143,42 @@ async def test_execute_gives_up_after_max_attempts():
     res = await ex.execute(ToolCall(id="c1", name="bash", arguments={"command": "x"}))
     assert res.is_error is True and "UNAVAILABLE" in res.content
     assert ex._stub.calls == 3
+
+
+async def test_exec_tool_sends_token_metadata():
+    # token 非空 → ExecTool 调用带 x-sandbox-token metadata(沙箱据此校验)
+    from agent_cloud_common import ToolCall
+    from agent_cloud_worker.sandbox_executor import SandboxToolExecutor
+
+    captured = {}
+
+    class _Stub:
+        async def ExecTool(self, req, metadata=None):
+            captured["md"] = metadata
+            from agent_cloud.v1 import sandbox_pb2
+
+            return sandbox_pb2.ExecToolResponse(content="ok", is_error=False)
+
+    ex = SandboxToolExecutor(channel=None, work_subdir=".", token="sekret")
+    ex._stub = _Stub()
+    await ex.execute(ToolCall(id="c1", name="bash", arguments={"command": "ls"}))
+    assert ("x-sandbox-token", "sekret") in (captured["md"] or ())
+
+
+async def test_exec_tool_no_token_no_metadata():
+    from agent_cloud_common import ToolCall
+    from agent_cloud_worker.sandbox_executor import SandboxToolExecutor
+
+    captured = {}
+
+    class _Stub:
+        async def ExecTool(self, req, metadata=None):
+            captured["md"] = metadata
+            from agent_cloud.v1 import sandbox_pb2
+
+            return sandbox_pb2.ExecToolResponse(content="ok", is_error=False)
+
+    ex = SandboxToolExecutor(channel=None, work_subdir=".")  # 无 token
+    ex._stub = _Stub()
+    await ex.execute(ToolCall(id="c1", name="bash", arguments={"command": "ls"}))
+    assert captured["md"] is None
