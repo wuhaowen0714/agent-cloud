@@ -1,5 +1,22 @@
 FROM python:3.13-slim
 
+# agent 高频命令行工具(bash 工具开箱可用)。放在应用层之前:工具层比 Python 代码稳定,
+# 改代码不使其失效缓存。ca-certificates 是 https 根证书,curl/wget/git 的 https 全靠它。
+# 出网未限制是既有语境(python 一直能联网),这些工具只是便利化,不扩大攻击面;
+# egress allowlist 是独立加固项(见 roadmap)。
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl wget git jq \
+    && rm -rf /var/lib/apt/lists/*
+
+# git 开箱可用:/workspace 是宿主 bind mount,容器内 root 与宿主属主 uid 不一致会触发
+# "dubious ownership" 拒绝操作 → safe.directory '*' 放行(沙箱单用户隔离环境)。
+# 兜底身份免去首次 commit 的 "tell me who you are";system 级最低优先级,agent 可在
+# /workspace/.home(HOME 在卷里,持久)用 git config --global 自行覆盖。
+RUN git config --system safe.directory '*' \
+    && git config --system init.defaultBranch main \
+    && git config --system user.name agent \
+    && git config --system user.email agent@sandbox.local
+
 # 依赖路由:让 pip/npm 等把包装进 /workspace 卷(跨容器重建保留)。详见 spec §8.1。
 ENV HOME=/workspace/.home \
     PYTHONUSERBASE=/workspace/.home/.local \
