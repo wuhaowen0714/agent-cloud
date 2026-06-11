@@ -1,4 +1,7 @@
+import asyncio
+
 import grpc
+import pytest
 import pytest_asyncio
 from agent_cloud.v1 import sandbox_pb2, sandbox_pb2_grpc
 from agent_cloud_sandbox.server import create_server
@@ -62,3 +65,59 @@ async def test_bash_output_clean_of_fork_noise_over_grpc(sandbox):
     assert resp.content == "hi\n"
     for noise in ("fork", "poll", "FD from fork"):
         assert noise not in resp.content
+
+
+async def test_terminal_echo_over_grpc(sandbox):
+    # 完整 gRPC 链路:开 PTY → 敲命令 → 收到含输出的 output 帧
+    addr, _ = sandbox
+    async with grpc.aio.insecure_channel(addr) as channel:
+        stub = sandbox_pb2_grpc.SandboxStub(channel)
+        call = stub.Terminal()
+        await call.write(
+            sandbox_pb2.TerminalClientMsg(
+                start=sandbox_pb2.TerminalStart(work_subdir="s1", rows=24, cols=80)
+            )
+        )
+        await call.write(sandbox_pb2.TerminalClientMsg(input=b"echo term-ok\n"))
+        buf = b""
+        async with asyncio.timeout(5):
+            while b"term-ok" not in buf:
+                msg = await call.read()
+                if msg.WhichOneof("msg") == "output":
+                    buf += msg.output
+        assert b"term-ok" in buf
+        await call.done_writing()
+        call.cancel()
+
+
+async def test_terminal_first_msg_must_be_start(sandbox):
+    addr, _ = sandbox
+    async with grpc.aio.insecure_channel(addr) as channel:
+        stub = sandbox_pb2_grpc.SandboxStub(channel)
+        call = stub.Terminal()
+        await call.write(sandbox_pb2.TerminalClientMsg(input=b"oops\n"))  # 非 start
+        await call.done_writing()
+        with pytest.raises(grpc.aio.AioRpcError) as ei:
+            async for _ in call:
+                pass
+    assert ei.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+
+async def test_terminal_exit_emits_exit_code(sandbox):
+    addr, _ = sandbox
+    async with grpc.aio.insecure_channel(addr) as channel:
+        stub = sandbox_pb2_grpc.SandboxStub(channel)
+        call = stub.Terminal()
+        await call.write(
+            sandbox_pb2.TerminalClientMsg(
+                start=sandbox_pb2.TerminalStart(work_subdir="s1", rows=24, cols=80)
+            )
+        )
+        await call.write(sandbox_pb2.TerminalClientMsg(input=b"exit 0\n"))
+        exit_code = None
+        async with asyncio.timeout(5):
+            async for msg in call:
+                if msg.WhichOneof("msg") == "exit_code":
+                    exit_code = msg.exit_code
+                    break
+        assert exit_code == 0

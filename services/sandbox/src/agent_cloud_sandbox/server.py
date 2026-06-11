@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import hmac
 from pathlib import Path
 
 import grpc
 from agent_cloud.v1 import sandbox_pb2, sandbox_pb2_grpc
 
-from agent_cloud_sandbox.tools import run_tool
+from agent_cloud_sandbox.pty_session import PtySession
+from agent_cloud_sandbox.tools import _resolve_within, run_tool
 
 
 class SandboxServicer(sandbox_pb2_grpc.SandboxServicer):
@@ -29,6 +31,49 @@ class SandboxServicer(sandbox_pb2_grpc.SandboxServicer):
             self._base, request.work_subdir, request.tool_name, request.arguments_json
         )
         return sandbox_pb2.ExecToolResponse(content=content, is_error=is_error)
+
+    async def Terminal(self, request_iterator, context: grpc.aio.ServicerContext):
+        # ⚠️ 复制 ExecTool 的 token 校验(server.py 注释明确要求:新增 RPC 必须复制,
+        # 否则成为未鉴权旁路)。
+        if self._token:
+            md = dict(context.invocation_metadata() or ())
+            if not hmac.compare_digest(md.get("x-sandbox-token", ""), self._token):
+                await context.abort(grpc.StatusCode.UNAUTHENTICATED, "invalid sandbox token")
+        # 首帧必须是 start(开 PTY)
+        try:
+            first = await request_iterator.__anext__()
+        except StopAsyncIteration:
+            return
+        if first.WhichOneof("msg") != "start":
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "first message must be start")
+        # work_subdir 经与 ExecTool 同款围栏(防 .. 逃逸出沙箱基目录)
+        try:
+            workdir = _resolve_within(self._base, first.start.work_subdir)
+        except ValueError:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "invalid work_subdir")
+        sess = PtySession(workdir, first.start.rows, first.start.cols)
+        await sess.start()
+
+        async def _pump_in() -> None:
+            async for msg in request_iterator:
+                kind = msg.WhichOneof("msg")
+                if kind == "input":
+                    await sess.write(msg.input)
+                elif kind == "resize":
+                    sess.resize(msg.resize.rows, msg.resize.cols)
+
+        pump = asyncio.create_task(_pump_in())
+        try:
+            while True:
+                data = await sess.read()
+                if data == b"":  # 子进程退出
+                    break
+                yield sandbox_pb2.TerminalServerMsg(output=data)
+            code = await sess.wait()
+            yield sandbox_pb2.TerminalServerMsg(exit_code=code)
+        finally:
+            pump.cancel()
+            await sess.close()
 
 
 async def create_server(
