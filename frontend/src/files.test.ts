@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { formatSize, previewKind, splitBreadcrumb } from "./files"
+import { formatSize, isHiddenEntry, previewKind, splitBreadcrumb } from "./files"
 
 describe("formatSize", () => {
   it("formats bytes/KB/MB", () => {
@@ -35,5 +35,15 @@ describe("previewKind", () => {
     expect(previewKind({ name: "h.htm", size: 100 })).toBe("html")
     expect(previewKind({ name: "big.md", size: 2_000_000 })).toBe("download")
     expect(previewKind({ name: "big.html", size: 2_000_000 })).toBe("download")
+  })
+})
+
+describe("isHiddenEntry", () => {
+  it("点目录隐藏(沙箱基础设施),点文件保留(用户内容,与 @ 索引政策一致)", () => {
+    expect(isHiddenEntry({ name: ".home", is_dir: true })).toBe(true)
+    expect(isHiddenEntry({ name: ".npm-global", is_dir: true })).toBe(true)
+    expect(isHiddenEntry({ name: ".env.example", is_dir: false })).toBe(false)
+    expect(isHiddenEntry({ name: "src", is_dir: true })).toBe(false)
+    expect(isHiddenEntry({ name: "a.txt", is_dir: false })).toBe(false)
   })
 })

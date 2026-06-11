@@ -44,7 +44,13 @@ export function FileToolbar({ path, onChanged }: { path: string; onChanged: () =
         variant="secondary"
         onClick={() => {
           const n = prompt("新建文件夹名称")
-          if (n) mkdir.mutate(n)
+          if (!n) return
+          // 点开头的文件夹会被列表隐藏 → 建完即"消失"(再建还 409),拦下
+          if (n.startsWith(".")) {
+            alert("以 . 开头的文件夹会被隐藏,请换个名称")
+            return
+          }
+          mkdir.mutate(n)
         }}
       >
         ＋ 文件夹
