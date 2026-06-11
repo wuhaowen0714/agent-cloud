@@ -2,7 +2,7 @@ import { create } from "zustand"
 import { setAccess, setOnUnauth } from "./api/auth"
 import { clearQueryCache } from "./api/queryClient"
 import type { Block } from "./blocks"
-import type { User } from "./types"
+import type { CompactResult, User } from "./types"
 
 export type SettingsTab = "agent" | "skills" | "keys" | "memory"
 
@@ -17,12 +17,17 @@ export interface LiveTurn {
   recoverable?: boolean // 失败时是否可重试(false=如上下文过大,引导开新会话)
 }
 
+// 手动压缩状态,按 sessionId 存(与 live 单条、切会话即清不同:压缩跨会话切换须存活,
+// 这样「在 A 压缩、切到 B、压缩完成」的反馈只认发起压缩的那个会话,绝不串到 B)。
+export type CompactState = { phase: "running" } | { phase: "result"; result: CompactResult }
+
 interface AppState {
   user: User | null
   userId: string | null // 由 user 派生(user?.id),组件/query-key 仍按 userId 用
   agentId: string | null
   sessionId: string | null
   live: LiveTurn | null
+  compactions: Record<string, CompactState> // 按 sessionId;切会话不清(见 CompactState 注释)
   fileDrawerOpen: boolean
   settingsOpen: boolean
   settingsTab: SettingsTab
@@ -33,6 +38,9 @@ interface AppState {
   startLive: (userText: string, sessionId: string) => void
   setLive: (fn: (t: LiveTurn) => LiveTurn) => void
   clearLive: () => void
+  startCompaction: (sessionId: string) => void
+  finishCompaction: (sessionId: string, result: CompactResult) => void
+  clearCompaction: (sessionId: string) => void
   toggleFileDrawer: () => void
   openSettings: (tab?: SettingsTab) => void
   closeSettings: () => void
@@ -48,6 +56,7 @@ export const useStore = create<AppState>((set, get) => ({
   // 持久化当前会话:刷新后自动回到原会话(并触发 resume 重挂在跑的回合)。
   sessionId: localStorage.getItem("ac.sessionId"),
   live: null,
+  compactions: {},
   fileDrawerOpen: false,
   settingsOpen: false,
   settingsTab: "agent",
@@ -59,7 +68,7 @@ export const useStore = create<AppState>((set, get) => ({
     if (prev !== null && prev !== uid) {
       localStorage.removeItem("ac.sessionId")
       localStorage.removeItem("ac.agentId")
-      set({ user, userId: uid, agentId: null, sessionId: null, live: null, settingsOpen: false })
+      set({ user, userId: uid, agentId: null, sessionId: null, live: null, compactions: {}, settingsOpen: false })
     } else {
       set({ user, userId: uid })
     }
@@ -75,6 +84,7 @@ export const useStore = create<AppState>((set, get) => ({
       agentId: null,
       sessionId: null,
       live: null,
+      compactions: {},
       fileDrawerOpen: false,
       settingsOpen: false,
     })
@@ -94,6 +104,15 @@ export const useStore = create<AppState>((set, get) => ({
     set({ live: { ...EMPTY, userText, sessionId, blocks: [], startedAt: new Date().toISOString() } }),
   setLive: (fn) => set((s) => (s.live ? { live: fn(s.live) } : {})),
   clearLive: () => set({ live: null }),
+  startCompaction: (sessionId) =>
+    set((s) => ({ compactions: { ...s.compactions, [sessionId]: { phase: "running" } } })),
+  finishCompaction: (sessionId, result) =>
+    set((s) => ({ compactions: { ...s.compactions, [sessionId]: { phase: "result", result } } })),
+  clearCompaction: (sessionId) =>
+    set((s) => {
+      const { [sessionId]: _, ...rest } = s.compactions
+      return { compactions: rest }
+    }),
   toggleFileDrawer: () => set((s) => ({ fileDrawerOpen: !s.fileDrawerOpen })),
   openSettings: (tab = "agent") => set({ settingsOpen: true, settingsTab: tab }),
   closeSettings: () => set({ settingsOpen: false }),

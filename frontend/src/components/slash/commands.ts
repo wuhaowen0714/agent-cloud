@@ -1,4 +1,5 @@
 import type { SettingsTab } from "../../store"
+import type { CompactResult } from "../../types"
 
 export interface StatusInfo {
   agentName: string | null
@@ -10,8 +11,8 @@ export interface StatusInfo {
   contextTokens: number | null // 最近一回合 worker 报告的上下文占用;未跑过回合则 null
 }
 
-// compact 结果四态:压缩了 / 没东西可压 / 会话忙(回合进行中) / 出错。
-export type CompactResult = "compacted" | "nothing" | "busy" | "error"
+// CompactResult 现定义在 ../../types(供 store 引用,避免 store↔commands 循环);此处再导出保持既有引用路径。
+export type { CompactResult }
 
 // 命令执行时拿到的上下文:动作接到 store/api/queryClient(在 useSlashCommands 里装配)。
 export interface SlashContext {
