@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef } from "react"
 import { api } from "../api/client"
-import { refreshSessionsLater } from "../api/queryClient"
+import { pollSessionTitle } from "../api/queryClient"
 import { cancelTurn, resumeTurn, streamTurn } from "../api/stream"
 import {
   appendDelta,
@@ -17,6 +17,7 @@ import { MessageList } from "./MessageList"
 
 export function ChatView() {
   const sessionId = useStore((s) => s.sessionId)
+  const userId = useStore((s) => s.userId)
   const live = useStore((s) => s.live)
   const startLive = useStore((s) => s.startLive)
   const setLive = useStore((s) => s.setLive)
@@ -164,7 +165,8 @@ export function ChatView() {
     const wasFirst = messages.length === 0 // 首回合:标题将在服务端异步生成
     startLive(text, sid)
     await consume(sid, streamTurn(sid, text, (e) => feed(sid, e)))
-    if (wasFirst) refreshSessionsLater(qc) // 常规 invalidate 早于异步标题,延迟二刷兜接
+    // 首回合标题在服务端异步生成:轮询刷 sessions 直到它出现(单次延迟刷常赶不上 LLM)
+    if (wasFirst && userId) pollSessionTitle(qc, userId, sid)
   }
 
   const onStop = () => {
