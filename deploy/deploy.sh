@@ -18,11 +18,15 @@ docker build -f deploy/sandbox.Dockerfile -t agent-cloud-sandbox:latest .
 
 echo "[3/4] 构建并启动应用…"
 mkdir -p /opt/agent-cloud/data/workspaces
-docker compose -f deploy/compose.yml build
-docker compose -f deploy/compose.yml up -d
+# --env-file 显式指向根 .env:否则 -f deploy/compose.yml 会把 compose 变量插值的
+# project-dir 设为 deploy/(读 deploy/.env),与 env_file(../.env)分裂。统一到根 .env,
+# 让 ${AGENT_CLOUD_DB_PASSWORD:?} 等插值与容器 env 同源。
+COMPOSE=(docker compose --env-file "$ROOT/.env" -f deploy/compose.yml)
+"${COMPOSE[@]}" build
+"${COMPOSE[@]}" up -d
 
 echo "[4/4] 清理悬空镜像…"
 docker image prune -f >/dev/null
 
-docker compose -f deploy/compose.yml ps
+"${COMPOSE[@]}" ps
 echo "✓ 部署完成:http://<公网IP>:8080(健康检查:curl -s localhost:8080/api/health)"

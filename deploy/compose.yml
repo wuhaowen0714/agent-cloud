@@ -7,7 +7,9 @@ services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_PASSWORD: postgres
+      # 强密码从 deploy/.env 读;缺失即 fail-loud(不静默回退弱默认)。变更已有部署见
+      # docs/security/sandbox-isolation.md §6(db 卷里的角色密码不随 .env 自动改)。
+      POSTGRES_PASSWORD: ${AGENT_CLOUD_DB_PASSWORD:?set AGENT_CLOUD_DB_PASSWORD in deploy/.env}
       POSTGRES_DB: agent_cloud
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -26,7 +28,7 @@ services:
     command: sh -c "alembic upgrade head && uvicorn agent_cloud_backend.main:app --host 0.0.0.0 --port 8000"
     env_file: ../.env
     environment:
-      AGENT_CLOUD_DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/agent_cloud
+      AGENT_CLOUD_DATABASE_URL: postgresql+asyncpg://postgres:${AGENT_CLOUD_DB_PASSWORD}@db:5432/agent_cloud
       AGENT_CLOUD_WORKER_ENDPOINT: worker:50052
       # DooD 沙箱:network 模式(publish 的 127.0.0.1 端点在容器化 worker 下不可达)
       AGENT_CLOUD_SANDBOX_PROVISIONER: docker
