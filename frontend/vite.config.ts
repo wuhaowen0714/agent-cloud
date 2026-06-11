@@ -8,8 +8,13 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      // 浏览器同源:前端请求 /api/* 代理到后端;SSE 也透传
-      "/api": { target: BACKEND, changeOrigin: true, rewrite: (p) => p.replace(/^\/api/, "") },
+      // 浏览器同源:前端请求 /api/* 代理到后端;SSE + WebSocket(终端)也透传
+      "/api": {
+        target: BACKEND,
+        changeOrigin: true,
+        ws: true,
+        rewrite: (p) => p.replace(/^\/api/, ""),
+      },
     },
   },
   test: {
