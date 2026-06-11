@@ -696,3 +696,58 @@ async def test_generate_title_caps_max_tokens():
     finally:
         await worker_server.stop(None)
     assert provider.last_request.max_tokens == 64
+
+
+async def test_extract_memory_over_grpc_returns_both_blocks():
+    # 双块对账走完整 gRPC 链路:四字段正确回填(spec 2026-06-11-memory-layers)
+    import json as _json
+
+    payload = _json.dumps(
+        {
+            "user_changed": True,
+            "user_memory": "- 中文回复",
+            "agent_changed": True,
+            "agent_memory": "- 名字:nana",
+        }
+    )
+    provider = FakeProvider([_final(payload)])
+    worker_server, wport = await create_worker_server(provider_factory=lambda *a: provider, port=0)
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            resp = await stub.ExtractMemory(
+                worker_pb2.ExtractMemoryRequest(
+                    agent=worker_pb2.Agent(model="m", provider="fake"),
+                    user_memory="- 用户叫我nana",
+                    agent_memory="",
+                    messages=[worker_pb2.Msg(role="user", text="记住你叫nana")],
+                    soft_max_chars=2000,
+                )
+            )
+    finally:
+        await worker_server.stop(None)
+    assert resp.user_changed is True and resp.user_memory == "- 中文回复"
+    assert resp.agent_changed is True and resp.agent_memory == "- 名字:nana"
+    assert resp.input_tokens == 3 and resp.output_tokens == 4
+
+
+async def test_extract_memory_unparseable_maps_to_internal():
+    # 解析失败 → INTERNAL(后端据此不推进水位线,下次重试)
+    provider = FakeProvider([_final("not json at all")])
+    worker_server, wport = await create_worker_server(provider_factory=lambda *a: provider, port=0)
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            with pytest.raises(grpc.aio.AioRpcError) as exc:
+                await stub.ExtractMemory(
+                    worker_pb2.ExtractMemoryRequest(
+                        agent=worker_pb2.Agent(model="m", provider="fake"),
+                        user_memory="",
+                        agent_memory="",
+                        messages=[worker_pb2.Msg(role="user", text="hi")],
+                        soft_max_chars=2000,
+                    )
+                )
+    finally:
+        await worker_server.stop(None)
+    assert exc.value.code() == grpc.StatusCode.INTERNAL

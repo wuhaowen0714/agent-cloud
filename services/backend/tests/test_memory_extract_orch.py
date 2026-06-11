@@ -174,6 +174,50 @@ async def test_agent_changed_writes_agent_block(engine, monkeypatch):
     assert await _watermark(engine, sid) == 3
 
 
+async def test_both_blocks_changed_writes_both(engine, monkeypatch):
+    _patch_sessionmaker(monkeypatch, engine)
+    _patch_worker(
+        monkeypatch, changed=True, mem="- 中文回复", agent_changed=True, agent_mem="- 名字:nana"
+    )
+    sid, uid = await _seed(engine, 2)
+    aid = await _agent_of(engine, sid)
+    assert await extract_session_memory(sid, settings=_settings(), reason="compaction") is True
+    assert (await _current(engine, uid)).content == "- 中文回复"
+    assert (await _current_scope(engine, "agent", aid)).content == "- 名字:nana"
+    assert await _watermark(engine, sid) == 3
+
+
+async def test_real_concurrent_winner_rolls_back_user_write(engine, monkeypatch):
+    # 真实 IntegrityError 路径(非 monkeypatch 模拟):并发赢家在 get_current 与
+    # write_version 的窗口抢写 agent v1 → 本次 agent 写撞唯一约束(事务被污染)→
+    # user 那笔 flush 与水位线必须一并回滚,赢家数据保留。
+    _patch_sessionmaker(monkeypatch, engine)
+    sid, uid = await _seed(engine, 2)
+    aid = await _agent_of(engine, sid)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def _fake(endpoint, req):
+        async with maker() as db:  # 独立事务:模拟并发赢家
+            await MemoryEntryRepository(db).write_version(
+                "agent", aid, "- winner", sid, expected_version=0
+            )
+            await db.commit()
+        return worker_pb2.ExtractMemoryResponse(
+            user_memory="- u",
+            agent_memory="- loser",
+            user_changed=True,
+            agent_changed=True,
+            input_tokens=1,
+            output_tokens=1,
+        )
+
+    monkeypatch.setattr("agent_cloud_backend.turn.memory_extract.extract_memory_via_worker", _fake)
+    assert await extract_session_memory(sid, settings=_settings(), reason="compaction") is False
+    assert await _watermark(engine, sid) == -1  # 未推进
+    assert await _current(engine, uid) is None  # user 写一并回滚
+    assert (await _current_scope(engine, "agent", aid)).content == "- winner"  # 赢家保留
+
+
 async def test_any_block_conflict_rolls_back_all_and_keeps_watermark(engine, monkeypatch):
     # agent 块乐观锁冲突 → 整体回滚:user 块本次写入与水位线都不落库(下次重提,与单块语义一致)
     _patch_sessionmaker(monkeypatch, engine)
