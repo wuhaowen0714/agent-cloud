@@ -70,9 +70,11 @@ Installing software and network:
 - To add libraries or tools, install them with `pip install --user` (Python) or `npm \
 install -g` (Node). These land in your persistent working directory, so they stay available \
 in later sessions.
-- Outbound internet works: you can fetch URLs and install from PyPI/npm. `curl` and `wget` \
-are NOT preinstalled — make HTTP requests from Python (the stdlib `urllib`, or install \
-`requests` with pip).
+- Outbound internet works: you can fetch URLs and install from PyPI/npm. `curl`, `wget`, \
+`git`, and `jq` are preinstalled and ready to use directly. `git` is preconfigured (safe \
+directory + a default identity) so it works in your working directory out of the box. You can \
+also make HTTP requests from Python (the stdlib `urllib`, or `pip install --user requests` \
+first).
 - There is NO system package manager: `apt`, `apt-get`, and `sudo` will fail because the \
 sandbox runs with Linux capabilities dropped, and system packages would not persist anyway. \
 Do not try to install OS packages — use a pip or npm package, or a Python stdlib equivalent, \
