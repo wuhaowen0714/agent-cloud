@@ -36,4 +36,34 @@ describe("FileList", () => {
     )
     expect(screen.getByText("空目录")).toBeInTheDocument()
   })
+
+  // 沙箱把 HOME/pip/npm 缓存、技能物化目录路由进工作区(.home/.npm-global/.skills),
+  // 对用户是基础设施噪音 → 点开头条目一律不显示(文件管理器通用约定)。
+  it("hides dot-entries (infra dirs like .home) from listing", () => {
+    const hiddenDir: FileEntry = { name: ".home", path: ".home", is_dir: true, size: 0, mtime: 0 }
+    const hiddenFile: FileEntry = { name: ".env", path: ".env", is_dir: false, size: 5, mtime: 0 }
+    render(
+      wrap(
+        <FileList
+          entries={[hiddenDir, hiddenFile, file]}
+          onOpenDir={() => {}}
+          onPreview={() => {}}
+          onChanged={() => {}}
+        />,
+      ),
+    )
+    expect(screen.queryByText(".home")).not.toBeInTheDocument()
+    expect(screen.queryByText(".env")).not.toBeInTheDocument()
+    expect(screen.getByText("a.txt")).toBeInTheDocument()
+  })
+
+  it("dir with only hidden entries renders empty state", () => {
+    const hiddenDir: FileEntry = { name: ".git", path: ".git", is_dir: true, size: 0, mtime: 0 }
+    render(
+      wrap(
+        <FileList entries={[hiddenDir]} onOpenDir={() => {}} onPreview={() => {}} onChanged={() => {}} />,
+      ),
+    )
+    expect(screen.getByText("空目录")).toBeInTheDocument()
+  })
 })

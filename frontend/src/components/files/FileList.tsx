@@ -39,12 +39,16 @@ export function FileList({
     onError: (err) => alert(`安装失败:${String(err)}`),
   })
 
-  if (entries.length === 0) {
+  // 点开头条目不显示:沙箱把 HOME/pip/npm 缓存、技能物化目录路由进工作区
+  // (.home/.npm-global/.skills),对用户是基础设施噪音(文件管理器通用约定)。
+  // 仅前端隐藏——agent(bash/read_file)与 API 仍可访问。
+  const visible = entries.filter((e) => !e.name.startsWith("."))
+  if (visible.length === 0) {
     return <div className="flex-1 p-6 text-center text-sm text-slate-400">空目录</div>
   }
   return (
     <ul className="flex-1 divide-y divide-slate-50 overflow-auto">
-      {entries.map((e) => (
+      {visible.map((e) => (
         <li key={e.path} className="group flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50">
           <span className="shrink-0">{e.is_dir ? "📁" : "📄"}</span>
           <button
