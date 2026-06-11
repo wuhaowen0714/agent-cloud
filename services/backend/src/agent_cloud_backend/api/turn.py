@@ -33,6 +33,7 @@ from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub, get_turn_hub, subs
 from agent_cloud_backend.turn.messages import common_to_content
 from agent_cloud_backend.turn.retry import RetryAction, RetryPolicy, classify
 from agent_cloud_backend.turn.runner import run_turn
+from agent_cloud_backend.turn.title import spawn_title_generation
 from agent_cloud_backend.turn.worker_client import run_turn_via_worker
 
 logger = logging.getLogger(__name__)
@@ -177,6 +178,10 @@ async def run_turn_endpoint(
                 session_id, response.context_tokens, model=request.agent.model, settings=settings
             )
 
+        # 标题为空 → 成功收尾后异步起名(fire-and-forget;钩子内还有权威复查)
+        if s.title is None:
+            spawn_title_generation(session_id, settings=settings)
+
         return TurnResponse(
             messages=persisted,
             stop_reason=response.stop_reason,
@@ -285,6 +290,8 @@ async def stream_turn_endpoint(
             session_id=session_id,
             heartbeat_interval=settings.session_heartbeat_seconds,
             settings=settings,
+            # 标题为空才在成功收尾后异步起名(钩子内还有权威复查)
+            spawn_title=s.title is None,
         )
     )
     return StreamingResponse(subscribe(active), media_type="text/event-stream")

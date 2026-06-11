@@ -154,3 +154,19 @@ async def auth_client_noraise(client_noraise: AsyncClient) -> AsyncClient:
     client_noraise.headers["Authorization"] = f"Bearer {access}"
     client_noraise.user_id = user_id  # type: ignore[attr-defined]
     return client_noraise
+
+
+@pytest.fixture(autouse=True)
+def _quiet_title_generation(request, monkeypatch):
+    """标题钩子默认打成 no-op(审查 H1):它是 fire-and-forget 的真 gRPC 调用,在未
+    override settings 的测试里会打到默认 worker_endpoint —— dev 栈在跑时就是【真 worker +
+    真 LLM 请求】,且任务可能在事件循环关闭后冻结。需要真链路的测试标 @pytest.mark.real_title。
+    两处接线点都是 `from ... import` 绑定,逐一替换。"""
+    if request.node.get_closest_marker("real_title"):
+        return
+    monkeypatch.setattr(
+        "agent_cloud_backend.turn.runner.spawn_title_generation", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        "agent_cloud_backend.api.turn.spawn_title_generation", lambda *a, **k: None
+    )

@@ -57,3 +57,17 @@ async def extract_memory_via_worker(
     ]
     async with grpc.aio.insecure_channel(worker_endpoint, options=options) as channel:
         return await worker_pb2_grpc.WorkerStub(channel).ExtractMemory(request)
+
+
+async def generate_title_via_worker(
+    worker_endpoint: str, request: worker_pb2.GenerateTitleRequest
+) -> str:
+    """向 worker 发起一次 GenerateTitle(基于首条提问起短名),返回清洗后的标题。"""
+    options = [
+        ("grpc.max_send_message_length", MAX_GRPC_MESSAGE_BYTES),
+        ("grpc.max_receive_message_length", MAX_GRPC_MESSAGE_BYTES),
+    ]
+    async with grpc.aio.insecure_channel(worker_endpoint, options=options) as channel:
+        # deadline:标题是 best-effort 锦上添花,绝不允许无界等待钉死调用方资源
+        resp = await worker_pb2_grpc.WorkerStub(channel).GenerateTitle(request, timeout=30.0)
+        return resp.title

@@ -50,4 +50,7 @@ dev = [
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 pythonpath = ["src"]
-markers = ["docker: needs a real Docker daemon + agent-cloud-sandbox image"]
+markers = [
+    "docker: needs a real Docker daemon + agent-cloud-sandbox image",
+    "real_title: exercises the real session-title pipeline (others get a no-op spawn)",
+]

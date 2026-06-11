@@ -53,6 +53,9 @@ class CompletionRequest:
     system: str
     messages: list[Message]
     tools: list[ToolSpec]
+    # 单次调用的输出上限覆盖(None = 用 provider 配置值)。小输出任务(如起标题)
+    # 用它收紧,免得话痨/思考型模型为几个字烧大段输出。
+    max_tokens: int | None = None
 
 
 @dataclass

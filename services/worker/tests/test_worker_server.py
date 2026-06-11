@@ -619,3 +619,80 @@ async def test_run_turn_stream_midstream_failure_returns_internal(sandbox):
     # 然后流以 INTERNAL 结束,且不泄漏原始异常文本
     assert ei.value.code() == grpc.StatusCode.INTERNAL
     assert "ProviderCompleted" not in (ei.value.details() or "")
+
+
+# ---- GenerateTitle:基于首条提问起短名 ----
+
+
+async def test_generate_title_cleans_output():
+    provider = FakeProvider([_final("「快排实现」\n")])
+    worker_server, wport = await create_worker_server(provider_factory=lambda *a: provider, port=0)
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            resp = await stub.GenerateTitle(
+                worker_pb2.GenerateTitleRequest(
+                    agent=worker_pb2.Agent(model="m", provider="fake"),
+                    user_message="帮我写一个快速排序",
+                )
+            )
+    finally:
+        await worker_server.stop(None)
+    assert resp.title == "快排实现"
+    assert resp.input_tokens == 3 and resp.output_tokens == 4
+
+
+async def test_generate_title_empty_message_invalid_argument():
+    provider = FakeProvider([])
+    worker_server, wport = await create_worker_server(provider_factory=lambda *a: provider, port=0)
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            with pytest.raises(grpc.aio.AioRpcError) as ei:
+                await stub.GenerateTitle(
+                    worker_pb2.GenerateTitleRequest(
+                        agent=worker_pb2.Agent(model="m", provider="fake"),
+                        user_message="   ",
+                    )
+                )
+    finally:
+        await worker_server.stop(None)
+    assert ei.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+
+async def test_generate_title_provider_factory_failure_failed_precondition():
+    def boom(*a):
+        raise RuntimeError("no key")
+
+    worker_server, wport = await create_worker_server(provider_factory=boom, port=0)
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            with pytest.raises(grpc.aio.AioRpcError) as ei:
+                await stub.GenerateTitle(
+                    worker_pb2.GenerateTitleRequest(
+                        agent=worker_pb2.Agent(model="m", provider="fake"),
+                        user_message="起个名",
+                    )
+                )
+    finally:
+        await worker_server.stop(None)
+    assert ei.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+
+
+async def test_generate_title_caps_max_tokens():
+    # 起标题是几个字的产出:请求级 max_tokens=64 收紧,不给话痨模型烧输出(审查 M3)
+    provider = _CapturingProvider(_final("短名"))
+    worker_server, wport = await create_worker_server(provider_factory=lambda *a: provider, port=0)
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            await stub.GenerateTitle(
+                worker_pb2.GenerateTitleRequest(
+                    agent=worker_pb2.Agent(model="m", provider="fake"),
+                    user_message="问题",
+                )
+            )
+    finally:
+        await worker_server.stop(None)
+    assert provider.last_request.max_tokens == 64

@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef } from "react"
 import { api } from "../api/client"
+import { refreshSessionsLater } from "../api/queryClient"
 import { cancelTurn, resumeTurn, streamTurn } from "../api/stream"
 import {
   appendDelta,
@@ -160,8 +161,10 @@ export function ChatView() {
     // 已有进行中回合则忽略(防 IME 回车 / 双击 / disabled 更新前的竞态导致重复发送)。
     if (useStore.getState().live?.status === "streaming") return
     const sid = sessionId
+    const wasFirst = messages.length === 0 // 首回合:标题将在服务端异步生成
     startLive(text, sid)
     await consume(sid, streamTurn(sid, text, (e) => feed(sid, e)))
+    if (wasFirst) refreshSessionsLater(qc) // 常规 invalidate 早于异步标题,延迟二刷兜接
   }
 
   const onStop = () => {

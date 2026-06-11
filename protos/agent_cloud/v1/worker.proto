@@ -8,6 +8,18 @@ service Worker {
   rpc RunTurnStream(RunTurnRequest) returns (stream TurnEvent);
   rpc Summarize(SummarizeRequest) returns (SummarizeResponse);
   rpc ExtractMemory(ExtractMemoryRequest) returns (ExtractMemoryResponse);
+  rpc GenerateTitle(GenerateTitleRequest) returns (GenerateTitleResponse);
+}
+
+// 会话标题:基于首条用户提问起 ≤16 字短名(backend 回合后异步调用)。
+message GenerateTitleRequest {
+  Agent agent = 1;
+  string user_message = 2;
+}
+message GenerateTitleResponse {
+  string title = 1;
+  int64 input_tokens = 2;
+  int64 output_tokens = 3;
 }
 
 message ToolCall {
