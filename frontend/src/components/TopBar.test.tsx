@@ -61,6 +61,13 @@ describe("TopBar", () => {
     fireEvent.click(screen.getByRole("button", { name: "工作区文件" }))
     expect(useStore.getState().fileDrawerOpen).toBe(true)
   })
+
+  it("三个入口是图标+文字按钮(纯图标易被忽略)", () => {
+    render(wrap(<TopBar />))
+    expect(screen.getByText("工具")).toBeInTheDocument()
+    expect(screen.getByText("技能")).toBeInTheDocument()
+    expect(screen.getByText("文件")).toBeInTheDocument()
+  })
 })
 
 describe("TopBar 工具/技能开关入口", () => {
