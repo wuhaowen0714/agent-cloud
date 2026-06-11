@@ -162,6 +162,9 @@ export function ChatView() {
     // 已有进行中回合则忽略(防 IME 回车 / 双击 / disabled 更新前的竞态导致重复发送)。
     if (useStore.getState().live?.status === "streaming") return
     const sid = sessionId
+    // 该会话正在压缩(与回合同锁)→ 发出去必撞 409。拦在这里也覆盖来自错误气泡「重试」的
+    // 路径(重试不经 Composer 的 busy 禁用,直接调 onSend)。
+    if (useStore.getState().compactions[sid]?.phase === "running") return
     const wasFirst = messages.length === 0 // 首回合:标题将在服务端异步生成
     startLive(text, sid)
     await consume(sid, streamTurn(sid, text, (e) => feed(sid, e)))

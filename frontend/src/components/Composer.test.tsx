@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { api, HttpError } from "../api/client"
 import { useStore } from "../store"
@@ -68,7 +68,14 @@ const box = () => screen.getByRole("textbox")
 const type = (v: string) => fireEvent.change(box(), { target: { value: v } })
 
 afterEach(() => {
-  useStore.setState({ userId: null, agentId: null, sessionId: null, settingsOpen: false })
+  useStore.setState({
+    userId: null,
+    agentId: null,
+    sessionId: null,
+    live: null,
+    compactions: {},
+    settingsOpen: false,
+  })
   vi.restoreAllMocks()
 })
 
@@ -187,6 +194,69 @@ describe("斜杠面板", () => {
     type("/compact")
     fireEvent.keyDown(box(), { key: "Enter" })
     expect(await screen.findByText("会话正忙(回合进行中),稍后再试")).toBeInTheDocument()
+  })
+})
+
+describe("压缩反馈(per-session)", () => {
+  // 受控 promise:压缩挂起在"运行中",由测试决定何时完成。
+  const deferredCompact = () => {
+    let resolve!: (v: { compacted: boolean }) => void
+    vi.spyOn(api, "compactSession").mockReturnValue(new Promise((r) => (resolve = r)))
+    return () => resolve({ compacted: true })
+  }
+
+  it("运行中显示『正在压缩上下文…』并禁用输入,完成后弹结果并恢复", async () => {
+    const finish = deferredCompact()
+    setup()
+    type("/compact")
+    fireEvent.keyDown(box(), { key: "Enter" })
+    expect(await screen.findByText("正在压缩上下文…")).toBeInTheDocument()
+    expect(box()).toBeDisabled()
+    await act(async () => {
+      finish()
+    })
+    expect(await screen.findByText("已压缩当前会话上下文")).toBeInTheDocument()
+    expect(screen.queryByText("正在压缩上下文…")).not.toBeInTheDocument()
+    expect(box()).not.toBeDisabled()
+  })
+
+  it("不串台:A 压缩中切到 B → B 无提示且可输入;A 完成时在 B 不弹;切回 A 才弹结果", async () => {
+    const finish = deferredCompact()
+    setup() // sessionId = "s1"
+    type("/compact")
+    fireEvent.keyDown(box(), { key: "Enter" })
+    await screen.findByText("正在压缩上下文…")
+
+    // 压缩进行中切到别的会话 s2
+    act(() => {
+      useStore.setState({ sessionId: "s2" })
+    })
+    expect(screen.queryByText("正在压缩上下文…")).not.toBeInTheDocument()
+    expect(box()).not.toBeDisabled()
+
+    // s1 的压缩此刻完成(用户正看 s2)→ s2 绝不弹任何压缩提示
+    await act(async () => {
+      finish()
+    })
+    expect(screen.queryByText("已压缩当前会话上下文")).not.toBeInTheDocument()
+
+    // 切回 s1 → 才看到结果
+    act(() => {
+      useStore.setState({ sessionId: "s1" })
+    })
+    expect(await screen.findByText("已压缩当前会话上下文")).toBeInTheDocument()
+  })
+
+  it("结果 flash 不滞留到别的会话:A 显示后切到 B 立即消失", async () => {
+    vi.spyOn(api, "compactSession").mockResolvedValue({ compacted: true })
+    setup() // sessionId = "s1"
+    type("/compact")
+    fireEvent.keyDown(box(), { key: "Enter" })
+    expect(await screen.findByText("已压缩当前会话上下文")).toBeInTheDocument()
+    act(() => {
+      useStore.setState({ sessionId: "s2" })
+    })
+    expect(screen.queryByText("已压缩当前会话上下文")).not.toBeInTheDocument()
   })
 })
 

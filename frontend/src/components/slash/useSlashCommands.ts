@@ -17,6 +17,8 @@ export function useSlashCommands(ui: {
   const sessionId = useStore((s) => s.sessionId)
   const agentId = useStore((s) => s.agentId)
   const setSession = useStore((s) => s.setSession)
+  const startCompaction = useStore((s) => s.startCompaction)
+  const finishCompaction = useStore((s) => s.finishCompaction)
   const openSettings = useStore((s) => s.openSettings)
   const { options } = useModelOptions() // /model 建议与模型选单共用一个选项源
 
@@ -36,14 +38,21 @@ export function useSlashCommands(ui: {
       await qc.invalidateQueries({ queryKey: ["agents", userId] })
       return true
     },
-    compact: async (): Promise<CompactResult> => {
-      if (!sessionId) return "error"
+    compact: async (): Promise<void> => {
+      // 捕获发起时的会话:压缩可能跨「用户切到别的会话」期间完成,结果必须写回发起的
+      // 那个会话(running/result 都按 sid 存进 store),与「当前看哪个会话」彻底解耦,
+      // 否则反馈会串到切过去的会话(原 bug)。
+      const sid = sessionId
+      if (!sid) return
+      startCompaction(sid)
+      let result: CompactResult
       try {
-        const r = await api.compactSession(sessionId)
-        return r.compacted ? "compacted" : "nothing"
+        const r = await api.compactSession(sid)
+        result = r.compacted ? "compacted" : "nothing"
       } catch (e) {
-        return e instanceof HttpError && e.status === 409 ? "busy" : "error"
+        result = e instanceof HttpError && e.status === 409 ? "busy" : "error"
       }
+      finishCompaction(sid, result)
     },
     modelSuggestions: () => options.map((o) => o.model),
     status: (): StatusInfo => {

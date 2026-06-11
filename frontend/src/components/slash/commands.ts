@@ -1,4 +1,5 @@
 import type { SettingsTab } from "../../store"
+import type { CompactResult } from "../../types"
 
 export interface StatusInfo {
   agentName: string | null
@@ -10,14 +11,23 @@ export interface StatusInfo {
   contextTokens: number | null // 最近一回合 worker 报告的上下文占用;未跑过回合则 null
 }
 
-// compact 结果四态:压缩了 / 没东西可压 / 会话忙(回合进行中) / 出错。
-export type CompactResult = "compacted" | "nothing" | "busy" | "error"
+// CompactResult 现定义在 ../../types(供 store 引用,避免 store↔commands 循环);此处再导出保持既有引用路径。
+export type { CompactResult }
+
+// 压缩四态对应的一行提示。由 Composer 在「当前会话」的压缩转为 result 时弹出
+// (而非压缩命令内 notify),确保提示只出现在发起压缩的那个会话。
+export const COMPACT_MESSAGES: Record<CompactResult, string> = {
+  compacted: "已压缩当前会话上下文",
+  nothing: "暂无可压缩内容",
+  busy: "会话正忙(回合进行中),稍后再试",
+  error: "压缩失败,请稍后再试",
+}
 
 // 命令执行时拿到的上下文:动作接到 store/api/queryClient(在 useSlashCommands 里装配)。
 export interface SlashContext {
   newSession: () => Promise<boolean> // false = 当前无 agent,未执行
   setModel: (model: string) => Promise<boolean> // 同上
-  compact: () => Promise<CompactResult>
+  compact: () => Promise<void> // 进度/结果写进 store(per-session),不在此返回
   modelSuggestions: () => string[]
   status: () => StatusInfo
   openSettings: (tab: SettingsTab) => void
@@ -42,18 +52,9 @@ export const COMMANDS: SlashCommand[] = [
     name: "compact",
     title: "压缩上下文",
     hint: "压缩当前会话",
-    run: async (c) => {
-      const r = await c.compact()
-      c.notify(
-        r === "compacted"
-          ? "已压缩当前会话上下文"
-          : r === "nothing"
-            ? "暂无可压缩内容"
-            : r === "busy"
-              ? "会话正忙(回合进行中),稍后再试"
-              : "压缩失败,请稍后再试",
-      )
-    },
+    // 仅触发:进度("正在压缩…")与结果 flash 由 Composer 按 store 里该会话的压缩状态渲染,
+    // 这样反馈只出现在发起压缩的会话,且能立即禁用输入(防压缩期间发消息撞 409)。
+    run: (c) => void c.compact(),
   },
   { name: "status", title: "状态", hint: "agent / 会话 / 消息数", run: (c) => c.showStatus() },
   {

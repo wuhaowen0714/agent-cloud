@@ -25,6 +25,10 @@ export type TurnEvent =
   | { type: "error"; message: string; recoverable: boolean }
   | { type: "reset" }  // 透明自动重试:清掉本回合已显示内容,从头重来
 
+// 手动压缩结果四态:压缩了 / 没东西可压 / 会话忙(回合进行中)/ 出错。
+// 定义在此(而非 slash/commands)以便 store 引用而不形成 store↔commands 循环依赖。
+export type CompactResult = "compacted" | "nothing" | "busy" | "error"
+
 export interface FileEntry { name: string; path: string; is_dir: boolean; size: number; mtime: number }
 export interface Skill { id: string; user_id: string; name: string; description: string; source: string; version: string }
 export interface ContextDocument { id: string; scope: string; type: string; owner_id: string; content: string }

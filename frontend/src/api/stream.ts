@@ -44,6 +44,9 @@ export function streamTurn(
     })
     if (!res.ok || !res.body) {
       const body = await res.text().catch(() => "")
+      // 409 = 会话锁被占用(回合进行中或正在压缩上下文)。给人话而非原始 JSON;
+      // 可恢复,用户点「重试」等占用结束即可成功。
+      if (res.status === 409) throw new Error("会话正忙(可能正在压缩上下文),请稍候重试")
       throw new Error(`turn stream failed: ${res.status} ${body}`)
     }
     const reader = res.body.getReader()

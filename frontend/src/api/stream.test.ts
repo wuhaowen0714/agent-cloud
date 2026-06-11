@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cancelTurn, parseSSE, resumeTurn } from "./stream"
+import { cancelTurn, parseSSE, resumeTurn, streamTurn } from "./stream"
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -45,6 +45,23 @@ describe("resumeTurn", () => {
   it("returns null on 204 (no active turn)", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })))
     expect(await resumeTurn("s1", () => {})).toBeNull()
+  })
+})
+
+describe("streamTurn", () => {
+  it("409 session busy → 抛友好提示(而非原始 turn stream failed JSON)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response('{"detail":"session is busy"}', { status: 409 })),
+    )
+    const { done } = streamTurn("s1", "hi", () => {})
+    await expect(done).rejects.toThrow("会话正忙(可能正在压缩上下文),请稍候重试")
+  })
+
+  it("其他非 2xx 仍带状态码(便于排查)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("boom", { status: 502 })))
+    const { done } = streamTurn("s1", "hi", () => {})
+    await expect(done).rejects.toThrow("turn stream failed: 502")
   })
 })
 
