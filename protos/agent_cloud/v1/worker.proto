@@ -80,6 +80,7 @@ message RunTurnRequest {
   string sandbox_endpoint = 9;
   string work_subdir = 10;
   string history_summary = 11;  // 此前历史的摘要,worker 拼进 system
+  string sandbox_token = 12;    // 沙箱 gRPC 鉴权 token(backend 注入;空=不校验)
 }
 
 message RunTurnResponse {
