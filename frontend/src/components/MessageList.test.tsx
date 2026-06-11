@@ -78,35 +78,43 @@ describe("MessageList 粘底跟随", () => {
     Element.prototype.scrollIntoView = scrollSpy
   })
 
-  // 把滚动容器(role=log 外层 overflow-auto div)的几何设为「在底/上翻」
-  const setGeometry = (container: HTMLElement, { away }: { away: boolean }) => {
-    const el = container.querySelector("[data-scroll-container]") as HTMLElement
-    Object.defineProperty(el, "scrollHeight", { configurable: true, value: 1000 })
+  const containerOf = (c: HTMLElement) =>
+    c.querySelector("[data-scroll-container]") as HTMLElement
+  const geom = (
+    el: HTMLElement,
+    { scrollTop, scrollHeight = 1000 }: { scrollTop: number; scrollHeight?: number },
+  ) => {
+    Object.defineProperty(el, "scrollHeight", { configurable: true, value: scrollHeight })
     Object.defineProperty(el, "clientHeight", { configurable: true, value: 400 })
     Object.defineProperty(el, "scrollTop", {
-      configurable: true, writable: true, value: away ? 100 : 600,
+      configurable: true, writable: true, value: scrollTop,
     })
-    return el
   }
 
-  const liveTurn = (text: string) => ({
-    userText: text, sessionId: "s1", startedAt: "2026-06-11T10:00:00",
+  const liveTurn = (text: string, startedAt = "2026-06-11T10:00:00") => ({
+    userText: text, sessionId: "s1", startedAt,
     blocks: [], status: "streaming" as const,
   })
 
   it("在底部:live 更新自动滚动", () => {
     const { container, rerender } = render(<MessageList messages={[]} />)
-    setGeometry(container, { away: false })
+    scrollSpy.mockClear() // 排除 mount 首滚,否则是空断言(审查 L1)
+    const el = containerOf(container)
+    geom(el, { scrollTop: 600 })
+    fireEvent.scroll(el)
     useStore.setState({ live: liveTurn("问") })
     rerender(<MessageList messages={[]} />)
     expect(scrollSpy).toHaveBeenCalled()
   })
 
-  it("上翻后:live 更新不再拽回底部,出现「回到底部」钮;点击回底", () => {
+  it("上翻(scrollTop 下降)后:不再拽回,浮钮出现;点钮回底且钮消失", () => {
     useStore.setState({ live: liveTurn("问") })
     const { container, rerender } = render(<MessageList messages={[]} />)
-    const el = setGeometry(container, { away: true })
-    fireEvent.scroll(el) // 上翻:跟随停止
+    const el = containerOf(container)
+    geom(el, { scrollTop: 600 })
+    fireEvent.scroll(el) // 在底(记录 lastTop)
+    geom(el, { scrollTop: 100 })
+    fireEvent.scroll(el) // 上翻:scrollTop 下降且不在底 → 停跟随
     scrollSpy.mockClear()
     useStore.setState({ live: { ...liveTurn("问"), blocks: [] } })
     rerender(<MessageList messages={[]} />)
@@ -114,15 +122,50 @@ describe("MessageList 粘底跟随", () => {
     const btn = screen.getByRole("button", { name: "回到底部" })
     fireEvent.click(btn)
     expect(scrollSpy).toHaveBeenCalled()
+    expect(screen.queryByRole("button", { name: "回到底部" })).not.toBeInTheDocument()
   })
 
-  it("发送新消息强制回底:即使此前上翻", () => {
+  it("内容增长把距底推远但 scrollTop 未降(程序滚动的异步事件):跟随不熄火(审查 H1)", () => {
+    useStore.setState({ live: liveTurn("问") })
+    const { container, rerender } = render(<MessageList messages={[]} />)
+    const el = containerOf(container)
+    geom(el, { scrollTop: 600 })
+    fireEvent.scroll(el) // 在底,跟随中
+    geom(el, { scrollTop: 600, scrollHeight: 2000 })
+    fireEvent.scroll(el) // 内容撑高:距底 1000 但 scrollTop 未降 —— 不是用户行为
+    scrollSpy.mockClear()
+    useStore.setState({ live: { ...liveTurn("问"), blocks: [] } })
+    rerender(<MessageList messages={[]} />)
+    expect(scrollSpy).toHaveBeenCalled() // 仍在跟随
+    expect(screen.queryByRole("button", { name: "回到底部" })).not.toBeInTheDocument()
+  })
+
+  it("发送新消息强制回底:live 由空 → 带 userText", () => {
     useStore.setState({ live: null })
     const { container, rerender } = render(<MessageList messages={[]} />)
-    const el = setGeometry(container, { away: true })
+    const el = containerOf(container)
+    geom(el, { scrollTop: 600 })
+    fireEvent.scroll(el)
+    geom(el, { scrollTop: 100 })
     fireEvent.scroll(el) // 上翻
     scrollSpy.mockClear()
-    useStore.setState({ live: liveTurn("新问题") }) // null → 带 userText = 用户发送
+    useStore.setState({ live: liveTurn("新问题") })
+    rerender(<MessageList messages={[]} />)
+    expect(scrollSpy).toHaveBeenCalled()
+  })
+
+  it("错误回合后直接再发送(live 非空→非空,startedAt 变):强制回底(审查 M1)", () => {
+    useStore.setState({
+      live: { ...liveTurn("旧问", "2026-06-11T09:00:00"), status: "error" as const },
+    })
+    const { container, rerender } = render(<MessageList messages={[]} />)
+    const el = containerOf(container)
+    geom(el, { scrollTop: 600 })
+    fireEvent.scroll(el)
+    geom(el, { scrollTop: 100 })
+    fireEvent.scroll(el) // 上翻重读上文
+    scrollSpy.mockClear()
+    useStore.setState({ live: liveTurn("新问", "2026-06-11T10:30:00") }) // startLive 刷新 startedAt
     rerender(<MessageList messages={[]} />)
     expect(scrollSpy).toHaveBeenCalled()
   })

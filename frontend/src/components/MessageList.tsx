@@ -18,21 +18,40 @@ export function MessageList({
   const live = useStore((s) => s.live)
   const endRef = useRef<HTMLDivElement>(null)
   // 粘底跟随:在底部才自动滚,上翻即停(spec 2026-06-11-scroll-follow)。
-  // followRef 是权威值(effect 读,不触发渲染);atBottom 只驱动浮钮显隐,边界翻转才 setState。
+  // followRef 是权威值(effect 读,不触发渲染);following state 只驱动浮钮显隐。
   const followRef = useRef(true)
-  const [atBottom, setAtBottom] = useState(true)
+  const [following, setFollowing] = useState(true)
+  const lastTopRef = useRef(0)
   const prevLiveRef = useRef(live)
 
-  const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const near = isNearBottom(e.currentTarget)
-    followRef.current = near
-    if (near !== atBottom) setAtBottom(near)
+  const setFollow = (v: boolean) => {
+    followRef.current = v
+    setFollowing((prev) => (prev === v ? prev : v)) // 边界翻转才真 setState(滚动事件高频)
   }
 
-  // 用户发送(live 由空 → 带 userText):强制恢复跟随——看自己的提问与回答开头是预期行为
-  const prevLive = prevLiveRef.current
-  prevLiveRef.current = live
-  if (live?.userText && !prevLive) followRef.current = true
+  const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget
+    const near = isNearBottom(el)
+    const scrolledUp = el.scrollTop < lastTopRef.current
+    lastTopRef.current = el.scrollTop
+    // 关跟随的唯一信号:scrollTop 实际下降(用户上翻)且不在底。scroll 事件是异步派发的,
+    // 程序滚动 + 下一个 delta 撑高内容后才到的事件会读到「距底变大但 scrollTop 没降」——
+    // 那不是用户行为,不能熄火(审查 H1:否则流式中跟随会自发停止)。
+    if (scrolledUp && !near) setFollow(false)
+    else if (near) setFollow(true)
+  }
+
+  // 用户发送新回合(startLive 必刷新 startedAt;delta 的 setLive 不动它):强制恢复跟随。
+  // 用 startedAt 而非 null→非空 判定——错误回合的 live 不被清,直接再发是非空→非空(审查 M1)。
+  // resume 续看(startLive("")):userText 为空,不触发。
+  useEffect(() => {
+    const prev = prevLiveRef.current
+    prevLiveRef.current = live
+    if (live?.userText && live.startedAt !== prev?.startedAt) {
+      setFollow(true)
+      endRef.current?.scrollIntoView()
+    }
+  }, [live])
 
   useEffect(() => {
     // 即时滚动(非 smooth):平滑动画在高频 delta 下排队,正是「拽走」感的帮凶
@@ -40,8 +59,7 @@ export function MessageList({
   }, [messages, live])
 
   const scrollToBottom = () => {
-    followRef.current = true
-    setAtBottom(true)
+    setFollow(true)
     endRef.current?.scrollIntoView()
   }
 
@@ -51,7 +69,7 @@ export function MessageList({
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      {!atBottom && (
+      {!following && (
         <button
           type="button"
           aria-label="回到底部"
