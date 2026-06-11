@@ -51,8 +51,26 @@ class PtySession:
         self._queue: asyncio.Queue[bytes] = asyncio.Queue()
         self._closed = False
 
+    @staticmethod
+    def _render_rc(home: str) -> str:
+        # 软状态持久(spec):历史落 <home>/.bash_history(跨会话累积),每个提示符把 cwd
+        # 写 <home>/.last_pwd、启动 cd 回去。用绝对路径(cd 后相对会变)。再 source 用户
+        # 自定义 <home>/.bashrc(若有)。<home> 在持久卷下,点目录在文件抽屉里隐藏(#31)。
+        return (
+            f'export HISTFILE="{home}/.bash_history"\n'
+            "export HISTSIZE=5000 HISTFILESIZE=20000\n"
+            "shopt -s histappend 2>/dev/null\n"
+            f"PROMPT_COMMAND='history -a; pwd > \"{home}/.last_pwd\"'\n"
+            f'__lp="$(cat "{home}/.last_pwd" 2>/dev/null)"; [ -d "$__lp" ] && cd "$__lp"\n'
+            f'[ -f "{home}/.bashrc" ] && . "{home}/.bashrc"\n'
+        )
+
     async def start(self) -> None:
         self._workdir.mkdir(parents=True, exist_ok=True)
+        home = self._workdir / ".home"
+        home.mkdir(parents=True, exist_ok=True)
+        rc = home / ".term_rcfile"
+        rc.write_text(self._render_rc(str(home)))
         master, slave = pty.openpty()
         self._set_winsize(master, self._rows, self._cols)
         env = self._env if self._env is not None else dict(os.environ)
@@ -61,6 +79,8 @@ class PtySession:
             sys.executable,
             "-c",
             _BASH_LAUNCHER,
+            "--rcfile",
+            str(rc),
             "-i",
             *self._extra_bash_args,
             stdin=slave,

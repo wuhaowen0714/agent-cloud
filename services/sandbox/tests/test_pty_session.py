@@ -68,3 +68,33 @@ async def test_close_is_idempotent(tmp_path):
     await pty.start()
     await pty.close()
     await pty.close()  # 再调不抛
+
+
+async def test_history_persists_across_sessions(tmp_path):
+    # 软状态:命令历史落 <workdir>/.home/.bash_history,跨会话累积。
+    s1 = PtySession(tmp_path, rows=24, cols=80)
+    await s1.start()
+    await s1.write(b"echo persisted-marker\n")
+    await _drain_until(s1, b"persisted-marker")
+    await s1.write(b"exit\n")
+    await s1.wait()
+    await s1.close()
+    hist = tmp_path / ".home" / ".bash_history"
+    assert hist.exists()
+    assert "persisted-marker" in hist.read_text()
+
+
+async def test_cwd_persists_across_sessions(tmp_path):
+    # 软状态:退出时记 cwd,下次启动自动 cd 回去。
+    (tmp_path / "subdir").mkdir()
+    s1 = PtySession(tmp_path, rows=24, cols=80)
+    await s1.start()
+    await s1.write(b"cd subdir\n")
+    await s1.write(b"echo done\n")
+    await _drain_until(s1, b"done")
+    await s1.write(b"exit\n")
+    await s1.wait()
+    await s1.close()
+    last_pwd = tmp_path / ".home" / ".last_pwd"
+    assert last_pwd.exists()
+    assert last_pwd.read_text().strip().endswith("subdir")

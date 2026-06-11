@@ -1,7 +1,12 @@
+import uuid
+
 from agent_cloud.v1 import sandbox_pb2
 from agent_cloud_backend.api.terminal import (
+    _active_terminals,
     _pump_worker_to_ws,
     _pump_ws_to_worker,
+    _release,
+    _takeover,
     _token_from_subprotocols,
 )
 
@@ -82,3 +87,35 @@ async def test_pump_ws_to_worker_forwards_input_and_resize():
     assert kinds == ["input", "resize"]
     assert call.written[0].input == b"ls\n"
     assert call.written[1].resize.rows == 40 and call.written[1].resize.cols == 100
+
+
+async def test_pump_calls_on_activity_for_input_and_resize():
+    # 续租 hook:每个 input/resize 帧触发 on_activity(端点据此 touch 续租)
+    hits = {"n": 0}
+
+    async def act():
+        hits["n"] += 1
+
+    ws = _FakeWS(
+        incoming=[
+            {"type": "websocket.receive", "bytes": b"x"},
+            {"type": "websocket.receive", "text": '{"rows": 30, "cols": 90}'},
+            {"type": "websocket.disconnect"},
+        ]
+    )
+    await _pump_ws_to_worker(ws, _FakeCall(), on_activity=act)
+    assert hits["n"] == 2
+
+
+def test_takeover_evicts_previous_and_release():
+    # 单终端:新连接顶替旧连接;release 仅摘除自己
+    _active_terminals.clear()
+    uid = uuid.uuid4()
+    old, new = _FakeWS(), _FakeWS()
+    assert _takeover(uid, old) is None
+    assert _takeover(uid, new) is old  # 返回被顶替的旧连接
+    assert _active_terminals[uid] is new
+    _release(uid, old)  # 旧连接 release 不该误删接管者
+    assert _active_terminals[uid] is new
+    _release(uid, new)
+    assert uid not in _active_terminals

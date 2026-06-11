@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import time
 import uuid
 
 import grpc
@@ -12,6 +13,7 @@ from fastapi import APIRouter, Depends, WebSocket
 from agent_cloud_backend.auth.security import decode_access_token
 from agent_cloud_backend.config import Settings, get_settings
 from agent_cloud_backend.db import get_sessionmaker
+from agent_cloud_backend.repositories.sandbox_registry import SandboxRegistryRepository
 from agent_cloud_backend.repositories.user import UserRepository
 from agent_cloud_backend.sandbox.deps import get_sandbox_manager
 from agent_cloud_backend.sandbox.manager import SandboxConn, SandboxManager
@@ -19,6 +21,25 @@ from agent_cloud_backend.sandbox.manager import SandboxConn, SandboxManager
 router = APIRouter(tags=["terminal"])
 
 _MAX_MSG = 16 * 1024 * 1024
+_TOUCH_INTERVAL = 10.0  # 续租节流:键盘活动最多每 10s touch 一次,防过频写库
+
+# 单终端:每用户至多一个活跃终端连接(进程内表)。多副本部署下各副本各持一份——
+# 同一用户的多个终端若落到不同副本不会互踢,但 v1 接受(用户通常单副本会话);
+# 真正的资源闸是沙箱 per-user 复用 + 续租回收。
+_active_terminals: dict[uuid.UUID, WebSocket] = {}
+
+
+def _takeover(user_id: uuid.UUID, ws: WebSocket) -> WebSocket | None:
+    """登记新终端为该用户的活跃终端,返回被顶替的旧连接(由调用方关闭)。"""
+    prev = _active_terminals.get(user_id)
+    _active_terminals[user_id] = ws
+    return prev
+
+
+def _release(user_id: uuid.UUID, ws: WebSocket) -> None:
+    """连接结束时摘除登记(仅当登记的还是自己,避免误删接管者)。"""
+    if _active_terminals.get(user_id) is ws:
+        del _active_terminals[user_id]
 
 
 def _token_from_subprotocols(raw: str) -> str | None:
@@ -30,8 +51,10 @@ def _token_from_subprotocols(raw: str) -> str | None:
     return None
 
 
-async def _pump_ws_to_worker(ws, call) -> None:
-    """浏览器 → worker:二进制帧 = 键盘输入;文本帧 = resize(JSON {rows,cols})。"""
+async def _pump_ws_to_worker(ws, call, on_activity=None) -> None:
+    """浏览器 → worker:二进制帧 = 键盘输入;文本帧 = resize(JSON {rows,cols})。
+    每个 input/resize 帧触发 on_activity(若提供)——端点据此续租沙箱(第二档:
+    只认用户活动,纯输出不续)。"""
     while True:
         msg = await ws.receive()
         if msg.get("type") == "websocket.disconnect":
@@ -39,6 +62,8 @@ async def _pump_ws_to_worker(ws, call) -> None:
         b = msg.get("bytes")
         if b is not None:
             await call.write(sandbox_pb2.TerminalClientMsg(input=b))
+            if on_activity is not None:
+                await on_activity()
             continue
         t = msg.get("text")
         if t is not None:
@@ -49,6 +74,8 @@ async def _pump_ws_to_worker(ws, call) -> None:
                         resize=sandbox_pb2.TerminalResize(rows=int(r["rows"]), cols=int(r["cols"]))
                     )
                 )
+                if on_activity is not None:
+                    await on_activity()
             except (ValueError, KeyError, TypeError):
                 pass  # 坏 resize 帧忽略,不拖垮终端
 
@@ -99,10 +126,32 @@ async def terminal_ws(
         return
     await websocket.accept(subprotocol="bearer")  # 必须回显选中的 subprotocol
 
+    # 单终端:顶替该用户已有的终端连接(旧的关闭,提示已在别处打开)
+    prev = _takeover(user.id, websocket)
+    if prev is not None:
+        with contextlib.suppress(Exception):
+            await prev.close(code=4001)
+
     conn = await manager.get_endpoint_for_user(user.id)
-    # docker 沙箱已把用户 workspace 挂到 /workspace,work_subdir 用 "." 落在工作区根
-    # (与 turn.py 一致);inprocess/测试用 <user_id>/workspace 相对沙箱 base。
-    work_subdir = "." if settings.sandbox_provisioner == "docker" else f"{user.id}/workspace"
+    # 终端工作目录 = 用户工作区根(与 agent/文件抽屉同一处,卖点:互相可见)。与 turn.py
+    # 一致:docker 沙箱已把 <host>/<uid>/workspace 挂到 /workspace → work_subdir="."。
+    # inprocess 下沙箱 base 已是 <base>/<uid>,故用 "workspace"(= session.work_subdir 默认,
+    # 不能带 uid 否则 <base>/<uid>/<uid>/workspace 重复)。
+    work_subdir = "." if settings.sandbox_provisioner == "docker" else "workspace"
+    # 续租(第二档):用户活动(input/resize)节流 touch last_used_at,防 reaper 中途回收。
+    last_touch = 0.0
+
+    async def _on_activity() -> None:
+        nonlocal last_touch
+        now = time.monotonic()
+        if now - last_touch < _TOUCH_INTERVAL:
+            return
+        last_touch = now
+        with contextlib.suppress(Exception):
+            async with get_sessionmaker()() as db:
+                await SandboxRegistryRepository(db).touch_for_user(user.id)
+                await db.commit()
+
     channel, call = _open_worker_terminal(settings.worker_endpoint, conn)
     try:
         await call.write(
@@ -110,7 +159,7 @@ async def terminal_ws(
                 start=sandbox_pb2.TerminalStart(work_subdir=work_subdir, rows=24, cols=80)
             )
         )
-        a = asyncio.create_task(_pump_ws_to_worker(websocket, call))
+        a = asyncio.create_task(_pump_ws_to_worker(websocket, call, _on_activity))
         b = asyncio.create_task(_pump_worker_to_ws(call, websocket))
         try:
             await asyncio.wait({a, b}, return_when=asyncio.FIRST_COMPLETED)
@@ -120,6 +169,7 @@ async def terminal_ws(
             with contextlib.suppress(Exception):
                 await call.done_writing()
     finally:
+        _release(user.id, websocket)
         with contextlib.suppress(Exception):
             await channel.close()
         with contextlib.suppress(Exception):

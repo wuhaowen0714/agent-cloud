@@ -38,6 +38,14 @@ class SandboxRegistryRepository(BaseRepository[SandboxRegistry]):
             .values(last_used_at=func.now())
         )
 
+    async def touch_for_user(self, user_id: uuid.UUID) -> None:
+        # 续租该用户的活跃沙箱(终端按键盘活动续租;终端不绑 session,故按 user 续)。
+        await self.session.execute(
+            update(SandboxRegistry)
+            .where(SandboxRegistry.user_id == user_id, SandboxRegistry.status == "active")
+            .values(last_used_at=func.now())
+        )
+
     async def mark_dead(self, sandbox_id: uuid.UUID) -> None:
         await self.session.execute(
             update(SandboxRegistry).where(SandboxRegistry.id == sandbox_id).values(status="dead")
