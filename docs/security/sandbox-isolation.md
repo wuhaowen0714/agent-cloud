@@ -69,10 +69,13 @@
 - **沙箱 → worker:50052**:per-sandbox 网络内 worker 与沙箱双向可达,沙箱仍能连 worker。但 worker `RunTurn` 需 backend 注入的 LLM api_key,沙箱自带不了 → 至多 DoS。后续可给 worker gRPC 也加 token。
 - **egress 出网未限制**:沙箱能出任意公网(python 一直能,curl/git 同理)。多租户下需 **egress allowlist** 防数据外泄 / 内网跳板。独立加固项,见 roadmap「限流/配额/滥用防护」。
 - **token 落库明文**:`sandbox_registry.auth_token` 存明文。其防护对象是"网络层被绕过后的横向";而 db 本身已由强密码(目标 5)+ 摘网络(目标 2,沙箱够不到 db)保护。db 被打穿时攻击者已取得更高权限,token 泄露是次要的。
+- **升级过渡窗口**:本次修复**只改新 spawn 的沙箱**。升级前已 active 的旧沙箱容器(无 token、挂在共享网 `agent-cloud-net`)在 backend 重启后仍存活,在被 idle-reap 替换前重现原始跨租户暴露。**`deploy.sh` 升级后会强制清掉所有 `label=managed-by=agent-cloud` 的残留沙箱容器与网络**(backend 经 health_check 按需重建带 token + 专属网的新沙箱),关闭此窗口。手动升级务必执行该清理(见 §6)。
+- **孤儿 docker 网络 → 可用性**:`_remove_network` 失败(best-effort,不重试)会泄漏 `acsbx-net-*`,累积到 docker 地址池耗尽时 `networks.create` 失败 → 新沙箱起不来(可用性 DoS,非隔离绕过)。运维定期 `docker network prune` 或重启服务可清。后续可加自动 sweep。
 
 ## 6. 运维:设置 / 变更 db 密码
 
-- **首次部署**:在 `deploy/.env` 设 `AGENT_CLOUD_DB_PASSWORD=<强随机值>`(如 `openssl rand -base64 24`)。未设时 `docker compose up` 直接 fail-loud,不会用弱默认起库。
+- **首次部署**:在仓库根 `.env` 设 `AGENT_CLOUD_DB_PASSWORD=<强随机值>`(如 `openssl rand -base64 24`)。未设时 `docker compose up` 直接 fail-loud,不会用弱默认起库。
+- **升级既有部署到本修复**:`deploy.sh` 会在 `up -d` 后自动清掉 pre-fix 残留沙箱容器/网络(关闭上面「升级过渡窗口」)。若手动升级(不走 deploy.sh),`up -d` 后执行:`docker ps -aq --filter "label=managed-by=agent-cloud" | xargs -r docker rm -f`。
 - **变更已有部署的密码**:db 卷里的角色密码在初始化时已固化,改 `.env` 不会自动改库内密码。需二选一:
   1. 改库内密码:`docker compose exec db psql -U postgres -c "ALTER ROLE postgres PASSWORD '<新值>';"`,再同步更新 `.env` 的 `AGENT_CLOUD_DB_PASSWORD` 并重启 backend;
   2. 重建 db 卷(**会丢数据**,仅限可弃数据的环境):`docker compose down`(**不要 `-v` 除非确认丢数据**)→ 删卷 → `up`。

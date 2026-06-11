@@ -70,7 +70,8 @@ services:
 
 networks:
   default:
-    # 固定网络名:DockerProvisioner 按此名把沙箱容器接进来(worker 经容器名直连沙箱)
+    # 控制面共享网:db / backend / worker / web。沙箱【不在】此网——每沙箱起在各自的
+    # acsbx-net-<id>,backend 把 worker 接入它(spec B 跨租户隔离),沙箱因此够不到 db/邻居。
     name: agent-cloud-net
 
 volumes:

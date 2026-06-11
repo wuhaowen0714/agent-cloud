@@ -167,10 +167,27 @@ async def test_per_sandbox_network_isolates_tenants(tmp_path):
     sid_a, ep_a, _ = await prov.spawn(a)
     sid_b, ep_b, _ = await prov.spawn(b)
     try:
-        name_b = ep_b.split(":")[0]
         ca = dc.containers.get(f"acsbx-{sid_a}")
-        res = ca.exec_run(f"timeout 3 wget -qO- http://{name_b}:50051")
-        assert res.exit_code != 0  # A 跨网络连不到 B
+        cb = dc.containers.get(f"acsbx-{sid_b}")
+
+        def _ip(c, sid):
+            return c.attrs["NetworkSettings"]["Networks"][f"acsbx-net-{sid}"]["IPAddress"]
+
+        ip_a, ip_b = _ip(ca, sid_a), _ip(cb, sid_b)
+
+        # 在 A 容器内用 socket 直接测 TCP 可达性(不靠 wget——h2-only 端口会让 wget 无论
+        # 可达与否都退出≠0,无法区分「真隔离」与「连得上但协议不对」,审查 M1)。
+        def _reachable(ip: str) -> bool:
+            probe = (
+                "import socket,sys;s=socket.socket();s.settimeout(3);"
+                f"sys.exit(0 if s.connect_ex(('{ip}',50051))==0 else 1)"
+            )
+            return ca.exec_run(["python", "-c", probe]).exit_code == 0
+
+        # 正向对照:A 连自己的 50051 必通 → 证明 probe 逻辑能区分可达/不可达
+        assert _reachable(ip_a) is True
+        # 隔离:A 跨专属网络连不到 B(若回归到共享网,此处会变 True 而失败)
+        assert _reachable(ip_b) is False
     finally:
         await prov.stop(sid_a)
         await prov.stop(sid_b)
