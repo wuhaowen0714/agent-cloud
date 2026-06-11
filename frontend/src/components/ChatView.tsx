@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef } from "react"
-import { api } from "../api/client"
+import { api, HttpError } from "../api/client"
 import { pollSessionTitle } from "../api/queryClient"
 import { cancelTurn, resumeTurn, streamTurn } from "../api/stream"
 import {
@@ -22,6 +22,8 @@ export function ChatView() {
   const startLive = useStore((s) => s.startLive)
   const setLive = useStore((s) => s.setLive)
   const clearLive = useStore((s) => s.clearLive)
+  const setSession = useStore((s) => s.setSession)
+  const setComposerDraft = useStore((s) => s.setComposerDraft)
   const qc = useQueryClient()
   // 在途客户端连接(POST 或 GET resume)的中断句柄 + 所属会话
   const inflight = useRef<{ abort: () => void; sessionId: string } | null>(null)
@@ -182,12 +184,45 @@ export function ChatView() {
     if (t && t.status === "error") void onSend(t.userText)
   }
 
+  // 回滚:删该用户消息及其之后,把它的文本回填输入框。与回合同锁,在跑 → 409 提示。
+  const onRollback = async (messageId: string) => {
+    const sid = sessionId
+    try {
+      const r = await api.rollbackSession(sid, messageId)
+      clearLive() // 可能删掉了正在错误展示的 live 回合
+      await qc.invalidateQueries({ queryKey: ["messages", sid] })
+      await qc.invalidateQueries({ queryKey: ["sessions"] })
+      setComposerDraft(r.user_text)
+    } catch (e) {
+      if (e instanceof HttpError && e.status === 409) window.alert("会话正忙,请稍候再试")
+      else window.alert("回滚失败,请稍后再试")
+    }
+  }
+
+  // Fork:复制该用户消息「之前」的历史到新会话,切过去并回填(原会话不动)。
+  const onFork = async (messageId: string) => {
+    try {
+      const r = await api.forkSession(sessionId, messageId)
+      await qc.invalidateQueries({ queryKey: ["sessions"] })
+      setSession(r.new_session_id) // 切到新会话(setSession 会清 live)
+      setComposerDraft(r.user_text)
+    } catch {
+      window.alert("Fork 失败,请稍后再试")
+    }
+  }
+
   return (
     // min-h-0:flex 子项默认 min-height:auto(=内容高),会把整列撑过视口、让整页滚动;
     // 收掉它,滚动才发生在 MessageList 的 overflow-auto 里(侧栏/composer 钉在视口内)。
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* key=会话:切会话整组件重建,跟随状态/滚动位置回到初值(粘底) */}
-      <MessageList key={sessionId} messages={messages} onRetry={onRetry} />
+      <MessageList
+        key={sessionId}
+        messages={messages}
+        onRetry={onRetry}
+        onRollback={onRollback}
+        onFork={onFork}
+      />
       <Composer disabled={live?.status === "streaming"} onSend={onSend} onStop={onStop} />
     </div>
   )

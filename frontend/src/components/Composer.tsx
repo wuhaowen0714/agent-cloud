@@ -47,6 +47,8 @@ export function Composer({
   const sessionId = useStore((s) => s.sessionId)
   const compactions = useStore((s) => s.compactions)
   const clearCompaction = useStore((s) => s.clearCompaction)
+  const composerDraft = useStore((s) => s.composerDraft)
+  const setComposerDraft = useStore((s) => s.setComposerDraft)
   const compaction = sessionId ? compactions[sessionId] : undefined
   const compacting = compaction?.phase === "running"
   // 压缩进行中等同回合占用:禁用输入,发不出消息 → 不会撞同会话 409。
@@ -58,6 +60,15 @@ export function Composer({
   useEffect(() => {
     setNotice(null)
   }, [sessionId])
+
+  // 回滚/fork 触发的回填:store 里有待回填文本 → 写进输入框、聚焦,消费一次即清(避免重复回填)。
+  useEffect(() => {
+    if (composerDraft != null) {
+      setText(composerDraft)
+      setComposerDraft(null)
+      requestAnimationFrame(() => taRef.current?.focus())
+    }
+  }, [composerDraft, setComposerDraft])
 
   // 当前会话的压缩转为「结果」→ 弹一行 flash(复用通知槽,4s 自动消失),并清掉 store 里的
   // 结果态。若压缩完成时用户不在该会话,这里不触发;切回该会话时再弹(故结果留在 store 直到被看到)。

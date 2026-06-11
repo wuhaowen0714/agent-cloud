@@ -6,14 +6,19 @@ import { useStore } from "../store"
 import { fmtTime } from "../time"
 import type { Message } from "../types"
 import { AssistantBubble, UserBubble } from "./Bubble"
+import { MessageActions } from "./MessageActions"
 import { TurnBlocks } from "./TurnBlocks"
 
 export function MessageList({
   messages,
   onRetry,
+  onRollback,
+  onFork,
 }: {
   messages: Message[]
   onRetry?: () => void
+  onRollback?: (messageId: string) => void
+  onFork?: (messageId: string) => void
 }) {
   const live = useStore((s) => s.live)
   // 当前会话正在压缩 → 藏掉「重试」:重试会触发回合,而压缩与回合同锁,必撞 409(onSend 也兜底拦)。
@@ -92,21 +97,34 @@ export function MessageList({
           <Fragment key={turn.id}>
             {/* 气泡 + 时间行包成组:父级 space-y-4 作用于组,时间行紧贴自己的气泡 */}
             {turn.userText !== null && (
-              <div className="space-y-1">
+              <div className="group space-y-1">
                 <UserBubble text={turn.userText} />
-                {turn.userAt && (
-                  <div className="flex justify-end pr-1 text-[11px] text-slate-400">{fmtTime(turn.userAt)}</div>
-                )}
+                {/* 操作 + 时间同行(hover 显操作,时间常驻),避免额外占位行 */}
+                <div className="flex items-center justify-end gap-2 pr-1">
+                  <MessageActions
+                    text={turn.userText}
+                    onRollback={onRollback ? () => onRollback(turn.id) : undefined}
+                    onFork={onFork ? () => onFork(turn.id) : undefined}
+                  />
+                  {turn.userAt && (
+                    <span className="text-[11px] text-slate-400">{fmtTime(turn.userAt)}</span>
+                  )}
+                </div>
               </div>
             )}
             {turn.blocks.length > 0 && (
-              <div className="space-y-1">
+              <div className="group space-y-1">
                 <AssistantBubble>
                   <TurnBlocks blocks={turn.blocks} />
                 </AssistantBubble>
-                {turn.doneAt && (
-                  <div className="pl-1 text-[11px] text-slate-400">{fmtTime(turn.doneAt)}</div>
-                )}
+                <div className="flex items-center gap-2 pl-1">
+                  {turn.doneAt && (
+                    <span className="text-[11px] text-slate-400">{fmtTime(turn.doneAt)}</span>
+                  )}
+                  <MessageActions
+                    text={turn.blocks.flatMap((b) => (b.kind === "text" ? [b.text] : [])).join("\n")}
+                  />
+                </div>
               </div>
             )}
             {unfinished && (
