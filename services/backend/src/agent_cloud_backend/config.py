@@ -20,7 +20,8 @@ class Settings(BaseSettings):
     sandbox_host_root: str = ""  # DooD 下宿主 workspace 根;空=回退 sandbox_base_root
     sandbox_image: str = "agent-cloud-sandbox:latest"
     sandbox_docker_network_mode: str = "publish"  # publish(dev) | network(prod)
-    sandbox_docker_network: str = "agent-cloud-net"
+    # network 模式必填:worker 容器名,backend 在 spawn 时把它接入每个沙箱专属网络(spec B)
+    sandbox_worker_container: str = ""
     sandbox_mem_limit: str = "512m"
     sandbox_nano_cpus: int = 1_000_000_000  # 1 vCPU
     sandbox_pids_limit: int = 256

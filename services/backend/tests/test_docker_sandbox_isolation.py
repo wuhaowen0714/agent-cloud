@@ -146,3 +146,35 @@ async def test_sandbox_rejects_missing_token(tmp_path):
         assert ei2.value.code() == grpc.StatusCode.UNAUTHENTICATED
     finally:
         await prov.stop(sid)
+
+
+async def test_per_sandbox_network_isolates_tenants(tmp_path):
+    # network 模式:两个沙箱各在专属网络 → A 容器够不到 B 容器(跨租户隔离,spec B)。
+    # 用 docker exec 直接在容器里验网络可达性(network 模式端点是容器名,宿主连不到)。
+    import docker as _docker
+
+    dc = _docker.from_env()
+    # throwaway「worker」:provisioner 需要一个 worker 容器名作 connect 目标
+    worker = dc.containers.run(
+        "agent-cloud-sandbox:latest", command="sleep 600", detach=True,
+        name=f"wkr-{uuid.uuid4().hex[:8]}", entrypoint="",
+    )
+    prov = DockerProvisioner(
+        host_root=str(tmp_path), image="agent-cloud-sandbox:latest",
+        network_mode="network", worker_container=worker.name,
+    )
+    a, b = uuid.uuid4(), uuid.uuid4()
+    sid_a, ep_a, _ = await prov.spawn(a)
+    sid_b, ep_b, _ = await prov.spawn(b)
+    try:
+        name_b = ep_b.split(":")[0]
+        ca = dc.containers.get(f"acsbx-{sid_a}")
+        res = ca.exec_run(f"timeout 3 wget -qO- http://{name_b}:50051")
+        assert res.exit_code != 0  # A 跨网络连不到 B
+    finally:
+        await prov.stop(sid_a)
+        await prov.stop(sid_b)
+        worker.remove(force=True)
+    # 专属网络已随 stop 清理
+    assert not dc.networks.list(names=[f"acsbx-net-{sid_a}"])
+    assert not dc.networks.list(names=[f"acsbx-net-{sid_b}"])

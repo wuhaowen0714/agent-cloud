@@ -43,9 +43,54 @@ class _FakeContainers:
         return list(self.by_name.values())
 
 
+class _FakeNetwork:
+    def __init__(self, name):
+        self.name = name
+        self.containers = []
+        self.connected = []
+        self.disconnected = []
+        self.removed = False
+
+    def connect(self, c, **kw):
+        self.connected.append(c)
+        self.containers.append(c)
+
+    def disconnect(self, c, **kw):
+        self.disconnected.append(c)
+
+    def reload(self):
+        pass
+
+    def remove(self):
+        self.removed = True
+
+
+class _FakeNetworks:
+    def __init__(self):
+        self.by_name = {}
+        self.created = []
+
+    def create(self, name, **kw):
+        n = _FakeNetwork(name)
+        self.by_name[name] = n
+        self.created.append(name)
+        return n
+
+    def get(self, name):
+        from docker.errors import NotFound
+
+        if name not in self.by_name:
+            raise NotFound(name)
+        return self.by_name[name]
+
+    def list(self, filters=None):
+        return list(self.by_name.values())
+
+
 class _FakeClient:
     def __init__(self):
         self.containers = _FakeContainers()
+        self.networks = _FakeNetworks()
 
 
 async def test_spawn_publish_mode_mounts_workspace_and_returns_localhost_endpoint(tmp_path):
@@ -70,18 +115,6 @@ async def test_spawn_publish_mode_mounts_workspace_and_returns_localhost_endpoin
     assert kw["name"] == f"acsbx-{sandbox_id}"
     assert endpoint == "127.0.0.1:49222"
 
-
-async def test_spawn_network_mode_uses_container_name_endpoint(tmp_path):
-    client = _FakeClient()
-    prov = DockerProvisioner(
-        host_root=str(tmp_path), image="img:1", network_mode="network",
-        network="acnet", client=client,
-    )
-    sandbox_id, endpoint, _ = await prov.spawn(uuid.uuid4())
-    kw = client.containers.run_kwargs
-    assert kw["network"] == "acnet"
-    assert "ports" not in kw
-    assert endpoint == f"acsbx-{sandbox_id}:50051"
 
 
 async def test_stop_is_idempotent_when_container_missing(tmp_path):
@@ -133,3 +166,50 @@ async def test_spawn_removes_container_when_no_port_published(tmp_path):
         await prov.spawn(uuid.uuid4())
     c = next(iter(client.containers.by_name.values()))
     assert c.removed is True
+
+
+# ── per-sandbox 网络隔离(spec B;mock client 验证 docker API 调用)──
+
+
+async def test_spawn_network_mode_creates_dedicated_net_and_connects_worker(tmp_path):
+    client = _FakeClient()
+    prov = DockerProvisioner(
+        host_root=str(tmp_path), image="img:1", network_mode="network",
+        worker_container="wkr", client=client,
+    )
+    sid, ep, _ = await prov.spawn(uuid.uuid4())
+    net_name = f"acsbx-net-{sid}"
+    assert net_name in client.networks.created  # 起了专属网络
+    assert client.containers.run_kwargs["network"] == net_name  # 沙箱接入它(非共享 net)
+    assert "wkr" in client.networks.by_name[net_name].connected  # worker 被接入
+    assert ep == f"acsbx-{sid}:50051"
+
+
+async def test_network_mode_requires_worker_container(tmp_path):
+    prov = DockerProvisioner(
+        host_root=str(tmp_path), image="img:1", network_mode="network",
+        worker_container="", client=_FakeClient(),
+    )
+    with pytest.raises(ValueError):
+        await prov.spawn(uuid.uuid4())
+
+
+async def test_stop_network_mode_removes_dedicated_net(tmp_path):
+    client = _FakeClient()
+    prov = DockerProvisioner(
+        host_root=str(tmp_path), image="img:1", network_mode="network",
+        worker_container="wkr", client=client,
+    )
+    sid, _, _ = await prov.spawn(uuid.uuid4())
+    await prov.stop(sid)
+    net = client.networks.by_name[f"acsbx-net-{sid}"]
+    assert "wkr" in net.disconnected and net.removed  # 断开 worker + 删网络
+
+
+async def test_publish_mode_uses_no_dedicated_net(tmp_path):
+    client = _FakeClient()
+    prov = DockerProvisioner(
+        host_root=str(tmp_path), image="img:1", network_mode="publish", client=client
+    )
+    await prov.spawn(uuid.uuid4())
+    assert client.networks.created == []  # publish 模式不建 per-sandbox 网络
