@@ -15,6 +15,19 @@ describe("MessageActions", () => {
     expect(screen.queryByRole("button", { name: "Fork 新会话" })).not.toBeInTheDocument()
   })
 
+  it("每个按钮有 title 提示(hover 可见,解释图标含义)", () => {
+    render(<MessageActions text="hi" onRollback={() => {}} onFork={() => {}} />)
+    expect(screen.getByRole("button", { name: "复制" })).toHaveAttribute("title", "复制")
+    expect(screen.getByRole("button", { name: "回滚到此处" })).toHaveAttribute(
+      "title",
+      "回滚到此处(删除其后消息)",
+    )
+    expect(screen.getByRole("button", { name: "Fork 新会话" })).toHaveAttribute(
+      "title",
+      "Fork:从这里开新会话分支",
+    )
+  })
+
   it("复制调 clipboard.writeText", () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.assign(navigator, { clipboard: { writeText } })
