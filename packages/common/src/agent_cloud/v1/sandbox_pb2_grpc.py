@@ -40,6 +40,11 @@ class SandboxStub:
                 request_serializer=agent__cloud_dot_v1_dot_sandbox__pb2.ExecToolRequest.SerializeToString,
                 response_deserializer=agent__cloud_dot_v1_dot_sandbox__pb2.ExecToolResponse.FromString,
                 _registered_method=True)
+        self.Terminal = channel.stream_stream(
+                '/agent_cloud.v1.Sandbox/Terminal',
+                request_serializer=agent__cloud_dot_v1_dot_sandbox__pb2.TerminalClientMsg.SerializeToString,
+                response_deserializer=agent__cloud_dot_v1_dot_sandbox__pb2.TerminalServerMsg.FromString,
+                _registered_method=True)
 
 
 class SandboxServicer:
@@ -52,6 +57,14 @@ class SandboxServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def Terminal(self, request_iterator, context):
+        """交互式终端:双向流。client 发 start(开 PTY)/input(键盘字节)/resize;
+        server 回 output(PTY 原始字节,含 ANSI)/exit_code(shell 退出收尾)。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_SandboxServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -59,6 +72,11 @@ def add_SandboxServicer_to_server(servicer, server):
                     servicer.ExecTool,
                     request_deserializer=agent__cloud_dot_v1_dot_sandbox__pb2.ExecToolRequest.FromString,
                     response_serializer=agent__cloud_dot_v1_dot_sandbox__pb2.ExecToolResponse.SerializeToString,
+            ),
+            'Terminal': grpc.stream_stream_rpc_method_handler(
+                    servicer.Terminal,
+                    request_deserializer=agent__cloud_dot_v1_dot_sandbox__pb2.TerminalClientMsg.FromString,
+                    response_serializer=agent__cloud_dot_v1_dot_sandbox__pb2.TerminalServerMsg.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -89,6 +107,33 @@ class Sandbox:
             '/agent_cloud.v1.Sandbox/ExecTool',
             agent__cloud_dot_v1_dot_sandbox__pb2.ExecToolRequest.SerializeToString,
             agent__cloud_dot_v1_dot_sandbox__pb2.ExecToolResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Terminal(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(
+            request_iterator,
+            target,
+            '/agent_cloud.v1.Sandbox/Terminal',
+            agent__cloud_dot_v1_dot_sandbox__pb2.TerminalClientMsg.SerializeToString,
+            agent__cloud_dot_v1_dot_sandbox__pb2.TerminalServerMsg.FromString,
             options,
             channel_credentials,
             insecure,

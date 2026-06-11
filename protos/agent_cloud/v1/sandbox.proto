@@ -5,6 +5,32 @@ package agent_cloud.v1;
 // 沙箱:在工作目录里执行一次工具调用(worker→sandbox,信任边界)。
 service Sandbox {
   rpc ExecTool(ExecToolRequest) returns (ExecToolResponse);
+  // 交互式终端:双向流。client 发 start(开 PTY)/input(键盘字节)/resize;
+  // server 回 output(PTY 原始字节,含 ANSI)/exit_code(shell 退出收尾)。
+  rpc Terminal(stream TerminalClientMsg) returns (stream TerminalServerMsg);
+}
+
+message TerminalClientMsg {
+  oneof msg {
+    TerminalStart start = 1;   // 首帧:开 PTY
+    bytes input = 2;           // 键盘字节(含 Ctrl-C 等控制序列)
+    TerminalResize resize = 3; // 窗口尺寸变化
+  }
+}
+message TerminalStart {
+  string work_subdir = 1;  // 相对沙箱基目录的会话工作子目录
+  uint32 rows = 2;
+  uint32 cols = 3;
+}
+message TerminalResize {
+  uint32 rows = 1;
+  uint32 cols = 2;
+}
+message TerminalServerMsg {
+  oneof msg {
+    bytes output = 1;     // PTY 输出(原始字节,含 ANSI)
+    int32 exit_code = 2;  // shell 退出 → 收尾帧
+  }
 }
 
 message ExecToolRequest {

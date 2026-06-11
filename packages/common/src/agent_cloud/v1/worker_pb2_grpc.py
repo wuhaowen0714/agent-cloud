@@ -3,6 +3,7 @@
 import grpc
 import warnings
 
+from agent_cloud.v1 import sandbox_pb2 as agent__cloud_dot_v1_dot_sandbox__pb2
 from agent_cloud.v1 import worker_pb2 as agent__cloud_dot_v1_dot_worker__pb2
 
 GRPC_GENERATED_VERSION = '1.81.0'
@@ -60,6 +61,11 @@ class WorkerStub:
                 request_serializer=agent__cloud_dot_v1_dot_worker__pb2.GenerateTitleRequest.SerializeToString,
                 response_deserializer=agent__cloud_dot_v1_dot_worker__pb2.GenerateTitleResponse.FromString,
                 _registered_method=True)
+        self.Terminal = channel.stream_stream(
+                '/agent_cloud.v1.Worker/Terminal',
+                request_serializer=agent__cloud_dot_v1_dot_sandbox__pb2.TerminalClientMsg.SerializeToString,
+                response_deserializer=agent__cloud_dot_v1_dot_sandbox__pb2.TerminalServerMsg.FromString,
+                _registered_method=True)
 
 
 class WorkerServicer:
@@ -96,6 +102,14 @@ class WorkerServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def Terminal(self, request_iterator, context):
+        """交互式终端透传桥(backend→worker→sandbox)。sandbox 连接信息走 gRPC
+        metadata(x-sandbox-endpoint / x-sandbox-token),不进消息体。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_WorkerServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -123,6 +137,11 @@ def add_WorkerServicer_to_server(servicer, server):
                     servicer.GenerateTitle,
                     request_deserializer=agent__cloud_dot_v1_dot_worker__pb2.GenerateTitleRequest.FromString,
                     response_serializer=agent__cloud_dot_v1_dot_worker__pb2.GenerateTitleResponse.SerializeToString,
+            ),
+            'Terminal': grpc.stream_stream_rpc_method_handler(
+                    servicer.Terminal,
+                    request_deserializer=agent__cloud_dot_v1_dot_sandbox__pb2.TerminalClientMsg.FromString,
+                    response_serializer=agent__cloud_dot_v1_dot_sandbox__pb2.TerminalServerMsg.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -261,6 +280,33 @@ class Worker:
             '/agent_cloud.v1.Worker/GenerateTitle',
             agent__cloud_dot_v1_dot_worker__pb2.GenerateTitleRequest.SerializeToString,
             agent__cloud_dot_v1_dot_worker__pb2.GenerateTitleResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Terminal(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(
+            request_iterator,
+            target,
+            '/agent_cloud.v1.Worker/Terminal',
+            agent__cloud_dot_v1_dot_sandbox__pb2.TerminalClientMsg.SerializeToString,
+            agent__cloud_dot_v1_dot_sandbox__pb2.TerminalServerMsg.FromString,
             options,
             channel_credentials,
             insecure,
