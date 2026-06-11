@@ -23,12 +23,24 @@ def _render_docs(documents: list[ContextDocument]) -> list[str]:
 
 
 def _render_memory(memory: list[MemoryItem]) -> list[str]:
-    if not memory:
-        return []
-    lines = ["# Memory"]
-    for m in memory:
-        lines.append(f"- ({m.scope}) {m.content}")
-    return ["\n".join(lines)]
+    # 分层渲染:user 块跨该用户全部 agent 共享(里面的"我"不是这个 agent),agent 块才是
+    # 它专属。标题措辞与 remember 工具的 scope 语义一一对应——模型读时不会认错主语,
+    # 写时也学得到该往哪层记。块内容本身已是 markdown bullets,原样输出
+    # (旧版逐条加 "- (scope)" 前缀,对多行块是畸形嵌套)。
+    user_blocks = [m.content for m in memory if m.scope == "user" and m.content.strip()]
+    agent_blocks = [m.content for m in memory if m.scope != "user" and m.content.strip()]
+    out = []
+    if user_blocks:
+        out.append(
+            "# Memory — about the user (shared across all of their agents)\n"
+            + "\n".join(user_blocks)
+        )
+    if agent_blocks:
+        out.append(
+            "# Memory — this agent (private to you: your given name/persona, conventions, "
+            "domain notes)\n" + "\n".join(agent_blocks)
+        )
+    return out
 
 
 def _render_skills(skills: list[SkillRef]) -> list[str]:
