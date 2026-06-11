@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useStore } from "../store"
 import type { Message } from "../types"
 import { MessageList } from "./MessageList"
@@ -67,5 +67,63 @@ describe("MessageList 时间戳", () => {
     render(<MessageList messages={[]} />)
     expect(screen.getByText(/09:05/)).toBeInTheDocument()
     expect(screen.getAllByText(/\d{2}:\d{2}/)).toHaveLength(1)
+  })
+})
+
+describe("MessageList 粘底跟随", () => {
+  const scrollSpy = vi.fn()
+
+  beforeEach(() => {
+    scrollSpy.mockClear()
+    Element.prototype.scrollIntoView = scrollSpy
+  })
+
+  // 把滚动容器(role=log 外层 overflow-auto div)的几何设为「在底/上翻」
+  const setGeometry = (container: HTMLElement, { away }: { away: boolean }) => {
+    const el = container.querySelector("[data-scroll-container]") as HTMLElement
+    Object.defineProperty(el, "scrollHeight", { configurable: true, value: 1000 })
+    Object.defineProperty(el, "clientHeight", { configurable: true, value: 400 })
+    Object.defineProperty(el, "scrollTop", {
+      configurable: true, writable: true, value: away ? 100 : 600,
+    })
+    return el
+  }
+
+  const liveTurn = (text: string) => ({
+    userText: text, sessionId: "s1", startedAt: "2026-06-11T10:00:00",
+    blocks: [], status: "streaming" as const,
+  })
+
+  it("在底部:live 更新自动滚动", () => {
+    const { container, rerender } = render(<MessageList messages={[]} />)
+    setGeometry(container, { away: false })
+    useStore.setState({ live: liveTurn("问") })
+    rerender(<MessageList messages={[]} />)
+    expect(scrollSpy).toHaveBeenCalled()
+  })
+
+  it("上翻后:live 更新不再拽回底部,出现「回到底部」钮;点击回底", () => {
+    useStore.setState({ live: liveTurn("问") })
+    const { container, rerender } = render(<MessageList messages={[]} />)
+    const el = setGeometry(container, { away: true })
+    fireEvent.scroll(el) // 上翻:跟随停止
+    scrollSpy.mockClear()
+    useStore.setState({ live: { ...liveTurn("问"), blocks: [] } })
+    rerender(<MessageList messages={[]} />)
+    expect(scrollSpy).not.toHaveBeenCalled()
+    const btn = screen.getByRole("button", { name: "回到底部" })
+    fireEvent.click(btn)
+    expect(scrollSpy).toHaveBeenCalled()
+  })
+
+  it("发送新消息强制回底:即使此前上翻", () => {
+    useStore.setState({ live: null })
+    const { container, rerender } = render(<MessageList messages={[]} />)
+    const el = setGeometry(container, { away: true })
+    fireEvent.scroll(el) // 上翻
+    scrollSpy.mockClear()
+    useStore.setState({ live: liveTurn("新问题") }) // null → 带 userText = 用户发送
+    rerender(<MessageList messages={[]} />)
+    expect(scrollSpy).toHaveBeenCalled()
   })
 })

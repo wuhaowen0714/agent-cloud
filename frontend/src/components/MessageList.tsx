@@ -1,5 +1,7 @@
-import { Fragment, useEffect, useMemo, useRef } from "react"
+import { ChevronDown } from "lucide-react"
+import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 import { messagesToTurns } from "../blocks"
+import { isNearBottom } from "../scroll"
 import { useStore } from "../store"
 import { fmtTime } from "../time"
 import type { Message } from "../types"
@@ -15,16 +17,51 @@ export function MessageList({
 }) {
   const live = useStore((s) => s.live)
   const endRef = useRef<HTMLDivElement>(null)
+  // 粘底跟随:在底部才自动滚,上翻即停(spec 2026-06-11-scroll-follow)。
+  // followRef 是权威值(effect 读,不触发渲染);atBottom 只驱动浮钮显隐,边界翻转才 setState。
+  const followRef = useRef(true)
+  const [atBottom, setAtBottom] = useState(true)
+  const prevLiveRef = useRef(live)
+
+  const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const near = isNearBottom(e.currentTarget)
+    followRef.current = near
+    if (near !== atBottom) setAtBottom(near)
+  }
+
+  // 用户发送(live 由空 → 带 userText):强制恢复跟随——看自己的提问与回答开头是预期行为
+  const prevLive = prevLiveRef.current
+  prevLiveRef.current = live
+  if (live?.userText && !prevLive) followRef.current = true
+
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" })
+    // 即时滚动(非 smooth):平滑动画在高频 delta 下排队,正是「拽走」感的帮凶
+    if (followRef.current) endRef.current?.scrollIntoView()
   }, [messages, live])
+
+  const scrollToBottom = () => {
+    followRef.current = true
+    setAtBottom(true)
+    endRef.current?.scrollIntoView()
+  }
 
   // 已落库历史:按回合分组,每个回合 = 一个用户气泡 + 一个助手气泡(块流)。
   // memo:MessageList 订阅 live,流式期间每帧重渲染,避免每帧重算整段历史。
   const turns = useMemo(() => messagesToTurns(messages), [messages])
 
   return (
-    <div className="flex-1 overflow-auto p-4">
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      {!atBottom && (
+        <button
+          type="button"
+          aria-label="回到底部"
+          onClick={scrollToBottom}
+          className="absolute bottom-4 right-6 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-500 shadow-pop ring-1 ring-slate-200 transition hover:text-slate-800"
+        >
+          <ChevronDown size={18} />
+        </button>
+      )}
+      <div data-scroll-container onScroll={onScroll} className="flex-1 overflow-auto p-4">
       <div className="mx-auto max-w-5xl space-y-4">
         {turns.map((turn, i) => {
         // user 消息但没有任何助手块 = 该回合被取消/出错(未完成)。但最后一条且当前
@@ -96,6 +133,7 @@ export function MessageList({
         </>
       )}
         <div ref={endRef} />
+        </div>
       </div>
     </div>
   )

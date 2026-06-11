@@ -181,7 +181,8 @@ export function ChatView() {
     // min-h-0:flex 子项默认 min-height:auto(=内容高),会把整列撑过视口、让整页滚动;
     // 收掉它,滚动才发生在 MessageList 的 overflow-auto 里(侧栏/composer 钉在视口内)。
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <MessageList messages={messages} onRetry={onRetry} />
+      {/* key=会话:切会话整组件重建,跟随状态/滚动位置回到初值(粘底) */}
+      <MessageList key={sessionId} messages={messages} onRetry={onRetry} />
       <Composer disabled={live?.status === "streaming"} onSend={onSend} onStop={onStop} />
     </div>
   )
