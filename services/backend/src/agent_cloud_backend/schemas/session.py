@@ -24,3 +24,21 @@ class SessionRead(BaseModel):
     created_at: datetime
     last_active_at: datetime
     last_context_tokens: int | None = None
+
+
+class RollbackRequest(BaseModel):
+    message_id: uuid.UUID
+
+
+class RollbackResult(BaseModel):
+    deleted_count: int
+    user_text: str
+
+
+class ForkRequest(BaseModel):
+    message_id: uuid.UUID
+
+
+class ForkResult(BaseModel):
+    new_session_id: uuid.UUID
+    user_text: str

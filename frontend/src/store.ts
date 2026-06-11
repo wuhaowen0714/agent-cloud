@@ -28,6 +28,7 @@ interface AppState {
   sessionId: string | null
   live: LiveTurn | null
   compactions: Record<string, CompactState> // 按 sessionId;切会话不清(见 CompactState 注释)
+  composerDraft: string | null // 待回填到输入框的文本(回滚/fork 触发);Composer 消费一次即清
   fileDrawerOpen: boolean
   settingsOpen: boolean
   settingsTab: SettingsTab
@@ -41,6 +42,7 @@ interface AppState {
   startCompaction: (sessionId: string) => void
   finishCompaction: (sessionId: string, result: CompactResult) => void
   clearCompaction: (sessionId: string) => void
+  setComposerDraft: (text: string | null) => void
   toggleFileDrawer: () => void
   openSettings: (tab?: SettingsTab) => void
   closeSettings: () => void
@@ -57,6 +59,7 @@ export const useStore = create<AppState>((set, get) => ({
   sessionId: localStorage.getItem("ac.sessionId"),
   live: null,
   compactions: {},
+  composerDraft: null,
   fileDrawerOpen: false,
   settingsOpen: false,
   settingsTab: "agent",
@@ -68,7 +71,7 @@ export const useStore = create<AppState>((set, get) => ({
     if (prev !== null && prev !== uid) {
       localStorage.removeItem("ac.sessionId")
       localStorage.removeItem("ac.agentId")
-      set({ user, userId: uid, agentId: null, sessionId: null, live: null, compactions: {}, settingsOpen: false })
+      set({ user, userId: uid, agentId: null, sessionId: null, live: null, compactions: {}, composerDraft: null, settingsOpen: false })
     } else {
       set({ user, userId: uid })
     }
@@ -85,6 +88,7 @@ export const useStore = create<AppState>((set, get) => ({
       sessionId: null,
       live: null,
       compactions: {},
+      composerDraft: null,
       fileDrawerOpen: false,
       settingsOpen: false,
     })
@@ -114,6 +118,7 @@ export const useStore = create<AppState>((set, get) => ({
         ? { compactions: { ...s.compactions, [sessionId]: { phase: "result", result } } }
         : {},
     ),
+  setComposerDraft: (text) => set({ composerDraft: text }),
   clearCompaction: (sessionId) =>
     set((s) => {
       const { [sessionId]: _, ...rest } = s.compactions

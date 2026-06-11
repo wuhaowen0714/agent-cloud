@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from agent_cloud_backend.models.message import Message
 from agent_cloud_backend.repositories.base import BaseRepository
@@ -26,3 +26,42 @@ class MessageRepository(BaseRepository[Message]):
             select(Message).where(Message.session_id == session_id).order_by(Message.seq)
         )
         return list(result.scalars().all())
+
+    async def get_in_session(
+        self, session_id: uuid.UUID, message_id: uuid.UUID
+    ) -> Message | None:
+        """按 id 取消息,但仅当它属于给定会话(否则视为不存在,防跨会话引用)。"""
+        m = await self.session.get(Message, message_id)
+        return m if m is not None and m.session_id == session_id else None
+
+    async def delete_from_seq(self, session_id: uuid.UUID, target_seq: int) -> int:
+        """删除该会话 seq >= target 的全部消息(回滚:删后缀)。返回删除条数。"""
+        result = await self.session.execute(
+            delete(Message).where(Message.session_id == session_id, Message.seq >= target_seq)
+        )
+        return result.rowcount
+
+    async def copy_prefix_to(
+        self, src_session_id: uuid.UUID, dst_session_id: uuid.UUID, below_seq: int
+    ) -> int:
+        """把源会话 seq < below 的消息保序复制到目标会话(fork:复制前缀),保留 seq/role/content/
+        创建时间。返回实际复制到的最大 seq(无复制则 -1)——调用方据此把新会话游标钳到真实复制
+        范围,以防与并发回滚竞态(原会话可能在读 s 之后、复制之前被删剩更短前缀)。"""
+        max_seq = -1
+        for m in await self.list_by_session(src_session_id):
+            if m.seq >= below_seq:
+                continue
+            self.session.add(
+                Message(
+                    session_id=dst_session_id,
+                    seq=m.seq,
+                    role=m.role,
+                    content=m.content,
+                    model=m.model,
+                    tokens=m.tokens,
+                    created_at=m.created_at,  # 保留原时间戳(否则分支历史时间全变成 fork 时刻)
+                )
+            )
+            max_seq = max(max_seq, m.seq)
+        await self.session.flush()
+        return max_seq

@@ -74,9 +74,21 @@ afterEach(() => {
     sessionId: null,
     live: null,
     compactions: {},
+    composerDraft: null,
     settingsOpen: false,
   })
   vi.restoreAllMocks()
+})
+
+describe("Composer 回填(composerDraft)", () => {
+  it("composerDraft 非空 → 写入输入框并清空(消费一次)", () => {
+    setup()
+    act(() => {
+      useStore.getState().setComposerDraft("回填的问题")
+    })
+    expect(box()).toHaveValue("回填的问题")
+    expect(useStore.getState().composerDraft).toBeNull()
+  })
 })
 
 describe("Composer 基础", () => {
