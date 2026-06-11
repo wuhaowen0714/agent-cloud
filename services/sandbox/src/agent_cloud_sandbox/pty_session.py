@@ -6,17 +6,24 @@ import os
 import pty
 import signal
 import struct
+import sys
 import termios
 from pathlib import Path
 
-
-def _make_controlling_tty(slave: int):
-    # 子进程 fork 后:slave 成为 controlling tty,让 job control(Ctrl-C 作用于前台
-    # 进程组而非整个沙箱服务)正常工作。start_new_session 已 setsid,这里补 TIOCSCTTY。
-    def _pre() -> None:
-        fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
-
-    return _pre
+# 启动器:让子 bash 把它的 stdin(PTY slave)设为 controlling tty,使 job control
+# (Ctrl-C 只作用于前台进程组、vim 等全屏 TUI 正常)生效。为何走 `python -c` 而非
+# preexec_fn:在 uvicorn+grpc 多线程进程里 fork 后跑 Python(preexec_fn)会因子进程
+# 运行时状态损坏而崩。这里 start_new_session 由 C 层做 setsid(安全),随后 exec 出一个
+# 干净的单线程 python(无多线程包袱)在 exec bash 前做 TIOCSCTTY——支持的平台(Linux)
+# 绑定可靠,不支持的(macOS)容错降级。argv 透传给 bash(`-i` + 可选 rcfile)。
+_BASH_LAUNCHER = (
+    "import os,sys,fcntl,termios\n"
+    "try:\n"
+    "    fcntl.ioctl(0, termios.TIOCSCTTY, 0)\n"
+    "except OSError:\n"
+    "    pass\n"
+    "os.execvp('bash', ['bash', *sys.argv[1:]])\n"
+)
 
 
 class PtySession:
@@ -51,7 +58,9 @@ class PtySession:
         env = self._env if self._env is not None else dict(os.environ)
         env.setdefault("TERM", "xterm-256color")
         self._proc = await asyncio.create_subprocess_exec(
-            "bash",
+            sys.executable,
+            "-c",
+            _BASH_LAUNCHER,
             "-i",
             *self._extra_bash_args,
             stdin=slave,
@@ -59,8 +68,9 @@ class PtySession:
             stderr=slave,
             cwd=str(self._workdir),
             env=env,
-            start_new_session=True,  # setsid:独立进程组(Ctrl-C 只杀前台组,不杀沙箱服务)
-            preexec_fn=_make_controlling_tty(slave),
+            # start_new_session:CPython 在 fork 后 C 层(_posixsubprocess)做 setsid,多线程
+            # 安全。controlling tty 的绑定由上面 _BASH_LAUNCHER 在 exec 后的干净进程里完成。
+            start_new_session=True,
         )
         os.close(slave)  # 父进程不持有 slave;仅子进程经 stdio 持有
         os.set_blocking(master, False)
