@@ -85,6 +85,24 @@ class SessionRepository(BaseRepository[Session]):
             update(Session).where(Session.id == session_id).values(status="idle")
         )
 
+    async def apply_rollback_cursors(self, session_id: uuid.UUID, target_seq: int) -> None:
+        """回滚删消息后修游标:摘要若折叠了被删消息(target<=summary_through_seq)则整体丢弃,
+        下次回合按需重压;记忆游标钳到 target-1(survivors 不重提炼、新消息能提炼,已入共享
+        记忆块的事实不撤);清 last_context_tokens。用裸 UPDATE 而非改 ORM 对象——避免提交
+        被 try_acquire 改过的 stale Session 把 status 写回 idle、提前释放锁。"""
+        s = await self.session.get(Session, session_id)
+        drop_summary = target_seq <= s.summary_through_seq
+        await self.session.execute(
+            update(Session)
+            .where(Session.id == session_id)
+            .values(
+                summary="" if drop_summary else s.summary,
+                summary_through_seq=-1 if drop_summary else s.summary_through_seq,
+                memory_through_seq=min(s.memory_through_seq, target_seq - 1),
+                last_context_tokens=None,
+            )
+        )
+
     async def set_context_tokens(self, session_id: uuid.UUID, tokens: int) -> None:
         """记录最近一回合 worker 报告的上下文 token 占用(供 /status 显示)。"""
         await self.session.execute(
