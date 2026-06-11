@@ -15,14 +15,17 @@ export function MessageActions({
     "rounded p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
   return (
     <div className="flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-      <button
-        type="button"
-        aria-label="复制"
-        className={btn}
-        onClick={() => void navigator.clipboard?.writeText(text)}
-      >
-        <Copy className="h-3.5 w-3.5" />
-      </button>
+      {/* 文本为空(如纯工具调用的助手回合)不给复制钮;clipboard 不可用/被拒静默吞掉 */}
+      {text && (
+        <button
+          type="button"
+          aria-label="复制"
+          className={btn}
+          onClick={() => void navigator.clipboard?.writeText(text)?.catch(() => {})}
+        >
+          <Copy className="h-3.5 w-3.5" />
+        </button>
+      )}
       {onRollback && (
         <button type="button" aria-label="回滚到此处" className={btn} onClick={onRollback}>
           <Undo2 className="h-3.5 w-3.5" />

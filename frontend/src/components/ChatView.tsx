@@ -27,6 +27,8 @@ export function ChatView() {
   const qc = useQueryClient()
   // 在途客户端连接(POST 或 GET resume)的中断句柄 + 所属会话
   const inflight = useRef<{ abort: () => void; sessionId: string } | null>(null)
+  // 回滚/fork 在途互斥:防双击发两次请求(输者撞 422 弹假错误,且可能交错出竞态)。
+  const actionBusy = useRef(false)
 
   const messagesQ = useQuery({
     queryKey: ["messages", sessionId],
@@ -186,28 +188,42 @@ export function ChatView() {
 
   // 回滚:删该用户消息及其之后,把它的文本回填输入框。与回合同锁,在跑 → 409 提示。
   const onRollback = async (messageId: string) => {
-    const sid = sessionId
+    if (actionBusy.current) return
+    const sid = sessionId // 捕获发起会话:resolve 时若已切走,数据照刷但 UI 副作用不泼到别的会话
+    actionBusy.current = true
     try {
       const r = await api.rollbackSession(sid, messageId)
-      clearLive() // 可能删掉了正在错误展示的 live 回合
       await qc.invalidateQueries({ queryKey: ["messages", sid] })
       await qc.invalidateQueries({ queryKey: ["sessions"] })
-      setComposerDraft(r.user_text)
+      if (useStore.getState().sessionId === sid) {
+        clearLive() // 可能删掉了正在错误展示的 live 回合
+        setComposerDraft(r.user_text)
+      }
     } catch (e) {
       if (e instanceof HttpError && e.status === 409) window.alert("会话正忙,请稍候再试")
       else window.alert("回滚失败,请稍后再试")
+    } finally {
+      actionBusy.current = false
     }
   }
 
   // Fork:复制该用户消息「之前」的历史到新会话,切过去并回填(原会话不动)。
   const onFork = async (messageId: string) => {
+    if (actionBusy.current) return
+    const sid = sessionId
+    actionBusy.current = true
     try {
-      const r = await api.forkSession(sessionId, messageId)
+      const r = await api.forkSession(sid, messageId)
       await qc.invalidateQueries({ queryKey: ["sessions"] })
-      setSession(r.new_session_id) // 切到新会话(setSession 会清 live)
-      setComposerDraft(r.user_text)
+      // 已切走则不强行把用户拽到新分支(分支已建好、在会话列表里)
+      if (useStore.getState().sessionId === sid) {
+        setSession(r.new_session_id) // 切到新会话(setSession 会清 live)
+        setComposerDraft(r.user_text)
+      }
     } catch {
       window.alert("Fork 失败,请稍后再试")
+    } finally {
+      actionBusy.current = false
     }
   }
 

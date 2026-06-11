@@ -167,18 +167,24 @@ async def fork_session(
     s = await owned_session(session_id, user.id, session)  # 404
     repo = MessageRepository(session)
     target, user_text = await _require_user_message(repo, session_id, body.message_id)
-    keep_summary = s.summary_through_seq < target  # 摘要只覆盖被复制的消息才带走
     new = Session(
         user_id=s.user_id,
         agent_config_id=s.agent_config_id,
         work_subdir=s.work_subdir,
         title=(f"{s.title}(分支)" if s.title else None),
-        summary=(s.summary if keep_summary else ""),
-        summary_through_seq=(s.summary_through_seq if keep_summary else -1),
-        memory_through_seq=min(s.memory_through_seq, target - 1),
+        summary=s.summary,
+        summary_through_seq=s.summary_through_seq,
+        memory_through_seq=s.memory_through_seq,
     )
     session.add(new)
     await session.flush()  # 拿 new.id
-    await repo.copy_prefix_to(session_id, new.id, target)
+    max_copied = await repo.copy_prefix_to(session_id, new.id, target)
+    # 按【实际复制到的最大 seq】钳游标,而非按 target——若读 s 之后、复制之前发生并发回滚把
+    # 原会话删得更短,这里仍保证新会话游标不超出真实复制范围(否则新会话首条消息 seq 会落在
+    # 陈旧游标之下、被组装/记忆漏掉,评审 I1)。摘要仅当完全落在已复制区间内才保留。
+    if new.summary_through_seq > max_copied:
+        new.summary = ""
+        new.summary_through_seq = -1
+    new.memory_through_seq = min(new.memory_through_seq, max_copied)
     await session.commit()
     return ForkResult(new_session_id=new.id, user_text=user_text)

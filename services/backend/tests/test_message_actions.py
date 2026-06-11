@@ -6,7 +6,7 @@ from agent_cloud_backend.models.session import Session
 from agent_cloud_backend.repositories.agent_config import AgentConfigRepository
 from agent_cloud_backend.repositories.message import MessageRepository
 from agent_cloud_backend.repositories.session import SessionRepository
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 
@@ -48,6 +48,15 @@ async def _set_session(engine, session_id, **values):
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
         await db.execute(update(Session).where(Session.id == session_id).values(**values))
+        await db.commit()
+
+
+async def _delete_message_seq(engine, session_id, seq):
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        await db.execute(
+            delete(Message).where(Message.session_id == session_id, Message.seq == seq)
+        )
         await db.commit()
 
 
@@ -110,6 +119,16 @@ async def test_rollback_404_unowned_session(auth_client):
     assert r.status_code == 404
 
 
+async def test_rollback_releases_lock(auth_client, engine):
+    sid, msgs = await _seed(engine, uuid.UUID(auth_client.user_id), ["u0", "a0", "u1", "a1"])
+    r1 = await auth_client.post(f"/sessions/{sid}/rollback", json={"message_id": str(msgs[2][0])})
+    assert r1.status_code == 200, r1.text
+    assert (await _read_session(engine, sid)).status == "idle"  # 锁已释放
+    # 二次回滚仍能成功(锁没卡在 running)
+    r2 = await auth_client.post(f"/sessions/{sid}/rollback", json={"message_id": str(msgs[0][0])})
+    assert r2.status_code == 200, r2.text
+
+
 async def test_rollback_422_foreign_message(auth_client, engine):
     sid_a, msgs_a = await _seed(engine, uuid.UUID(auth_client.user_id), ["u0", "a0"])
     sid_b, msgs_b = await _seed(engine, uuid.UUID(auth_client.user_id), ["x0", "y0"])
@@ -159,3 +178,18 @@ async def test_fork_422_on_assistant_message(auth_client, engine):
     target_id, _ = msgs[1]  # a0
     r = await auth_client.post(f"/sessions/{sid}/fork", json={"message_id": str(target_id)})
     assert r.status_code == 422
+
+
+async def test_fork_clamps_cursors_to_copied_prefix(auth_client, engine):
+    """评审 I1:新会话游标按【实际复制到的最大 seq】钳,而非按 target。模拟"读 s 后、复制前
+    原会话被删得更短"——这里直接删 seq=3 制造比 target-1 更短的前缀;摘要游标(3)领先于实际
+    复制到的最大 seq(2)→ 必须丢弃,否则新会话首条新消息会落在陈旧游标下被漏掉。"""
+    sid, msgs = await _seed(engine, uuid.UUID(auth_client.user_id), ["u0", "a0", "u1", "a1", "u2"])
+    await _set_session(engine, sid, summary="S", summary_through_seq=3, memory_through_seq=3)
+    await _delete_message_seq(engine, sid, 3)  # 删 a3 → target=4 之下存活 0,1,2(max=2)
+    target_id, _ = msgs[4]  # u2, seq=4(仍存活)
+    r = await auth_client.post(f"/sessions/{sid}/fork", json={"message_id": str(target_id)})
+    assert r.status_code == 200, r.text
+    new = await _read_session(engine, r.json()["new_session_id"])
+    assert new.summary == "" and new.summary_through_seq == -1  # 3 > max_copied(2) → 丢弃
+    assert new.memory_through_seq == 2  # min(3, 2)
