@@ -10,6 +10,13 @@ export function formatSize(bytes: number): string {
   return `${v.toFixed(v < 10 ? 1 : 0)} ${units[i]}`
 }
 
+// 文件抽屉的隐藏规则:只藏点开头【目录】(.home/.npm-global/.skills 等沙箱基础设施),
+// 点【文件】(.env.example 等)是用户内容,保持可见可管理——与后端 @ 文件索引的剪枝
+// 政策一致(walk 剪点目录、留点文件),两个 UI 面互不矛盾。
+export function isHiddenEntry(e: { name: string; is_dir: boolean }): boolean {
+  return e.is_dir && e.name.startsWith(".")
+}
+
 export interface Crumb { name: string; path: string }
 export function splitBreadcrumb(path: string): Crumb[] {
   const crumbs: Crumb[] = [{ name: "工作区", path: "" }]

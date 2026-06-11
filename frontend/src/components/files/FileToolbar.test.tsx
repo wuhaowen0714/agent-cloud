@@ -28,3 +28,15 @@ describe("FileToolbar 文件夹上传", () => {
     expect(up.mock.calls[0][1]).toHaveLength(1)
   })
 })
+
+describe("FileToolbar 新建文件夹", () => {
+  it("点开头名称被拦截(建完会被列表隐藏)", () => {
+    vi.spyOn(window, "prompt").mockReturnValue(".cache")
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {})
+    const mk = vi.spyOn(api, "mkdir").mockResolvedValue({} as never)
+    render(wrap(<FileToolbar path="" onChanged={() => {}} />))
+    fireEvent.click(screen.getByRole("button", { name: "＋ 文件夹" }))
+    expect(alertSpy).toHaveBeenCalled()
+    expect(mk).not.toHaveBeenCalled()
+  })
+})

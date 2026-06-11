@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { api } from "../../api/client"
-import { formatSize } from "../../files"
+import { formatSize, isHiddenEntry } from "../../files"
 import type { FileEntry } from "../../types"
 
 // 下载:fetch(带 Bearer)→ blob URL → 触发 <a download> → 释放。<a href> 直链带不了 token。
@@ -39,10 +39,9 @@ export function FileList({
     onError: (err) => alert(`安装失败:${String(err)}`),
   })
 
-  // 点开头条目不显示:沙箱把 HOME/pip/npm 缓存、技能物化目录路由进工作区
-  // (.home/.npm-global/.skills),对用户是基础设施噪音(文件管理器通用约定)。
+  // 点开头【目录】不显示(沙箱基础设施噪音);点文件保留(见 isHiddenEntry 注释)。
   // 仅前端隐藏——agent(bash/read_file)与 API 仍可访问。
-  const visible = entries.filter((e) => !e.name.startsWith("."))
+  const visible = entries.filter((e) => !isHiddenEntry(e))
   if (visible.length === 0) {
     return <div className="flex-1 p-6 text-center text-sm text-slate-400">空目录</div>
   }
@@ -79,7 +78,13 @@ export function FileList({
               onClick={() => {
                 const base = e.path.includes("/") ? e.path.slice(0, e.path.lastIndexOf("/") + 1) : ""
                 const next = prompt("重命名为", e.name)
-                if (next && next !== e.name) rename.mutate({ e, dst: base + next })
+                if (!next || next === e.name) return
+                // 点开头的文件夹会被列表隐藏 → 改完即失联(UI 内无入口改回),拦下
+                if (e.is_dir && next.startsWith(".")) {
+                  alert("以 . 开头的文件夹会被隐藏,请换个名称")
+                  return
+                }
+                rename.mutate({ e, dst: base + next })
               }}
             >
               重命名
