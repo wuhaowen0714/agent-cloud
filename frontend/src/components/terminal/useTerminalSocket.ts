@@ -3,7 +3,7 @@ import { Terminal } from "@xterm/xterm"
 import { useEffect, useRef, useState } from "react"
 import { getAccess } from "../../api/auth"
 
-export type TermStatus = "connecting" | "open" | "closed"
+export type TermStatus = "connecting" | "open" | "closed" | "evicted"
 
 // 终端 WS URL:同源 /api/terminal(vite 代理 ws→backend;生产同源 nginx 透传)。
 function wsURL(): string {
@@ -24,10 +24,15 @@ export function useTerminalSocket(containerRef: React.RefObject<HTMLDivElement |
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
+  // 主动关闭标记:cleanup / reconnect 关 ws 时置位,onclose 据此静默(不误报"已断开")。
+  // 否则 React StrictMode(dev)双跑 effect 的 unmount→remount 会让被 cleanup 关掉的那个
+  // 连接弹出断开浮层。
+  const closingRef = useRef(false)
 
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
+    closingRef.current = false
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 13,
@@ -60,8 +65,15 @@ export function useTerminalSocket(containerRef: React.RefObject<HTMLDivElement |
     ws.onmessage = (e) => {
       if (e.data instanceof ArrayBuffer) term.write(new Uint8Array(e.data))
     }
-    ws.onclose = () => setStatus("closed")
-    ws.onerror = () => setStatus("closed")
+    ws.onclose = (e) => {
+      if (closingRef.current) return // 自己主动关(cleanup/reconnect)→ 静默
+      // 4001 = 被另一处终端接管(后端单终端策略);其余为真断开。接管不提供重连(重连会
+      // 再次被踢),只提示。
+      setStatus(e.code === 4001 ? "evicted" : "closed")
+    }
+    ws.onerror = () => {
+      if (!closingRef.current) setStatus("closed")
+    }
 
     const dataDisp = term.onData((d) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(d))
@@ -74,6 +86,7 @@ export function useTerminalSocket(containerRef: React.RefObject<HTMLDivElement |
     ro.observe(container)
 
     return () => {
+      closingRef.current = true // 标记主动关,onclose 静默
       ro.disconnect()
       dataDisp.dispose()
       ws.close()

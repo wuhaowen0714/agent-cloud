@@ -107,17 +107,19 @@ export function TerminalWindow() {
       </div>
       {/* xterm 容器 */}
       <div ref={bodyRef} className="min-h-0 flex-1 bg-[#1a1b26] p-1.5" />
-      {/* 断开/重连浮层 */}
-      {status === "closed" && (
+      {/* 断开浮层:真断开可重连;被接管(4001)只提示,重连会再被踢故不给重连 */}
+      {(status === "closed" || status === "evicted") && (
         <div className="absolute inset-0 top-8 flex flex-col items-center justify-center gap-2 bg-[#1a1b26]/85 text-sm text-slate-300">
-          <span>连接已断开</span>
-          <button
-            type="button"
-            onClick={reconnect}
-            className="rounded-lg border border-slate-600 px-3 py-1 text-slate-200 hover:bg-slate-700"
-          >
-            点击重连
-          </button>
+          <span>{status === "evicted" ? "终端已在另一处打开" : "连接已断开"}</span>
+          {status === "closed" && (
+            <button
+              type="button"
+              onClick={reconnect}
+              className="rounded-lg border border-slate-600 px-3 py-1 text-slate-200 hover:bg-slate-700"
+            >
+              点击重连
+            </button>
+          )}
         </div>
       )}
       {/* 右下角 resize 手柄 */}
