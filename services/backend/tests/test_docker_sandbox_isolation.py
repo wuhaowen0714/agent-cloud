@@ -59,6 +59,40 @@ async def test_user_b_cannot_read_user_a_files(tmp_path):
         await prov.stop(sid_b)
 
 
+async def test_sandbox_has_cli_toolchain(tmp_path):
+    # 镜像自带 curl/wget/git/jq:agent 的 bash 工具开箱可用(不需运行期 apt)
+    prov = DockerProvisioner(
+        host_root=str(tmp_path), image="agent-cloud-sandbox:latest", network_mode="publish"
+    )
+    sid, ep = await prov.spawn(uuid.uuid4())
+    try:
+        for tool in ("curl", "wget", "git", "jq"):
+            out, err = await _exec(ep, "bash", {"command": f"{tool} --version"})
+            assert err is False, f"{tool} --version errored: {out}"
+            assert out.strip(), f"{tool} --version produced no output"
+    finally:
+        await prov.stop(sid)
+
+
+async def test_sandbox_git_works_out_of_the_box(tmp_path):
+    # git 免身份/ownership 配置:bind-mount 的 /workspace 不报 dubious ownership,
+    # 首次 commit 不报 "tell me who you are"(system 级 safe.directory + 兜底身份)
+    prov = DockerProvisioner(
+        host_root=str(tmp_path), image="agent-cloud-sandbox:latest", network_mode="publish"
+    )
+    sid, ep = await prov.spawn(uuid.uuid4())
+    try:
+        cmd = (
+            "git init -q && echo hi > f.txt && git add f.txt "
+            "&& git commit -q -m init && git log --oneline"
+        )
+        out, err = await _exec(ep, "bash", {"command": cmd})
+        assert err is False, f"git flow errored: {out}"
+        assert "init" in out
+    finally:
+        await prov.stop(sid)
+
+
 async def test_pip_dependency_survives_container_respawn(tmp_path):
     prov = DockerProvisioner(
         host_root=str(tmp_path), image="agent-cloud-sandbox:latest", network_mode="publish"
