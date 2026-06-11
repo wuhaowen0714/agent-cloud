@@ -216,7 +216,7 @@
       </tr>
       <tr>
         <td class="itm">限流 / 配额 / 滥用防护</td>
-        <td>按用户/租户的并发与速率上限;基础滥用/安全护栏(沙箱出网 allowlist 收紧、危险操作)。</td>
+        <td>按用户/租户的并发与速率上限;基础滥用/安全护栏(沙箱出网 allowlist 收紧、危险操作)。<div class="why">沙箱已带 curl/wget/git/jq,但出网仍未限制——多租户下需 egress 白名单防数据外泄/内网跳板。</div></td>
         <td>AuthN</td><td><span class="tag M">M</span></td>
       </tr>
       <tr>
