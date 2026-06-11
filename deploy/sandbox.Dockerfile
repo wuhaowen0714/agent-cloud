@@ -4,7 +4,10 @@ FROM python:3.13-slim
 # 改代码不使其失效缓存。ca-certificates 是 https 根证书,curl/wget/git 的 https 全靠它。
 # 出网未限制是既有语境(python 一直能联网),这些工具只是便利化,不扩大攻击面;
 # egress allowlist 是独立加固项(见 roadmap)。
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# apt 走阿里云镜像:部署目标机(阿里云,境外网络受限——连 GitHub 都被掐)拉官方源
+# deb.debian.org 会卡死。trixie 用 deb822 的 debian.sources(URIs: deb.debian.org → 阿里云)。
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl wget git jq \
     && rm -rf /var/lib/apt/lists/*
 
