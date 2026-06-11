@@ -36,6 +36,7 @@ cd /opt/agent-cloud/app
 cp .env.example .env   # 填 LLM 凭据,并追加:
 # AGENT_CLOUD_AUTH_SECRET=$(openssl rand -hex 48)
 # AGENT_CLOUD_CREDENTIAL_KEY=$(openssl rand -base64 32)
+# AGENT_CLOUD_DB_PASSWORD=$(openssl rand -base64 24)   # 缺失则 deploy 直接 fail-loud
 bash deploy/deploy.sh
 ```
 

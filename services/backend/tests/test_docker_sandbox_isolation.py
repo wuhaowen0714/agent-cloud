@@ -10,8 +10,10 @@ from agent_cloud_backend.sandbox.docker_provisioner import DockerProvisioner
 pytestmark = pytest.mark.docker
 
 
-async def _exec(endpoint: str, tool: str, args: dict, work_subdir: str = "."):
-    """连沙箱执行一次工具;容器 boot 可能慢,简单重试。返回 (content, is_error)。"""
+async def _exec(endpoint: str, token: str, tool: str, args: dict, work_subdir: str = "."):
+    """连沙箱执行一次工具(带鉴权 token,模拟 worker);容器 boot 可能慢,简单重试。
+    返回 (content, is_error)。"""
+    md = (("x-sandbox-token", token),) if token else ()
     async with grpc.aio.insecure_channel(endpoint) as ch:
         stub = sandbox_pb2_grpc.SandboxStub(ch)
         last: Exception | None = None
@@ -23,7 +25,8 @@ async def _exec(endpoint: str, tool: str, args: dict, work_subdir: str = "."):
                         tool_name=tool,
                         arguments_json=json.dumps(args),
                         work_subdir=work_subdir,
-                    )
+                    ),
+                    metadata=md,
                 )
                 return resp.content, resp.is_error
             except grpc.aio.AioRpcError as e:
@@ -37,22 +40,26 @@ async def test_user_b_cannot_read_user_a_files(tmp_path):
         host_root=str(tmp_path), image="agent-cloud-sandbox:latest", network_mode="publish"
     )
     a, b = uuid.uuid4(), uuid.uuid4()
-    sid_a, ep_a = await prov.spawn(a)
-    sid_b, ep_b = await prov.spawn(b)
+    sid_a, ep_a, tok_a = await prov.spawn(a)
+    sid_b, ep_b, tok_b = await prov.spawn(b)
     try:
         # A 写一个秘密文件
-        _, err = await _exec(ep_a, "write_file", {"path": "secret.txt", "content": "TOP-SECRET"})
+        _, err = await _exec(
+            ep_a, tok_a, "write_file", {"path": "secret.txt", "content": "TOP-SECRET"}
+        )
         assert err is False
         # 宿主上确认它在 A 的卷里
         assert (tmp_path / str(a) / "workspace" / "secret.txt").read_text() == "TOP-SECRET"
 
         # B 用 bash 按宿主绝对路径读 A 的文件 → 容器里没这个路径 → 读不到
         host_path_of_a = str(tmp_path / str(a) / "workspace" / "secret.txt")
-        content, _ = await _exec(ep_b, "bash", {"command": f"cat {host_path_of_a}"})
+        content, _ = await _exec(ep_b, tok_b, "bash", {"command": f"cat {host_path_of_a}"})
         assert "TOP-SECRET" not in content  # 越权失败
 
         # B 列根 / workspace 也看不到别的用户目录
-        content, _ = await _exec(ep_b, "bash", {"command": "ls / ; echo ---- ; ls /workspace"})
+        content, _ = await _exec(
+            ep_b, tok_b, "bash", {"command": "ls / ; echo ---- ; ls /workspace"}
+        )
         assert str(a) not in content
     finally:
         await prov.stop(sid_a)
@@ -64,10 +71,10 @@ async def test_sandbox_has_cli_toolchain(tmp_path):
     prov = DockerProvisioner(
         host_root=str(tmp_path), image="agent-cloud-sandbox:latest", network_mode="publish"
     )
-    sid, ep = await prov.spawn(uuid.uuid4())
+    sid, ep, tok = await prov.spawn(uuid.uuid4())
     try:
         for tool in ("curl", "wget", "git", "jq"):
-            out, err = await _exec(ep, "bash", {"command": f"{tool} --version"})
+            out, err = await _exec(ep, tok, "bash", {"command": f"{tool} --version"})
             assert err is False, f"{tool} --version errored: {out}"
             assert out.strip(), f"{tool} --version produced no output"
     finally:
@@ -80,13 +87,13 @@ async def test_sandbox_git_works_out_of_the_box(tmp_path):
     prov = DockerProvisioner(
         host_root=str(tmp_path), image="agent-cloud-sandbox:latest", network_mode="publish"
     )
-    sid, ep = await prov.spawn(uuid.uuid4())
+    sid, ep, tok = await prov.spawn(uuid.uuid4())
     try:
         cmd = (
             "git init -q && echo hi > f.txt && git add f.txt "
             "&& git commit -q -m init && git log --oneline"
         )
-        out, err = await _exec(ep, "bash", {"command": cmd})
+        out, err = await _exec(ep, tok, "bash", {"command": cmd})
         assert err is False, f"git flow errored: {out}"
         assert "init" in out
     finally:
@@ -98,21 +105,93 @@ async def test_pip_dependency_survives_container_respawn(tmp_path):
         host_root=str(tmp_path), image="agent-cloud-sandbox:latest", network_mode="publish"
     )
     u = uuid.uuid4()
-    sid1, ep1 = await prov.spawn(u)
+    sid1, ep1, tok1 = await prov.spawn(u)
     try:
         # PIP_USER=1 → 装进 /workspace/.home/.local(在卷里)
         cmd = "pip install --quiet six && python -c 'import six; print(six.__version__)'"
-        out, err = await _exec(ep1, "bash", {"command": cmd})
+        out, err = await _exec(ep1, tok1, "bash", {"command": cmd})
         assert err is False and out.strip()
     finally:
         await prov.stop(sid1)  # 冷重建:杀掉容器
 
     # 同一用户重新 spawn(挂回同卷)→ six 仍能 import
-    sid2, ep2 = await prov.spawn(u)
+    sid2, ep2, tok2 = await prov.spawn(u)
     try:
         out, err = await _exec(
-            ep2, "bash", {"command": "python -c 'import six; print(six.__version__)'"}
+            ep2, tok2, "bash", {"command": "python -c 'import six; print(six.__version__)'"}
         )
         assert err is False and out.strip()  # 依赖跨重建保留
     finally:
         await prov.stop(sid2)
+
+
+async def test_sandbox_rejects_missing_token(tmp_path):
+    # 纵深防御:有 token 的沙箱,不带 token 直连 ExecTool → UNAUTHENTICATED
+    prov = DockerProvisioner(
+        host_root=str(tmp_path), image="agent-cloud-sandbox:latest", network_mode="publish"
+    )
+    sid, ep, tok = await prov.spawn(uuid.uuid4())
+    try:
+        assert tok  # docker provisioner 必生成 token
+        # 先用正确 token 确认沙箱已就绪
+        _, err = await _exec(ep, tok, "bash", {"command": "echo ok"})
+        assert err is False
+        # 不带 token → 拒
+        with pytest.raises(grpc.aio.AioRpcError) as ei:
+            await _exec(ep, "", "bash", {"command": "echo pwned"})
+        assert ei.value.code() == grpc.StatusCode.UNAUTHENTICATED
+        # 错 token → 拒
+        with pytest.raises(grpc.aio.AioRpcError) as ei2:
+            await _exec(ep, "wrong-token", "bash", {"command": "echo pwned"})
+        assert ei2.value.code() == grpc.StatusCode.UNAUTHENTICATED
+    finally:
+        await prov.stop(sid)
+
+
+async def test_per_sandbox_network_isolates_tenants(tmp_path):
+    # network 模式:两个沙箱各在专属网络 → A 容器够不到 B 容器(跨租户隔离,spec B)。
+    # 用 docker exec 直接在容器里验网络可达性(network 模式端点是容器名,宿主连不到)。
+    import docker as _docker
+
+    dc = _docker.from_env()
+    # throwaway「worker」:provisioner 需要一个 worker 容器名作 connect 目标
+    worker = dc.containers.run(
+        "agent-cloud-sandbox:latest", command="sleep 600", detach=True,
+        name=f"wkr-{uuid.uuid4().hex[:8]}", entrypoint="",
+    )
+    prov = DockerProvisioner(
+        host_root=str(tmp_path), image="agent-cloud-sandbox:latest",
+        network_mode="network", worker_container=worker.name,
+    )
+    a, b = uuid.uuid4(), uuid.uuid4()
+    sid_a, ep_a, _ = await prov.spawn(a)
+    sid_b, ep_b, _ = await prov.spawn(b)
+    try:
+        ca = dc.containers.get(f"acsbx-{sid_a}")
+        cb = dc.containers.get(f"acsbx-{sid_b}")
+
+        def _ip(c, sid):
+            return c.attrs["NetworkSettings"]["Networks"][f"acsbx-net-{sid}"]["IPAddress"]
+
+        ip_a, ip_b = _ip(ca, sid_a), _ip(cb, sid_b)
+
+        # 在 A 容器内用 socket 直接测 TCP 可达性(不靠 wget——h2-only 端口会让 wget 无论
+        # 可达与否都退出≠0,无法区分「真隔离」与「连得上但协议不对」,审查 M1)。
+        def _reachable(ip: str) -> bool:
+            probe = (
+                "import socket,sys;s=socket.socket();s.settimeout(3);"
+                f"sys.exit(0 if s.connect_ex(('{ip}',50051))==0 else 1)"
+            )
+            return ca.exec_run(["python", "-c", probe]).exit_code == 0
+
+        # 正向对照:A 连自己的 50051 必通 → 证明 probe 逻辑能区分可达/不可达
+        assert _reachable(ip_a) is True
+        # 隔离:A 跨专属网络连不到 B(若回归到共享网,此处会变 True 而失败)
+        assert _reachable(ip_b) is False
+    finally:
+        await prov.stop(sid_a)
+        await prov.stop(sid_b)
+        worker.remove(force=True)
+    # 专属网络已随 stop 清理
+    assert not dc.networks.list(names=[f"acsbx-net-{sid_a}"])
+    assert not dc.networks.list(names=[f"acsbx-net-{sid_b}"])

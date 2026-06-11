@@ -89,7 +89,10 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
         ) as channel:
             executor = RememberingExecutor(
                 SandboxToolExecutor(
-                    channel, request.work_subdir, list(request.agent.enabled_tools)
+                    channel,
+                    request.work_subdir,
+                    list(request.agent.enabled_tools),
+                    token=request.sandbox_token,
                 ),
                 enabled=remember_enabled(list(request.agent.enabled_tools)),
             )
@@ -159,7 +162,10 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
         async with grpc.aio.insecure_channel(request.sandbox_endpoint, options=options) as channel:
             executor = RememberingExecutor(
                 SandboxToolExecutor(
-                    channel, request.work_subdir, list(request.agent.enabled_tools)
+                    channel,
+                    request.work_subdir,
+                    list(request.agent.enabled_tools),
+                    token=request.sandbox_token,
                 ),
                 enabled=remember_enabled(list(request.agent.enabled_tools)),
             )

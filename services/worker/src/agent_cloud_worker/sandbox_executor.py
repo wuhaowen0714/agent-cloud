@@ -32,10 +32,13 @@ class SandboxToolExecutor:
         enabled_tools: list[str] | None = None,
         max_attempts: int = 10,
         retry_backoff: float = 1.0,
+        token: str = "",
     ) -> None:
         self._stub = sandbox_pb2_grpc.SandboxStub(channel) if channel is not None else None
         self._work_subdir = work_subdir
         self._enabled_tools = list(enabled_tools or [])
+        # 沙箱 gRPC 鉴权:token 经 metadata 带给沙箱拦截校验(空=沙箱开放,inprocess/旧)。
+        self._md = (("x-sandbox-token", token),) if token else None
         # 沙箱(尤其 docker 冷启动)可能短暂 UNAVAILABLE:对其重试,与首个 LLM 思考重叠
         # 以隐藏冷启动(spec §4.1)。其它错误立即转成 is_error 结果。
         self._max_attempts = max_attempts
@@ -61,7 +64,7 @@ class SandboxToolExecutor:
         )
         for attempt in range(self._max_attempts):
             try:
-                resp = await self._stub.ExecTool(req)
+                resp = await self._stub.ExecTool(req, metadata=self._md)
                 return ToolResult(call_id=call.id, content=resp.content, is_error=resp.is_error)
             except grpc.aio.AioRpcError as exc:
                 # 冷启动期的 UNAVAILABLE 重试;其它错误立即转成 is_error 结果交回模型

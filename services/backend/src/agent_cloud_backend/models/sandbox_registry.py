@@ -16,6 +16,9 @@ class SandboxRegistry(Base, TimestampMixin):
     )
     status: Mapped[str] = mapped_column(default="active", nullable=False)  # active | dead
     endpoint: Mapped[str] = mapped_column(nullable=False)
+    # 沙箱 gRPC 鉴权 token(docker provisioner 生成并注入容器 env;inprocess 为空)。
+    # 复用已有沙箱时连同 endpoint 取回,经 RunTurnRequest 下发给 worker(spec C②)。
+    auth_token: Mapped[str] = mapped_column(default="", nullable=False)
     last_used_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

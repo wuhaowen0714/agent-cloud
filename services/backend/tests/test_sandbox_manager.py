@@ -19,7 +19,7 @@ class FakeProvisioner:
     async def spawn(self, user_id):
         sandbox_id = uuid.uuid4()
         self.spawned.append(sandbox_id)
-        return sandbox_id, f"fake:{len(self.spawned)}"
+        return sandbox_id, f"fake:{len(self.spawned)}", ""
 
     async def stop(self, sandbox_id):
         self.stopped.append(sandbox_id)
@@ -196,7 +196,7 @@ async def test_concurrent_get_endpoint_single_active_row(engine):
             .all()
         )
     assert len(active) == 1  # exactly one active row survives
-    assert active[0].endpoint == ep1
+    assert active[0].endpoint == ep1.endpoint
 
     # both raced past the initial check so spawn fired twice, but the loser's
     # throwaway sandbox was discarded via stop()
@@ -265,11 +265,11 @@ async def test_health_check_fail_marks_dead_and_respawns(engine):
     mgr = SandboxManager(provisioner=prov, sessionmaker=maker, health_check=health)
     uid = await _user(engine)
     ep1 = await mgr.get_endpoint_for_user(uid)
-    assert ep1 == "fake:1"
+    assert ep1.endpoint == "fake:1"
     first_id = prov.spawned[0]
 
     ep2 = await mgr.get_endpoint_for_user(uid)  # fake:1 探活失败 -> 重建 fake:2
-    assert ep2 == "fake:2" and ep2 != ep1
+    assert ep2.endpoint == "fake:2" and ep2 != ep1
     assert len(prov.spawned) == 2
     assert prov.stopped == [first_id]  # 死沙箱被尽力停掉
 
@@ -283,3 +283,19 @@ async def test_health_check_fail_marks_dead_and_respawns(engine):
     assert status_by_id[first_id] == "dead"
     active = [r for r in rows if r.status == "active"]
     assert len(active) == 1 and active[0].endpoint == "fake:2"
+
+
+async def test_get_endpoint_returns_conn_with_token(engine):
+    from agent_cloud_backend.sandbox.manager import SandboxConn
+
+    class _TokProv:
+        async def spawn(self, user_id):
+            return uuid.uuid4(), "sbx:50051", "tok-123"
+
+        async def stop(self, sandbox_id):
+            pass
+
+    mgr = SandboxManager(_TokProv(), async_sessionmaker(engine, expire_on_commit=False))
+    conn = await mgr.get_endpoint_for_user(await _user(engine))
+    assert isinstance(conn, SandboxConn)
+    assert conn.endpoint == "sbx:50051" and conn.token == "tok-123"

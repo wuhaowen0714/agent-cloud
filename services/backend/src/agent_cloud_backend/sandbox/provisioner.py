@@ -7,8 +7,11 @@ from typing import Protocol
 class SandboxProvisioner(Protocol):
     """提供/销毁 sandbox 的抽象。生产用 Docker/k8s 实现;本仓库提供进程内实现。"""
 
-    async def spawn(self, user_id: uuid.UUID) -> tuple[uuid.UUID, str]:
-        """起一个 sandbox,返回 (sandbox_id, endpoint)。"""
+    async def spawn(self, user_id: uuid.UUID) -> tuple[uuid.UUID, str, str]:
+        """起一个 sandbox,返回 (sandbox_id, endpoint, auth_token)。
+
+        auth_token 是沙箱 gRPC 鉴权 token(docker 实现生成并注入;inprocess 为空串)。
+        """
         ...
 
     async def stop(self, sandbox_id: uuid.UUID) -> None:

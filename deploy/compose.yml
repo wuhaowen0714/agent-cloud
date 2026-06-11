@@ -7,7 +7,9 @@ services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_PASSWORD: postgres
+      # 强密码从 deploy/.env 读;缺失即 fail-loud(不静默回退弱默认)。变更已有部署见
+      # docs/security/sandbox-isolation.md §6(db 卷里的角色密码不随 .env 自动改)。
+      POSTGRES_PASSWORD: ${AGENT_CLOUD_DB_PASSWORD:?set AGENT_CLOUD_DB_PASSWORD in deploy/.env}
       POSTGRES_DB: agent_cloud
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -26,12 +28,14 @@ services:
     command: sh -c "alembic upgrade head && uvicorn agent_cloud_backend.main:app --host 0.0.0.0 --port 8000"
     env_file: ../.env
     environment:
-      AGENT_CLOUD_DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/agent_cloud
+      AGENT_CLOUD_DATABASE_URL: postgresql+asyncpg://postgres:${AGENT_CLOUD_DB_PASSWORD}@db:5432/agent_cloud
       AGENT_CLOUD_WORKER_ENDPOINT: worker:50052
       # DooD 沙箱:network 模式(publish 的 127.0.0.1 端点在容器化 worker 下不可达)
       AGENT_CLOUD_SANDBOX_PROVISIONER: docker
       AGENT_CLOUD_SANDBOX_DOCKER_NETWORK_MODE: network
-      AGENT_CLOUD_SANDBOX_DOCKER_NETWORK: agent-cloud-net
+      # 跨租户隔离(spec B):每沙箱起在专属网络 acsbx-net-<id>,backend 把 worker 接入它。
+      # 沙箱因此够不到 db/backend/邻居沙箱;worker 容器名固定如下供 backend connect。
+      AGENT_CLOUD_SANDBOX_WORKER_CONTAINER: agent-cloud-worker
       AGENT_CLOUD_SANDBOX_MEM_LIMIT: 256m # 1.6G 小机,压低单沙箱上限
       # 工作区:容器内外同一路径(backend makedirs + 沙箱兄弟容器 bind 同一宿主目录)
       AGENT_CLOUD_SANDBOX_BASE_ROOT: /opt/agent-cloud/data/workspaces
@@ -49,6 +53,7 @@ services:
   worker:
     build: { context: .., dockerfile: deploy/app.Dockerfile }
     image: agent-cloud-app:latest
+    container_name: agent-cloud-worker # 固定名:backend 据此把 worker 接入每个沙箱专属网络
     working_dir: /app/services/worker
     command: python -m agent_cloud_worker
     env_file: ../.env # AGENT_CLOUD_WORKER_OPENAI_*(LLM 凭据只进 worker / backend 注入)
@@ -65,7 +70,8 @@ services:
 
 networks:
   default:
-    # 固定网络名:DockerProvisioner 按此名把沙箱容器接进来(worker 经容器名直连沙箱)
+    # 控制面共享网:db / backend / worker / web。沙箱【不在】此网——每沙箱起在各自的
+    # acsbx-net-<id>,backend 把 worker 接入它(spec B 跨租户隔离),沙箱因此够不到 db/邻居。
     name: agent-cloud-net
 
 volumes:
