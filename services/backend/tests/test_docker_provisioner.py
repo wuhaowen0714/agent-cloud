@@ -8,6 +8,7 @@ class _FakeContainer:
     def __init__(self, name):
         self.name = name
         self.ports = {"50051/tcp": [{"HostPort": "49222"}]}
+        self.status = "running"
         self.stopped = False
         self.removed = False
 
@@ -116,6 +117,54 @@ async def test_spawn_publish_mode_mounts_workspace_and_returns_localhost_endpoin
     assert endpoint == "127.0.0.1:49222"
 
 
+async def test_alive_network_mode_checks_container_running(tmp_path):
+    # network 模式:health_check 不能从 backend gRPC 探(不在沙箱专属网),改查容器 Running
+    client = _FakeClient()
+    prov = DockerProvisioner(
+        host_root=str(tmp_path),
+        image="img:1",
+        network_mode="network",
+        worker_container="w",
+        client=client,
+    )
+    _, endpoint, _ = await prov.spawn(uuid.uuid4())  # endpoint = acsbx-<id>:50051(容器名)
+    assert await prov.alive(endpoint) is True  # 容器 running → 活
+    client.containers.by_name[endpoint.rsplit(":", 1)[0]].status = "exited"
+    assert await prov.alive(endpoint) is False  # 容器停了 → 死(触发重建)
+
+
+async def test_alive_network_mode_false_when_container_gone(tmp_path):
+    client = _FakeClient()
+    prov = DockerProvisioner(
+        host_root=str(tmp_path),
+        image="img:1",
+        network_mode="network",
+        worker_container="w",
+        client=client,
+    )
+    assert await prov.alive("acsbx-nonexistent:50051") is False  # 容器不存在 → 死
+
+
+async def test_alive_fail_open_on_daemon_error(tmp_path):
+    # docker daemon 瞬断(非 NotFound 异常)→ fail-open 视为存活,不误杀健康沙箱(审查 L1)
+    class _BoomContainers(_FakeContainers):
+        def get(self, name):
+            raise RuntimeError("daemon connection reset")
+
+    class _BoomClient:
+        def __init__(self):
+            self.containers = _BoomContainers()
+            self.networks = _FakeNetworks()
+
+    prov = DockerProvisioner(
+        host_root=str(tmp_path),
+        image="img:1",
+        network_mode="network",
+        worker_container="w",
+        client=_BoomClient(),
+    )
+    assert await prov.alive("acsbx-whatever:50051") is True
+
 
 async def test_stop_is_idempotent_when_container_missing(tmp_path):
     client = _FakeClient()
@@ -174,8 +223,11 @@ async def test_spawn_removes_container_when_no_port_published(tmp_path):
 async def test_spawn_network_mode_creates_dedicated_net_and_connects_worker(tmp_path):
     client = _FakeClient()
     prov = DockerProvisioner(
-        host_root=str(tmp_path), image="img:1", network_mode="network",
-        worker_container="wkr", client=client,
+        host_root=str(tmp_path),
+        image="img:1",
+        network_mode="network",
+        worker_container="wkr",
+        client=client,
     )
     sid, ep, _ = await prov.spawn(uuid.uuid4())
     net_name = f"acsbx-net-{sid}"
@@ -187,8 +239,11 @@ async def test_spawn_network_mode_creates_dedicated_net_and_connects_worker(tmp_
 
 async def test_network_mode_requires_worker_container(tmp_path):
     prov = DockerProvisioner(
-        host_root=str(tmp_path), image="img:1", network_mode="network",
-        worker_container="", client=_FakeClient(),
+        host_root=str(tmp_path),
+        image="img:1",
+        network_mode="network",
+        worker_container="",
+        client=_FakeClient(),
     )
     with pytest.raises(ValueError):
         await prov.spawn(uuid.uuid4())
@@ -197,8 +252,11 @@ async def test_network_mode_requires_worker_container(tmp_path):
 async def test_stop_network_mode_removes_dedicated_net(tmp_path):
     client = _FakeClient()
     prov = DockerProvisioner(
-        host_root=str(tmp_path), image="img:1", network_mode="network",
-        worker_container="wkr", client=client,
+        host_root=str(tmp_path),
+        image="img:1",
+        network_mode="network",
+        worker_container="wkr",
+        client=client,
     )
     sid, _, _ = await prov.spawn(uuid.uuid4())
     await prov.stop(sid)

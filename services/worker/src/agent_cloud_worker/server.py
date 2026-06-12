@@ -218,6 +218,14 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
             ("grpc.max_receive_message_length", MAX_GRPC_MESSAGE_BYTES),
         ]
         async with grpc.aio.insecure_channel(endpoint, options=options) as ch:
+            # 等沙箱 server 就绪再开流:首次 spawn 的沙箱 server 冷启动(容器已起但 gRPC 还没
+            # 监听)时,worker 立刻连会 Connection refused → 终端秒断。channel_ready 会重试
+            # 连接直到就绪或超时(此处只用于建连阶段,不限制随后的长流时长)。
+            try:
+                await asyncio.wait_for(ch.channel_ready(), timeout=15)
+            except (TimeoutError, grpc.aio.AioRpcError):
+                await context.abort(grpc.StatusCode.UNAVAILABLE, "sandbox not ready")
+                return
             sbx = sandbox_pb2_grpc.SandboxStub(ch)
             sbx_call = sbx.Terminal(metadata=(("x-sandbox-token", token),))
 
