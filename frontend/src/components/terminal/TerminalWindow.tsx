@@ -1,63 +1,55 @@
 import "@xterm/xterm/css/xterm.css"
-import { X } from "lucide-react"
+import { ChevronUp } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { useStore } from "../../store"
 import { useTerminalSocket } from "./useTerminalSocket"
 
-interface Rect {
-  x: number
-  y: number
-  w: number
-  h: number
-}
-const MIN_W = 360
-const MIN_H = 200
-const KEY = "ac.terminal.rect"
+const MIN_H = 160
+const KEY = "ac.terminal.height"
 
-function loadRect(): Rect {
-  try {
-    const r = JSON.parse(localStorage.getItem(KEY) ?? "")
-    if (r && typeof r.x === "number") return r
-  } catch {
-    /* 无存档:用默认 */
-  }
-  // 默认:右下偏中,留出边距
-  const w = Math.min(760, window.innerWidth - 80)
-  const h = Math.min(420, window.innerHeight - 160)
-  return { x: Math.max(40, window.innerWidth - w - 48), y: Math.max(40, window.innerHeight - h - 64), w, h }
+function loadHeight(): number {
+  const h = Number(localStorage.getItem(KEY))
+  if (Number.isFinite(h) && h >= MIN_H) return Math.min(h, Math.round(window.innerHeight * 0.85))
+  return Math.round(window.innerHeight * 0.4)
 }
 
-// Ghostty 风悬浮终端:深色圆角浮窗,标题栏拖动、右下角 resize,位置/尺寸存 localStorage。
+// Ghostty quick-terminal 风:全视口宽、从顶部滑下的下拉面板(translateY 动画)。
+// 关键语义:收起 ≠ 断开——本组件由 App 在首次打开后【常驻挂载】,terminalOpen 只驱动
+// 滑入/滑出动画;收起时 WS/PTY/xterm 缓冲全保留,再展开时跑着的进程与屏幕内容原样还在。
+// (刷新页面仍是新 shell:临时 PTY 语义,历史/cwd 经软状态恢复。)
 // createPortal 到 body,避开祖先 backdrop-filter / overflow 对 fixed 的裁剪(同 RowMenu 教训)。
 export function TerminalWindow() {
+  const open = useStore((s) => s.terminalOpen)
   const toggleTerminal = useStore((s) => s.toggleTerminal)
-  const [rect, setRect] = useState<Rect>(loadRect)
+  const [height, setHeight] = useState<number>(loadHeight)
+  const panelRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
-  const { status, reconnect } = useTerminalSocket(bodyRef)
+  const { status, reconnect, focus } = useTerminalSocket(bodyRef)
 
-  // 拖动 / resize:用指针事件,移动期间在 document 上监听,松开落库 localStorage。
-  const drag = useRef<{ mode: "move" | "resize"; px: number; py: number; r: Rect } | null>(null)
+  // 首帧以收起态渲染,下一帧再应用展开态 → 首次挂载也有滑入动画
+  const [entered, setEntered] = useState(false)
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setEntered(true))
+    return () => cancelAnimationFrame(id)
+  }, [])
+  const shown = open && entered
+
+  // 底边拖拽调高度;松开落库 localStorage
+  const drag = useRef<{ py: number; h: number } | null>(null)
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
       const d = drag.current
       if (!d) return
-      const dx = e.clientX - d.px
-      const dy = e.clientY - d.py
-      if (d.mode === "move") {
-        const x = Math.min(Math.max(0, d.r.x + dx), window.innerWidth - 80)
-        const y = Math.min(Math.max(0, d.r.y + dy), window.innerHeight - 40)
-        setRect({ ...d.r, x, y })
-      } else {
-        setRect({ ...d.r, w: Math.max(MIN_W, d.r.w + dx), h: Math.max(MIN_H, d.r.h + dy) })
-      }
+      const max = Math.round(window.innerHeight * 0.85)
+      setHeight(Math.max(MIN_H, Math.min(max, d.h + (e.clientY - d.py))))
     }
     const onUp = () => {
       if (drag.current) {
         drag.current = null
-        setRect((r) => {
-          localStorage.setItem(KEY, JSON.stringify(r))
-          return r
+        setHeight((h) => {
+          localStorage.setItem(KEY, String(h))
+          return h
         })
       }
     }
@@ -69,40 +61,47 @@ export function TerminalWindow() {
     }
   }, [])
 
-  // Esc 关闭
+  // Esc 收起——仅展开时监听(常驻挂载,收起后不能再抢 Esc)
   useEffect(() => {
+    if (!open) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") toggleTerminal()
     }
     document.addEventListener("keydown", onKey)
     return () => document.removeEventListener("keydown", onKey)
-  }, [toggleTerminal])
+  }, [open, toggleTerminal])
 
-  const start = (mode: "move" | "resize") => (e: React.PointerEvent) => {
-    e.preventDefault()
-    drag.current = { mode, px: e.clientX, py: e.clientY, r: rect }
-  }
+  // 展开 → 滑入动画后聚焦 xterm;收起 → 若焦点还在面板内则移走(配合 aria-hidden)
+  useEffect(() => {
+    if (open) {
+      const t = setTimeout(focus, 320)
+      return () => clearTimeout(t)
+    }
+    const el = document.activeElement
+    if (el instanceof HTMLElement && panelRef.current?.contains(el)) el.blur()
+  }, [open, focus])
 
   return createPortal(
     <div
+      ref={panelRef}
       role="dialog"
       aria-label="终端"
-      className="fixed z-40 flex flex-col overflow-hidden rounded-xl border border-slate-700 bg-[#1a1b26] shadow-2xl"
-      style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}
+      aria-hidden={!open}
+      className={`fixed inset-x-0 top-0 z-40 flex flex-col overflow-hidden rounded-b-xl border-x border-b border-slate-700 bg-[#1a1b26] shadow-2xl transition-transform duration-300 ease-out ${
+        shown ? "translate-y-0" : "pointer-events-none -translate-y-full"
+      }`}
+      style={{ height }}
     >
-      {/* 标题栏:拖动手柄 */}
-      <div
-        onPointerDown={start("move")}
-        className="flex cursor-move items-center justify-between border-b border-slate-700/70 bg-[#16161e] px-3 py-1.5 text-xs text-slate-300 select-none"
-      >
+      <div className="flex select-none items-center justify-between border-b border-slate-700/70 bg-[#16161e] px-3 py-1.5 text-xs text-slate-300">
         <span className="font-medium">终端 · 工作区</span>
         <button
           type="button"
-          aria-label="关闭终端"
+          aria-label="收起终端"
+          title="收起(Esc)——进程继续运行"
           onClick={toggleTerminal}
           className="rounded p-0.5 text-slate-400 hover:bg-slate-700 hover:text-slate-100"
         >
-          <X size={14} />
+          <ChevronUp size={14} />
         </button>
       </div>
       {/* xterm 容器 */}
@@ -122,15 +121,14 @@ export function TerminalWindow() {
           )}
         </div>
       )}
-      {/* 右下角 resize 手柄 */}
+      {/* 底边拖拽条:调面板高度 */}
       <div
-        onPointerDown={start("resize")}
-        aria-label="调整终端大小"
-        className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize"
-        style={{
-          background:
-            "linear-gradient(135deg, transparent 50%, rgb(71 85 105) 50%, rgb(71 85 105) 60%, transparent 60%, transparent 70%, rgb(71 85 105) 70%, rgb(71 85 105) 80%, transparent 80%)",
+        onPointerDown={(e) => {
+          e.preventDefault()
+          drag.current = { py: e.clientY, h: height }
         }}
+        aria-label="调整终端高度"
+        className="h-1.5 shrink-0 cursor-ns-resize bg-[#16161e] transition-colors hover:bg-slate-600"
       />
     </div>,
     document.body,

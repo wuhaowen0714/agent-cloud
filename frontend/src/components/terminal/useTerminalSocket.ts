@@ -1,6 +1,6 @@
 import { FitAddon } from "@xterm/addon-fit"
 import { Terminal } from "@xterm/xterm"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { getAccess } from "../../api/auth"
 
 export type TermStatus = "connecting" | "open" | "closed" | "evicted"
@@ -47,38 +47,43 @@ export function useTerminalSocket(containerRef: React.RefObject<HTMLDivElement |
     fitRef.current = fit
 
     setStatus("connecting")
-    const ws = new WebSocket(wsURL(), ["bearer", getAccess() ?? ""])
-    ws.binaryType = "arraybuffer"
-    wsRef.current = ws
-
+    // WS 建立延迟到下一 tick:React StrictMode(dev)双跑 effect 会 setup→cleanup→setup,
+    // 同步建 WS 会先后开两个连接,后端单终端接管让它们互踢(活的那个反被踢成 evicted)。
+    // 延迟后,第一次的 cleanup 会 clearTimeout 取消其建立,最终只建一个连接,无竞态。
+    let ws: WebSocket | null = null
     const sendResize = () => {
-      if (ws.readyState === WebSocket.OPEN) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ rows: term.rows, cols: term.cols }))
       }
     }
-    ws.onopen = () => {
-      setStatus("open")
-      fit.fit()
-      sendResize()
-      term.focus()
-    }
-    ws.onmessage = (e) => {
-      if (e.data instanceof ArrayBuffer) term.write(new Uint8Array(e.data))
-    }
-    ws.onclose = (e) => {
-      if (closingRef.current) return // 自己主动关(cleanup/reconnect)→ 静默
-      // 4001 = 被另一处终端接管(后端单终端策略);其余为真断开。接管不提供重连(重连会
-      // 再次被踢),只提示。
-      setStatus(e.code === 4001 ? "evicted" : "closed")
-    }
-    ws.onerror = () => {
-      if (!closingRef.current) setStatus("closed")
-    }
+    const wsTimer = setTimeout(() => {
+      ws = new WebSocket(wsURL(), ["bearer", getAccess() ?? ""])
+      ws.binaryType = "arraybuffer"
+      wsRef.current = ws
+      ws.onopen = () => {
+        setStatus("open")
+        fit.fit()
+        sendResize()
+        term.focus()
+      }
+      ws.onmessage = (e) => {
+        if (e.data instanceof ArrayBuffer) term.write(new Uint8Array(e.data))
+      }
+      ws.onclose = (e) => {
+        if (closingRef.current) return // 自己主动关(cleanup/reconnect)→ 静默
+        // 4001 = 被另一处终端接管(后端单终端策略);其余为真断开。接管不提供重连(重连会
+        // 再次被踢),只提示。
+        setStatus(e.code === 4001 ? "evicted" : "closed")
+      }
+      ws.onerror = () => {
+        if (!closingRef.current) setStatus("closed")
+      }
+    }, 0)
 
     const dataDisp = term.onData((d) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(d))
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(d))
     })
-    // 容器尺寸变化(悬浮窗 resize/拖动)→ 重算 fit 并上报 PTY
+    // 容器尺寸变化(面板高度拖拽 / 视口变化)→ 重算 fit 并上报 PTY
     const ro = new ResizeObserver(() => {
       fit.fit()
       sendResize()
@@ -87,9 +92,10 @@ export function useTerminalSocket(containerRef: React.RefObject<HTMLDivElement |
 
     return () => {
       closingRef.current = true // 标记主动关,onclose 静默
+      clearTimeout(wsTimer)
       ro.disconnect()
       dataDisp.dispose()
-      ws.close()
+      ws?.close()
       term.dispose()
       termRef.current = null
       fitRef.current = null
@@ -97,5 +103,8 @@ export function useTerminalSocket(containerRef: React.RefObject<HTMLDivElement |
     }
   }, [containerRef, attempt])
 
-  return { status, reconnect: () => setAttempt((n) => n + 1) }
+  // 稳定引用(进消费方 effect deps):下拉面板展开时重新聚焦 xterm(收起不销毁,焦点已移走)
+  const focus = useCallback(() => termRef.current?.focus(), [])
+  const reconnect = useCallback(() => setAttempt((n) => n + 1), [])
+  return { status, reconnect, focus }
 }

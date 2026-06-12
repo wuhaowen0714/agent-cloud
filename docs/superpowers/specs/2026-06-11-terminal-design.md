@@ -11,7 +11,8 @@
 ## 已定决策
 
 - **方案**:完整交互式(xterm.js + WebSocket + PTY),非简化命令框。
-- **形态**:Ghostty 风**悬浮窗**——深色、圆角+阴影,浮在浅色 app 之上;标题栏可拖动移位,右下角可拖拽 resize;位置/尺寸存 localStorage。TopBar「终端」chip(Terminal 图标,与文件平行)开关,Esc / 关闭按钮收起。
+- **形态**:Ghostty quick-terminal 风**顶部下拉面板**——全视口宽,从屏幕顶部滑下(translateY 动画),深色、底部圆角+阴影,盖在侧栏与内容之上;底边可拖拽调高度(存 localStorage)。TopBar「终端」chip(Terminal 图标,与文件平行)开关,Esc / 收起按钮向上滑走。
+  - **收起 ≠ 断开**:面板由 App 在首次打开后**常驻挂载**,chip/Esc 只驱动滑入/滑出动画;收起时 WS/PTY/xterm 缓冲全保留,再展开时跑着的进程与屏幕内容原样还在(刷新页面仍是新 shell:临时 PTY,历史/cwd 经软状态恢复)。
 - **PTY 持久性**:临时——WS 断开/刷新即销毁 PTY 进程,重连是全新 shell。
 - **状态保留**:工作区文件 + `pip --user`/`npm -g` 装的环境(本就在持久卷);**shell 历史**(HISTFILE 指向 `/workspace/.home/.bash_history`)+ **上次 cwd**(退出写 `.last_pwd`,启动 `cd` 回去)。不恢复正在跑的前台进程。
 - **保活(第二档)**:WS 收到**用户输入(input 帧)**时节流续租沙箱 `last_used_at`;30 分钟无输入 → reaper 照常回收沙箱(纯看 `top` 不敲键盘超时会被回收,已接受,重连即恢复)。

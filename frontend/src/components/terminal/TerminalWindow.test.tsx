@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useStore } from "../../store"
 
@@ -67,27 +67,43 @@ afterEach(() => {
   useStore.setState({ terminalOpen: false })
 })
 
-describe("TerminalWindow", () => {
-  it("渲染悬浮终端窗口(标题 + 关闭按钮)", () => {
+// aria-hidden 元素算不出 accessible name,改按 role 属性直接取(避开 name 匹配)
+const panel = () => document.querySelector('[role="dialog"]') as HTMLElement
+
+describe("TerminalWindow(Ghostty 下拉面板)", () => {
+  it("渲染下拉面板:标题 + 收起按钮 + 高度拖拽条", () => {
     render(<TerminalWindow />)
-    expect(screen.getByRole("dialog", { name: "终端" })).toBeInTheDocument()
-    expect(screen.getByLabelText("关闭终端")).toBeInTheDocument()
+    expect(panel()).toBeInTheDocument()
+    expect(screen.getByLabelText("收起终端")).toBeInTheDocument()
+    expect(screen.getByLabelText("调整终端高度")).toBeInTheDocument()
   })
 
-  it("点关闭按钮 toggle terminalOpen", () => {
+  it("展开态滑入(translate-y-0)", async () => {
     render(<TerminalWindow />)
-    fireEvent.click(screen.getByLabelText("关闭终端"))
+    await waitFor(() => expect(panel().className).toContain("translate-y-0"))
+  })
+
+  it("收起 ≠ 卸载:terminalOpen=false 时仍在文档中,仅滑出(-translate-y-full)", async () => {
+    render(<TerminalWindow />)
+    await waitFor(() => expect(panel().className).toContain("translate-y-0"))
+    act(() => useStore.setState({ terminalOpen: false }))
+    await waitFor(() => expect(panel().className).toContain("-translate-y-full"))
+    expect(panel()).toBeInTheDocument() // 常驻挂载,WS/PTY/缓冲保留
+    expect(panel().getAttribute("aria-hidden")).toBe("true")
+  })
+
+  it("点收起按钮 toggle terminalOpen", () => {
+    render(<TerminalWindow />)
+    fireEvent.click(screen.getByLabelText("收起终端"))
     expect(useStore.getState().terminalOpen).toBe(false)
   })
 
-  it("Esc 关闭", () => {
+  it("Esc 收起;收起后再按 Esc 不会把面板弹回来", async () => {
     render(<TerminalWindow />)
     fireEvent.keyDown(document, { key: "Escape" })
     expect(useStore.getState().terminalOpen).toBe(false)
-  })
-
-  it("有 resize 手柄", () => {
-    render(<TerminalWindow />)
-    expect(screen.getByLabelText("调整终端大小")).toBeInTheDocument()
+    await waitFor(() => expect(panel().className).toContain("-translate-y-full"))
+    fireEvent.keyDown(document, { key: "Escape" }) // 仅展开时监听,不应重新展开
+    expect(useStore.getState().terminalOpen).toBe(false)
   })
 })
