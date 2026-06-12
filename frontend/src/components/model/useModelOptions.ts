@@ -4,7 +4,7 @@ import { mergeModelOptions, type ModelOption } from "../../models"
 import { useStore } from "../../store"
 
 // 模型选单的选项源:预设 ∪ 各 agent 在用 ∪ 用户自定义(后端持久化)。
-// agents/userModels 都走订阅式 useQuery(与 AgentList 等共享缓存),变更即重渲染。
+// agents/userModels 都走订阅式 useQuery(与 AgentRail 等共享缓存),变更即重渲染。
 export function useModelOptions(): {
   options: ModelOption[]
   addModel: (model: string) => Promise<string>

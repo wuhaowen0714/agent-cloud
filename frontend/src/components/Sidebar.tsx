@@ -1,12 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Plus } from "lucide-react"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { api } from "../api/client"
 import { useStore } from "../store"
-import { AccountMenu } from "./AccountMenu"
-import { AgentList } from "./AgentList"
+import { AgentHeader } from "./AgentHeader"
+import { AgentRail } from "./AgentRail"
 import { SessionList } from "./SessionList"
 
+/** 侧栏 = 左 46px AgentRail(只管切 agent)+ 右面板(当前 agent 的头部/新对话/会话列表)。
+ * Sidebar 自身是组合器 + 两件协调事:rail 新建后让面板头部进改名态;自动落位。 */
 export function Sidebar() {
   const userId = useStore((s) => s.userId)
   const agentId = useStore((s) => s.agentId)
@@ -14,6 +16,8 @@ export function Sidebar() {
   const setAgent = useStore((s) => s.setAgent)
   const setSession = useStore((s) => s.setSession)
   const qc = useQueryClient()
+  // rail 新建 agent → 面板头部自动进入改名态(跨组件协调放在共同父级)
+  const [autoRenameId, setAutoRenameId] = useState<string | null>(null)
 
   const create = useMutation({
     mutationFn: () => api.createSession({ agent_config_id: agentId! }),
@@ -34,7 +38,8 @@ export function Sidebar() {
     queryFn: () => api.listSessions(),
     enabled: !!userId,
   })
-  // 自动落位:无选中 agent → 选第一个;选中后无会话 → 选该 agent 最近一条。
+
+  // 自动落位:无选中 agent → 选第一个;选中后无会话 → 选该 agent 最近活跃的一条。
   // 新注册用户(注册播种 main+会话)登录即可直接打字;删除当前选中后的兜底也走这里。
   // 自愈:localStorage 残留的 agentId 指向已删 agent(他端删除/换号残留)→ 落回第一个,
   // 否则会停在「无高亮、列表空、新对话 404」的幽灵选中态。仅在 agents 加载成功后判定。
@@ -45,39 +50,38 @@ export function Sidebar() {
   }, [agentId, agents, agentsQ.isSuccess, setAgent])
   useEffect(() => {
     if (!agentId || sessionId) return
-    const mine = sessions.filter((s) => s.agent_config_id === agentId)
-    if (mine.length) setSession(mine[mine.length - 1].id)
+    const mine = sessions
+      .filter((s) => s.agent_config_id === agentId)
+      .sort((a, b) => +new Date(b.last_active_at) - +new Date(a.last_active_at))
+    if (mine.length) setSession(mine[0].id)
   }, [agentId, sessionId, sessions, setSession])
 
   return (
-    <aside className="flex w-72 flex-col gap-3 border-r border-slate-200 bg-white/80 p-3 backdrop-blur-sm">
-      {/* 品牌头 */}
-      <div className="flex items-center gap-2.5 px-1 pt-1">
-        <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 text-sm font-bold text-white shadow-sm">
-          A
-        </span>
-        <span className="text-[15px] font-semibold tracking-tight text-slate-800">Agent Cloud</span>
+    <aside className="flex w-80 flex-none border-r border-slate-200">
+      <AgentRail onCreated={setAutoRenameId} />
+      <div className="flex min-w-0 flex-1 flex-col gap-3 bg-white/80 p-3 backdrop-blur-sm">
+        {agentsQ.isSuccess && agents.length === 0 ? (
+          <div className="flex flex-1 items-center justify-center px-4 text-center text-sm text-slate-400">
+            在左栏 + 新建一个 Agent 开始
+          </div>
+        ) : (
+          <>
+            <AgentHeader
+              autoRenameId={autoRenameId}
+              onAutoRenameConsumed={() => setAutoRenameId(null)}
+            />
+            <button
+              disabled={!agentId || create.isPending}
+              onClick={() => create.mutate()}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-50 px-3 py-2 text-sm font-medium text-brand-700 transition hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Plus size={16} />
+              新对话
+            </button>
+            <SessionList />
+          </>
+        )}
       </div>
-
-      {/* 新对话:幽灵行(无 agent 时禁用)*/}
-      <button
-        disabled={!agentId || create.isPending}
-        title={agentId ? "" : "先选择 / 新建一个 agent"}
-        onClick={() => create.mutate()}
-        className="flex w-full items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-slate-200 disabled:hover:bg-transparent disabled:hover:text-slate-600"
-      >
-        <Plus size={16} className="text-slate-400" />
-        新对话
-      </button>
-
-      {/* agent 列表(直接点选,无下拉)*/}
-      <AgentList />
-
-      {/* 当前 agent 的对话列表(占据剩余高度)*/}
-      <SessionList />
-
-      {/* 贴底账户区 */}
-      <AccountMenu />
     </aside>
   )
 }

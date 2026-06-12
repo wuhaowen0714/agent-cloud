@@ -23,7 +23,16 @@ const S1 = {
   agent_config_id: "a1",
   title: "标题一",
   work_subdir: "workspace",
+  last_active_at: new Date().toISOString(),
   last_context_tokens: null,
+}
+
+// 正午锚点构造"N 个本地日前":离日界 12h,任何运行时刻分组判定都稳定
+const day = (n: number) => {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  d.setHours(12, 0, 0, 0)
+  return d.toISOString()
 }
 
 const wrap = (ui: ReactNode) => (
@@ -43,6 +52,25 @@ afterEach(() => {
 })
 
 describe("SessionList", () => {
+  it("按 last_active_at 降序 + 时间分组标签;区头已删", async () => {
+    vi.spyOn(api, "listSessions").mockResolvedValue([
+      { ...S1, id: "old", title: "旧会话", last_active_at: day(40) },
+      { ...S1, id: "yesterday", title: "昨日会话", last_active_at: day(1) },
+      { ...S1, id: "now", title: "刚刚会话", last_active_at: day(0) },
+    ] as never)
+    render(wrap(<SessionList />))
+    await screen.findByText("刚刚会话")
+    const items = screen.getAllByRole("listitem").map((li) => li.textContent ?? "")
+    const idx = (t: string) => items.findIndex((x) => x.includes(t))
+    expect(idx("今天")).toBeGreaterThanOrEqual(0)
+    expect(idx("今天")).toBeLessThan(idx("刚刚会话"))
+    expect(idx("刚刚会话")).toBeLessThan(idx("昨天"))
+    expect(idx("昨天")).toBeLessThan(idx("昨日会话"))
+    expect(idx("昨日会话")).toBeLessThan(idx("更早"))
+    expect(idx("更早")).toBeLessThan(idx("旧会话"))
+    expect(screen.queryByText(/的对话/)).not.toBeInTheDocument() // 区头已删
+  })
+
   it("重命名:菜单 → input → Enter 调 patchSession", async () => {
     const patch = vi.spyOn(api, "patchSession").mockResolvedValue(S1 as never)
     render(wrap(<SessionList />))

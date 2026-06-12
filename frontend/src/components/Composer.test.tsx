@@ -50,6 +50,7 @@ function setup(opts?: { disabled?: boolean }) {
         agent_config_id: "a1",
         title: "T",
         work_subdir: "workspace",
+        last_active_at: "2026-06-12T12:00:00Z",
         last_context_tokens: 873,
       },
     ],

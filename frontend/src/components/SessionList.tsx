@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { Fragment, useState } from "react"
 import { api } from "../api/client"
 import { useStore } from "../store"
+import { timeGroupLabel } from "../time"
 import { RowMenu } from "./RowMenu"
 
 export function SessionList() {
@@ -17,15 +18,20 @@ export function SessionList() {
     queryFn: () => api.listSessions(),
     enabled: !!userId,
   })
-  const { data: agents = [] } = useQuery({
-    queryKey: ["agents", userId],
-    queryFn: () => api.listAgents(),
-    enabled: !!userId,
-  })
 
-  const current = agents.find((a) => a.id === agentId)
   // 只显示当前 agent 的会话(会话本身带 agent_config_id);未选 agent 则为空。
+  // 按最近活跃降序 + 时间分组(归属由 rail/面板头部表达,区头已删)。
   const mine = agentId ? sessions.filter((s) => s.agent_config_id === agentId) : []
+  const sorted = [...mine].sort(
+    (a, b) => +new Date(b.last_active_at) - +new Date(a.last_active_at),
+  )
+  const groups: { label: string; items: typeof sorted }[] = []
+  for (const s of sorted) {
+    const glabel = timeGroupLabel(s.last_active_at)
+    const last = groups[groups.length - 1]
+    if (last?.label === glabel) last.items.push(s)
+    else groups.push({ label: glabel, items: [s] })
+  }
   const label = (s: (typeof mine)[number]) => s.title ?? `会话 ${s.id.slice(0, 6)}`
   const invalidate = () => qc.invalidateQueries({ queryKey: ["sessions", userId] })
 
@@ -49,17 +55,13 @@ export function SessionList() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="mb-1 truncate px-1 text-xs font-medium tracking-wide text-slate-400">
-        {current ? (
-          <>
-            <span className="text-slate-600">{current.name}</span> 的对话
-          </>
-        ) : (
-          "对话"
-        )}
-      </div>
       <ul className="min-h-0 flex-1 space-y-0.5 overflow-auto">
-        {mine.map((s) => (
+        {groups.map((g) => (
+          <Fragment key={g.label}>
+            <li className="px-1 pb-1 pt-3 text-[11px] font-medium tracking-wide text-slate-400 first:pt-0.5">
+              {g.label}
+            </li>
+            {g.items.map((s) => (
           <li
             key={s.id}
             className={`group flex items-center gap-1 rounded-lg pr-1 transition ${
@@ -108,6 +110,8 @@ export function SessionList() {
               </>
             )}
           </li>
+            ))}
+          </Fragment>
         ))}
         {agentId && mine.length === 0 && (
           <li className="px-2 py-6 text-center text-xs text-slate-400">还没有对话</li>

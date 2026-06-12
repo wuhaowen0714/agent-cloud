@@ -42,7 +42,7 @@ describe("AgentSettings", () => {
   beforeEach(() => useStore.setState({ userId: "u1", agentId: null }))
   afterEach(() => vi.restoreAllMocks())
 
-  // 创建职责已移到侧栏 AgentList(一键直创,见 AgentList.test);设置页只编辑。
+  // 创建职责已移到侧栏 AgentRail(一键直创,见 AgentRail.test);设置页只编辑。
   it("无选中 agent 时显示空态提示", () => {
     render(wrap(<AgentSettings />))
     expect(screen.getByText("在左侧选择或新建一个 agent")).toBeInTheDocument()

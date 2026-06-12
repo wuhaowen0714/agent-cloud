@@ -18,7 +18,7 @@ export function AgentSettings() {
   const userId = useStore((s) => s.userId)!
   const agentId = useStore((s) => s.agentId)
 
-  // 创建职责在侧栏 AgentList(一键直创);设置页只编辑已选中的 agent。
+  // 创建职责在侧栏 AgentRail(一键直创);设置页只编辑已选中的 agent。
   if (!agentId) {
     return (
       <div className="px-1 py-10 text-center text-sm text-slate-400">

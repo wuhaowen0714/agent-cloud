@@ -14,3 +14,16 @@ export function fmtTime(iso: string, now: Date = new Date()): string {
   if (d.getFullYear() === now.getFullYear()) return `${md} ${hm}`
   return `${d.getFullYear()}-${md} ${hm}`
 }
+
+// 会话列表时间分组:按本地日历日距今天数分档。未来(时钟偏差)归今天;坏值归更早。
+export function timeGroupLabel(iso: string, now: Date = new Date()): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return "更早"
+  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  const days = Math.round((startOf(now) - startOf(d)) / 86_400_000)
+  if (days <= 0) return "今天"
+  if (days === 1) return "昨天"
+  if (days <= 7) return "前 7 天"
+  if (days <= 30) return "前 30 天"
+  return "更早"
+}

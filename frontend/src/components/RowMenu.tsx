@@ -37,7 +37,7 @@ export function RowMenu({
 
   const openMenu = () => {
     // 浮层 portal 到 body + fixed 定位:列表容器 overflow-auto 会裁剪 absolute 浮层;
-    // 而留在侧栏内的 fixed 又会被 aside 的 backdrop-blur 变成「相对侧栏」解析坐标
+    // 而留在侧栏面板内的 fixed 又会被面板的 backdrop-blur 变成「相对面板」解析坐标
     // (backdrop-filter 与 transform 同款地成为 fixed 后代的包含块)→ 飞出屏幕外。
     // 打开瞬间按触发钮定位;开着滚动属边缘情况,点外面即收起。
     const r = triggerRef.current?.getBoundingClientRect()
@@ -96,7 +96,7 @@ export function RowMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => (open ? close() : openMenu())}
-        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-white hover:text-slate-700 ${
+        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-white hover:text-slate-700 focus-visible:opacity-100 ${
           visible || open ? "opacity-100" : "opacity-0 group-hover:opacity-100"
         }`}
       >

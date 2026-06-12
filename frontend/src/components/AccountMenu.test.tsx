@@ -14,10 +14,11 @@ describe("AccountMenu", () => {
     useStore.setState({ user: { id: "u1", email: "alice@example.com" }, userId: "u1" })
   })
 
-  it("shows the email and opens the menu", () => {
+  it("触发器是圆头像(不直接显示邮箱);菜单内含邮箱行 / Provider Keys / 登出", () => {
     render(<AccountMenu />)
+    expect(screen.queryByText("alice@example.com")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "账户" }))
     expect(screen.getByText("alice@example.com")).toBeInTheDocument()
-    fireEvent.click(screen.getByText("alice@example.com"))
     expect(screen.getByText("登出")).toBeInTheDocument()
     expect(screen.getByText("Provider Keys")).toBeInTheDocument()
     // 工作区文件入口已迁往主区顶栏(TopBar),菜单里不应再有
@@ -26,7 +27,7 @@ describe("AccountMenu", () => {
 
   it("logs out: calls api.logout then clears the store user", async () => {
     render(<AccountMenu />)
-    fireEvent.click(screen.getByText("alice@example.com")) // open menu
+    fireEvent.click(screen.getByRole("button", { name: "账户" })) // open menu
     fireEvent.click(screen.getByText("登出"))
     await waitFor(() => expect(api.logout).toHaveBeenCalled())
     await waitFor(() => expect(useStore.getState().user).toBeNull())
