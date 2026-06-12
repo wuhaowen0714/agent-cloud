@@ -8,8 +8,12 @@ FROM python:3.13-slim
 # deb.debian.org 会卡死。trixie 用 deb822 的 debian.sources(URIs: deb.debian.org → 阿里云)。
 RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources \
     && apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl wget git jq \
+        ca-certificates curl wget git jq vim \
     && rm -rf /var/lib/apt/lists/*
+
+# 预设系统级 vim 配置:debian vim 的 /etc/vim/vimrc 会自动 source vimrc.local。
+# 用户级 ~/.vimrc 在 /workspace(运行时 bind mount)里,镜像构建时写不进,故走系统级。
+COPY deploy/sandbox-vimrc /etc/vim/vimrc.local
 
 # git 开箱可用:/workspace 是宿主 bind mount,容器内 root 与宿主属主 uid 不一致会触发
 # "dubious ownership" 拒绝操作 → safe.directory '*' 放行(沙箱单用户隔离环境)。

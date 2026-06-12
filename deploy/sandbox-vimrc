@@ -1,0 +1,45 @@
+" Agent 沙箱终端的实用默认 vim 配置(系统级,无需联网插件)。
+" debian vim 的 /etc/vim/vimrc 会自动 source 本文件(/etc/vim/vimrc.local)。
+" 取舍:不设 mouse(保留终端原生选择/复制),不设 termguicolors(256 色已够、避免
+" 个别终端颜色异常);swap/backup 全关,避免在用户工作区留 .swp/~ 污染文件抽屉。
+
+runtime! defaults.vim          " 先引入 vim 自带的合理默认,再按需覆盖
+set nocompatible
+syntax on
+filetype plugin indent on
+
+" 显示
+set number                     " 行号
+set ruler                      " 右下角光标位置
+set showcmd                    " 显示未完成命令
+set wildmenu                   " 命令补全菜单
+set scrolloff=3                " 光标上下保留 3 行
+set laststatus=2               " 总显示状态栏
+
+" 缩进:默认 4 空格;Makefile/Go 必须真 tab
+set expandtab
+set tabstop=4
+set shiftwidth=4
+set softtabstop=4
+set autoindent
+set smartindent
+autocmd FileType make,go setlocal noexpandtab
+
+" 搜索
+set incsearch                  " 增量搜索
+set hlsearch                   " 高亮匹配
+set ignorecase                 " 默认忽略大小写
+set smartcase                  " 含大写时区分
+
+" 编辑体验
+set backspace=indent,eol,start " 退格正常工作
+set encoding=utf-8
+set fileencodings=utf-8,gbk,latin1
+set background=dark
+set history=1000
+set hidden                     " 允许切换未保存 buffer
+
+" 沙箱临时环境:不产生 swap/backup,避免污染工作区
+set noswapfile
+set nobackup
+set nowritebackup
