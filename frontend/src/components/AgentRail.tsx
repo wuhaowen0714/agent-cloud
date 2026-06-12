@@ -83,12 +83,28 @@ export function AgentRail({ onCreated }: { onCreated: (id: string) => void }) {
 
   return (
     <div className="flex w-[46px] flex-none flex-col items-center gap-2 border-r border-slate-200/70 bg-slate-50 py-3">
+      {/* 品牌位:logo 标记(云 + AI spark),而非字母——缩小后才不与下方 agent 字母头像混淆。
+          hover tooltip 仍补「Agent Cloud」。viewBox 内自带留白,撑满方块即与设计稿同比例。 */}
       <span
         onMouseEnter={showTip("Agent Cloud")}
         onMouseLeave={() => setTip(null)}
-        className="flex h-[30px] w-[30px] items-center justify-center rounded-[9px] bg-gradient-to-br from-brand-400 to-brand-600 text-[13px] font-bold text-white shadow-sm"
+        className="flex h-[30px] w-[30px] items-center justify-center rounded-[9px] bg-gradient-to-br from-brand-400 to-brand-600 shadow-sm"
       >
-        A
+        <svg
+          viewBox="0 0 32 32"
+          role="img"
+          aria-label="Agent Cloud"
+          className="h-full w-full text-white"
+          fill="currentColor"
+        >
+          <g>
+            <circle cx="9" cy="21.5" r="4.2" />
+            <circle cx="14.5" cy="17.5" r="5.2" />
+            <circle cx="20" cy="21.5" r="4.2" />
+            <rect x="5.5" y="21" width="15" height="4" rx="1" />
+          </g>
+          <path d="M24 5 C24.4 8.2 24.8 8.6 28 9 C24.8 9.4 24.4 9.8 24 13 C23.6 9.8 23.2 9.4 20 9 C23.2 8.6 23.6 8.2 24 5 Z" />
+        </svg>
       </span>
       <span className="w-[22px] border-t border-slate-200" />
       {/* w-full(46px):flex 子项默认收缩到内容宽 30px,而本列 overflow-y-auto 会把 overflow-x
