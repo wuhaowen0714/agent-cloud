@@ -67,6 +67,11 @@ describe("AgentRail", () => {
     expect(useStore.getState().sessionId).toBe("keep") // setAgent 未被调(它会清 sessionId)
   })
 
+  it("品牌位是 logo 标记(图形,非字母),带 Agent Cloud 无障碍名", async () => {
+    render(wrap(<AgentRail onCreated={() => {}} />))
+    expect(screen.getByRole("img", { name: "Agent Cloud" })).toBeInTheDocument()
+  })
+
   it("hover 头像弹「名字 · 模型」tooltip(portal 到 body),移出消失", async () => {
     render(wrap(<AgentRail onCreated={() => {}} />))
     fireEvent.mouseEnter(await screen.findByRole("button", { name: "main" }))
