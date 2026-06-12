@@ -88,7 +88,9 @@ export function TerminalWindow() {
       aria-label="终端"
       aria-hidden={!open}
       className={`fixed inset-x-0 top-0 z-40 flex flex-col overflow-hidden rounded-b-xl border-x border-b border-slate-700 bg-[#1a1b26] shadow-2xl transition-transform duration-300 ease-out ${
-        shown ? "translate-y-0" : "pointer-events-none -translate-y-full"
+        // 收起多移 4rem:-translate-y-full 只把底边移到 y=0,shadow-2xl 向下扩散(~50px)会
+        // 漏在 TopBar 上(中间空白处的灰影);多移把阴影也带出视口顶部。
+        shown ? "translate-y-0" : "pointer-events-none -translate-y-[calc(100%+4rem)]"
       }`}
       style={{ height }}
     >

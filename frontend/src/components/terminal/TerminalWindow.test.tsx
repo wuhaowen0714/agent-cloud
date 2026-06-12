@@ -83,11 +83,13 @@ describe("TerminalWindow(Ghostty 下拉面板)", () => {
     await waitFor(() => expect(panel().className).toContain("translate-y-0"))
   })
 
-  it("收起 ≠ 卸载:terminalOpen=false 时仍在文档中,仅滑出(-translate-y-full)", async () => {
+  it("收起 ≠ 卸载:terminalOpen=false 时仍在文档中,仅滑出(去掉展开态 translate-y-0)", async () => {
     render(<TerminalWindow />)
     await waitFor(() => expect(panel().className).toContain("translate-y-0"))
     act(() => useStore.setState({ terminalOpen: false }))
-    await waitFor(() => expect(panel().className).toContain("-translate-y-full"))
+    // 收起:不再有展开态 translate-y-0,且有 pointer-events-none(具体位移类含 calc,不硬断言)
+    await waitFor(() => expect(panel().className).not.toContain("translate-y-0"))
+    expect(panel().className).toContain("pointer-events-none")
     expect(panel()).toBeInTheDocument() // 常驻挂载,WS/PTY/缓冲保留
     expect(panel().getAttribute("aria-hidden")).toBe("true")
   })
@@ -102,7 +104,7 @@ describe("TerminalWindow(Ghostty 下拉面板)", () => {
     render(<TerminalWindow />)
     fireEvent.keyDown(document, { key: "Escape" })
     expect(useStore.getState().terminalOpen).toBe(false)
-    await waitFor(() => expect(panel().className).toContain("-translate-y-full"))
+    await waitFor(() => expect(panel().className).not.toContain("translate-y-0"))
     fireEvent.keyDown(document, { key: "Escape" }) // 仅展开时监听,不应重新展开
     expect(useStore.getState().terminalOpen).toBe(false)
   })
