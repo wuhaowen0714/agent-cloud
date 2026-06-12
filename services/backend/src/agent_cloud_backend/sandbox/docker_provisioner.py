@@ -60,6 +60,37 @@ class DockerProvisioner:
             self._client = docker.from_env()
         return self._client
 
+    async def alive(self, endpoint: str) -> bool:
+        """探活(供 SandboxManager.health_check 注入)。
+
+        network 模式:沙箱在专属网 acsbx-net-<id>,backend【不在】该网,从 backend 做 gRPC
+        探活恒 timeout → 误判每个沙箱已死 → 每次 get_endpoint 都 mark_dead+重建,且每次撞
+        新沙箱冷启动(worker 连未就绪的 server → refused)。改查 docker 容器是否 Running
+        (backend 能访问 docker daemon),正确反映沙箱存活,沙箱真崩(容器 stopped/gone)
+        才返回 False 触发重建。
+        publish 模式(dev):沙箱端口发布到宿主 127.0.0.1,backend 经 localhost 可达,
+        用 gRPC 连通性探(端点 = 127.0.0.1:<port>,无容器名可查)。
+        """
+        if self._network_mode == "network":
+            name = endpoint.rsplit(":", 1)[0]  # acsbx-<id>:50051 → 容器名 acsbx-<id>
+            return await asyncio.to_thread(self._container_running, name)
+        from agent_cloud_backend.sandbox.health import grpc_endpoint_alive
+
+        return await grpc_endpoint_alive(endpoint)
+
+    def _container_running(self, name: str) -> bool:
+        from docker.errors import NotFound
+
+        try:
+            return self._docker().containers.get(name).status == "running"
+        except NotFound:
+            return False  # 容器不存在 = 真死 → 触发重建
+        except Exception:
+            # docker daemon 瞬断等:不误杀健康沙箱(否则 mark_dead 后 stop 也失败 → 容器泄漏)。
+            # fail-open 视为存活,下次探活自然恢复(审查 L1)。
+            logger.exception("container running check errored for %s; assuming alive", name)
+            return True
+
     async def spawn(self, user_id: uuid.UUID) -> tuple[uuid.UUID, str, str]:
         sandbox_id = uuid.uuid4()
         name = f"acsbx-{sandbox_id}"

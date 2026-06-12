@@ -5,7 +5,6 @@ from pathlib import Path
 from agent_cloud_backend.config import Settings, get_settings
 from agent_cloud_backend.db import get_sessionmaker
 from agent_cloud_backend.sandbox.docker_provisioner import DockerProvisioner
-from agent_cloud_backend.sandbox.health import grpc_endpoint_alive
 from agent_cloud_backend.sandbox.inprocess import InProcessProvisioner
 from agent_cloud_backend.sandbox.manager import SandboxManager
 from agent_cloud_backend.sandbox.provisioner import SandboxProvisioner
@@ -36,12 +35,18 @@ def get_sandbox_manager() -> SandboxManager:
     global _manager
     if _manager is None:
         settings = get_settings()
+        provisioner = build_provisioner(settings)
         # health_check 注入:端点死亡(backend 重启 / 沙箱崩溃)会被探活发现并重建,
-        # 而非复用陈旧端点导致 UNAVAILABLE。
+        # 而非复用陈旧端点导致 UNAVAILABLE。docker provisioner 用自己的 alive(network 模式
+        # 查容器 Running——backend 不在沙箱专属网,gRPC 探恒 timeout 会误判每个沙箱已死、
+        # 疯狂重建);inprocess 恒活,无需注入(None)。
+        # hasattr 而非 isinstance:provisioner 被 wrapper/proxy 包一层也不会静默退化为 None
+        # (那会让沙箱真死后端点永久复用,审查 L2)。
+        health_check = getattr(provisioner, "alive", None)
         _manager = SandboxManager(
-            provisioner=build_provisioner(settings),
+            provisioner=provisioner,
             sessionmaker=get_sessionmaker(),
             idle_ttl_seconds=settings.sandbox_idle_ttl_seconds,
-            health_check=grpc_endpoint_alive,
+            health_check=health_check,
         )
     return _manager
