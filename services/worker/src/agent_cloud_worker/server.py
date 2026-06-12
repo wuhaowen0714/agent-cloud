@@ -71,6 +71,7 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
         self,
         provider_factory: ProviderFactory,
         network_region: str = "",
+        max_iterations: int = 20,
         *,
         web_search_endpoint: str = DEFAULT_SEARCH_ENDPOINT,
         web_search_api_key: str = "",
@@ -78,6 +79,7 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
     ) -> None:
         self._provider_factory = provider_factory
         self._network_region = network_region
+        self._max_iterations = max_iterations
         self._web_search_endpoint = web_search_endpoint
         self._web_search_api_key = web_search_api_key
         self._web_search_max_results = web_search_max_results
@@ -154,6 +156,7 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                     system=system,
                     history=history,
                     user_message=request.user_message,
+                    max_iterations=self._max_iterations,
                 )
             except CompletionBudgetExceeded as exc:
                 # 配置错误(输出预算 ≥ 模型窗口):压缩救不了,绝不能映射成 RESOURCE_EXHAUSTED
@@ -224,6 +227,7 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                     system=system,
                     history=history,
                     user_message=request.user_message,
+                    max_iterations=self._max_iterations,
                 ):
                     yield turn_event_to_proto(event)
             except CompletionBudgetExceeded as exc:
@@ -468,6 +472,7 @@ async def create_server(
     host: str = "localhost",
     port: int = 0,
     network_region: str = "",
+    max_iterations: int = 20,
     web_search_endpoint: str = DEFAULT_SEARCH_ENDPOINT,
     web_search_api_key: str = "",
     web_search_max_results: int = 8,
@@ -482,6 +487,7 @@ async def create_server(
         WorkerServicer(
             provider_factory,
             network_region=network_region,
+            max_iterations=max_iterations,
             web_search_endpoint=web_search_endpoint,
             web_search_api_key=web_search_api_key,
             web_search_max_results=web_search_max_results,

@@ -860,3 +860,35 @@ async def test_run_turn_hides_web_search_tool_when_no_key():
     tool_names = {t.name for t in provider.last_request.tools}
     assert "web_search" not in tool_names
     assert "remember" in tool_names  # 其余 worker 原生工具不受影响
+
+
+async def test_max_iterations_is_configurable_and_enforced(sandbox):
+    # 配 max_iterations=2,provider 两轮都只发工具调用(永不收尾)→ 第 2 轮后达上限停。
+    # 若配置没透传到 loop(仍用默认 10),这两条脚本会被耗尽后报错而非干净地 max_iterations 收尾。
+    sandbox_addr, _ = sandbox
+    provider = FakeProvider(
+        [
+            _call("write_file", {"path": "a.txt", "content": "x"}),
+            _call("write_file", {"path": "b.txt", "content": "y"}),
+        ]
+    )
+    worker_server, wport = await create_worker_server(
+        provider_factory=lambda *a: provider,
+        host="localhost",
+        port=0,
+        max_iterations=2,
+    )
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            resp = await stub.RunTurn(
+                worker_pb2.RunTurnRequest(
+                    agent=worker_pb2.Agent(model="m", provider="fake"),
+                    user_message="go",
+                    sandbox_endpoint=sandbox_addr,
+                    work_subdir="s1",
+                )
+            )
+    finally:
+        await worker_server.stop(None)
+    assert resp.stop_reason == "max_iterations"

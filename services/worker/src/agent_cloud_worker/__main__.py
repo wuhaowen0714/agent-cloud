@@ -19,6 +19,7 @@ async def main() -> None:
         host=settings.grpc_host,
         port=settings.grpc_port,
         network_region=settings.network_region,
+        max_iterations=settings.max_iterations,
         web_search_endpoint=settings.web_search_endpoint,
         web_search_api_key=settings.web_search_api_key,
         web_search_max_results=settings.web_search_max_results,
