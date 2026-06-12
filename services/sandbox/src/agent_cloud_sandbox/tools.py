@@ -203,3 +203,33 @@ def run_tool(
     except Exception as exc:
         # 不向模型泄露宿主绝对路径:把 base 前缀替换掉,只留 workdir 相对路径(spec §6)。
         return (str(exc).replace(str(base), "").replace(str(base_workdir), ""), True)
+
+
+def run_write_binary(
+    base_workdir: Path, work_subdir: str, path: str, content: bytes
+) -> tuple[str, bool]:
+    """把二进制字节落进工作区(worker 原生工具如图片生成专用)。返回 (相对路径 or 错误, is_error)。
+
+    与 run_tool 同款围栏:work_subdir 非空且不逃逸 base;path 不逃逸 work_subdir。直接 write_bytes,
+    落地即原始文件(不像 write_file 走 write_text 会损坏二进制 + 让 /files/raw 的 MIME 探测失效)。
+    """
+    base = Path(base_workdir).resolve()
+    if not work_subdir:
+        return (f"invalid work_subdir: {work_subdir}", True)
+    try:
+        workdir = _resolve_within(base, work_subdir)
+    except ValueError:
+        return (f"invalid work_subdir: {work_subdir}", True)
+    if not path:
+        return ("path is required", True)
+    try:
+        target = _resolve_within(workdir, path)
+    except ValueError:
+        return (f"path escapes working directory: {path}", True)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+    except Exception as exc:
+        # 同 run_tool:不泄露宿主绝对路径。
+        return (str(exc).replace(str(base), "").replace(str(base_workdir), ""), True)
+    return (path, False)

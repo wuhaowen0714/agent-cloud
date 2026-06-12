@@ -1,6 +1,7 @@
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from agent_cloud_worker.image_gen import DEFAULT_IMAGE_ENDPOINT, DEFAULT_IMAGE_MODEL
 from agent_cloud_worker.web_search import DEFAULT_SEARCH_ENDPOINT
 
 
@@ -46,6 +47,13 @@ class WorkerSettings(BaseSettings):
     web_search_api_key: str = ""
     web_search_endpoint: str = DEFAULT_SEARCH_ENDPOINT
     web_search_max_results: int = 8
+
+    # generate_image 工具(worker 原生):文生图,图片落盘到工作区 media/picture/。同 web_search
+    # 用独立于 LLM 的专用 key。留空则回退 web_search_api_key(同一 sophnet 平台 key,见 __main__);
+    # 两者都空 = 不暴露 generate_image。endpoint 是 sophnet 图片生成异步任务端点。
+    image_gen_api_key: str = ""
+    image_gen_endpoint: str = DEFAULT_IMAGE_ENDPOINT
+    image_gen_model: str = DEFAULT_IMAGE_MODEL
 
 
 def get_worker_settings() -> WorkerSettings:

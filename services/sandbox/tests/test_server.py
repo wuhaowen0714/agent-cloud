@@ -4,6 +4,7 @@ import grpc
 import pytest
 import pytest_asyncio
 from agent_cloud.v1 import sandbox_pb2, sandbox_pb2_grpc
+from agent_cloud_common import MAX_GRPC_MESSAGE_BYTES
 from agent_cloud_sandbox.server import create_server
 
 
@@ -121,3 +122,28 @@ async def test_terminal_exit_emits_exit_code(sandbox):
                     exit_code = msg.exit_code
                     break
         assert exit_code == 0
+
+
+async def test_write_binary_accepts_large_image(tmp_path):
+    # 回归 H1:WriteBinary 收图片字节(可能数 MB),sandbox server 必须把接收上限开大,否则
+    # gRPC 默认 4MiB 下大图 RESOURCE_EXHAUSTED 落盘失败。用 5MiB(> 默认 4MiB)穿真 server。
+    server, port = await create_server(base_workdir=tmp_path, host="localhost", port=0)
+    try:
+        big = b"\x89PNG\r\n\x1a\n" + b"\x00" * (5 * 1024 * 1024)  # > 默认 4MiB
+        async with grpc.aio.insecure_channel(
+            f"localhost:{port}",
+            options=[
+                ("grpc.max_send_message_length", MAX_GRPC_MESSAGE_BYTES),
+                ("grpc.max_receive_message_length", MAX_GRPC_MESSAGE_BYTES),
+            ],
+        ) as channel:
+            stub = sandbox_pb2_grpc.SandboxStub(channel)
+            resp = await stub.WriteBinary(
+                sandbox_pb2.WriteBinaryRequest(
+                    path="media/picture/big.png", content=big, work_subdir="."
+                )
+            )
+        assert resp.is_error is False
+        assert (tmp_path / "media" / "picture" / "big.png").read_bytes() == big
+    finally:
+        await server.stop(None)

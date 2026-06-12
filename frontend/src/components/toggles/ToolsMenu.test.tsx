@@ -34,21 +34,18 @@ describe("ToolsMenu", () => {
     const patch = vi.spyOn(api, "patchAgent").mockResolvedValue(agent([]))
     render(wrap(<ToolsMenu agent={agent([])} />))
     fireEvent.click(screen.getByRole("switch", { name: "bash" }))
-    await waitFor(() =>
-      expect(patch).toHaveBeenCalledWith("a1", {
-        enabled_tools: ["write_file", "read_file", "edit", "remember", "web_search"],
-      }),
-    )
+    // 动态算其余工具(按内置顺序),避免每次新增内置工具都要改硬编码列表
+    const rest = BUILTIN_TOOLS.map((t) => t.name).filter((n) => n !== "bash")
+    await waitFor(() => expect(patch).toHaveBeenCalledWith("a1", { enabled_tools: rest }))
   })
 
   it("把最后一个关闭的工具开回:规范化为 [](= 全部)", async () => {
     const patch = vi.spyOn(api, "patchAgent").mockResolvedValue(agent([]))
-    render(
-      wrap(
-        <ToolsMenu agent={agent(["bash", "write_file", "read_file", "edit", "remember"])} />,
-      ),
-    )
-    fireEvent.click(screen.getByRole("switch", { name: "web_search" }))
+    // 启用「除最后一个外的全部」,开回最后一个 → 凑齐全部 → 规范化为 [](动态,免硬编码)
+    const names = BUILTIN_TOOLS.map((t) => t.name)
+    const last = names[names.length - 1]
+    render(wrap(<ToolsMenu agent={agent(names.slice(0, -1))} />))
+    fireEvent.click(screen.getByRole("switch", { name: last }))
     await waitFor(() => expect(patch).toHaveBeenCalledWith("a1", { enabled_tools: [] }))
   })
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { api } from "../api/client"
 import type { ToolProgress } from "../blocks"
 import type { ToolCall, ToolResult } from "../types"
 
@@ -20,6 +21,56 @@ function fmtChars(n: number): string {
   return n < 1000 ? `${n}` : `${(n / 1000).toFixed(1)}k`
 }
 
+// generate_image 成功结果文本里嵌着落盘路径(worker 回填 "Generated image saved to media/picture/..")。
+const IMG_PATH_RE = /(media\/picture\/[^\s"']+\.(?:png|jpe?g|webp|gif))/i
+
+// 把生成的图片在卡片内大图展示。<img> 带不了 Bearer,故用带 token 的 fetch 取回 blob 生成本地
+// object URL(同 FilePreview);卸载时 revoke 释放,避免内存泄漏。
+function GeneratedImage({ path }: { path: string }) {
+  const [url, setUrl] = useState<string | null>(null)
+  const [err, setErr] = useState(false)
+  useEffect(() => {
+    let alive = true
+    let created: string | null = null
+    api
+      .previewUrl(path)
+      .then((u) => {
+        if (!alive) {
+          URL.revokeObjectURL(u)
+          return
+        }
+        created = u
+        setUrl(u)
+      })
+      .catch(() => alive && setErr(true))
+    return () => {
+      alive = false
+      if (created) URL.revokeObjectURL(created)
+    }
+  }, [path])
+
+  if (err) {
+    return (
+      <div className="border-t border-slate-100 px-2.5 py-2 text-slate-400">
+        图片加载失败:{path}
+      </div>
+    )
+  }
+  if (!url) {
+    return (
+      <div className="flex items-center gap-2 border-t border-slate-100 px-2.5 py-2 text-slate-400">
+        <span className="block h-3 w-3 animate-spin rounded-full border-[1.5px] border-slate-200 border-t-brand-500" />
+        加载图片中…
+      </div>
+    )
+  }
+  return (
+    <div className="border-t border-slate-100 bg-slate-50 p-2">
+      <img src={url} alt={path} className="max-h-96 max-w-full rounded-md" />
+    </div>
+  )
+}
+
 export function ToolCallCard({
   call,
   result,
@@ -28,6 +79,11 @@ export function ToolCallCard({
   const [open, setOpen] = useState(false)
   const { summary, details } = describe(call)
   const error = result?.is_error ?? false
+  // generate_image 成功:从结果文本解析落盘路径,卡片内直接渲染图(不随折叠,常显)。
+  const imagePath =
+    call.name === "generate_image" && result && !error
+      ? (result.content.match(IMG_PATH_RE)?.[1] ?? null)
+      : null
   // 失败结果默认展开(错误通常要立刻看);成功保持折叠。仅在 error 由 false→true 时触发一次,
   // 故用户手动收起后不会被反弹。
   useEffect(() => {
@@ -85,6 +141,9 @@ export function ToolCallCard({
           <span className="mt-0.5 shrink-0 text-slate-400">{open ? "▾" : "▸"}</span>
         )}
       </button>
+
+      {/* generate_image:成功时把生成的图片在卡片内直接大图展示(不随折叠,常显) */}
+      {imagePath && <GeneratedImage path={imagePath} />}
 
       {/* 展开:完整写入内容 / 参数 */}
       {open && details && (

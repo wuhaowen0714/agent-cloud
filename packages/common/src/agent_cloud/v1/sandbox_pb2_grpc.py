@@ -40,6 +40,11 @@ class SandboxStub:
                 request_serializer=agent__cloud_dot_v1_dot_sandbox__pb2.ExecToolRequest.SerializeToString,
                 response_deserializer=agent__cloud_dot_v1_dot_sandbox__pb2.ExecToolResponse.FromString,
                 _registered_method=True)
+        self.WriteBinary = channel.unary_unary(
+                '/agent_cloud.v1.Sandbox/WriteBinary',
+                request_serializer=agent__cloud_dot_v1_dot_sandbox__pb2.WriteBinaryRequest.SerializeToString,
+                response_deserializer=agent__cloud_dot_v1_dot_sandbox__pb2.WriteBinaryResponse.FromString,
+                _registered_method=True)
         self.Terminal = channel.stream_stream(
                 '/agent_cloud.v1.Sandbox/Terminal',
                 request_serializer=agent__cloud_dot_v1_dot_sandbox__pb2.TerminalClientMsg.SerializeToString,
@@ -53,6 +58,15 @@ class SandboxServicer:
 
     def ExecTool(self, request, context):
         """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def WriteBinary(self, request, context):
+        """二进制落盘(worker→sandbox):worker 原生工具(如图片生成)把下载的字节写进工作区。
+        走独立 RPC 而非 ExecTool/write_file:bytes 字段不经 JSON/base64,落地即原始文件
+        (write_file 是 write_text,塞二进制会损坏 + 让 /files/raw 的 MIME 探测失效)。
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -72,6 +86,11 @@ def add_SandboxServicer_to_server(servicer, server):
                     servicer.ExecTool,
                     request_deserializer=agent__cloud_dot_v1_dot_sandbox__pb2.ExecToolRequest.FromString,
                     response_serializer=agent__cloud_dot_v1_dot_sandbox__pb2.ExecToolResponse.SerializeToString,
+            ),
+            'WriteBinary': grpc.unary_unary_rpc_method_handler(
+                    servicer.WriteBinary,
+                    request_deserializer=agent__cloud_dot_v1_dot_sandbox__pb2.WriteBinaryRequest.FromString,
+                    response_serializer=agent__cloud_dot_v1_dot_sandbox__pb2.WriteBinaryResponse.SerializeToString,
             ),
             'Terminal': grpc.stream_stream_rpc_method_handler(
                     servicer.Terminal,
@@ -107,6 +126,33 @@ class Sandbox:
             '/agent_cloud.v1.Sandbox/ExecTool',
             agent__cloud_dot_v1_dot_sandbox__pb2.ExecToolRequest.SerializeToString,
             agent__cloud_dot_v1_dot_sandbox__pb2.ExecToolResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def WriteBinary(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/agent_cloud.v1.Sandbox/WriteBinary',
+            agent__cloud_dot_v1_dot_sandbox__pb2.WriteBinaryRequest.SerializeToString,
+            agent__cloud_dot_v1_dot_sandbox__pb2.WriteBinaryResponse.FromString,
             options,
             channel_credentials,
             insecure,

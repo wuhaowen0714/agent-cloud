@@ -837,6 +837,56 @@ async def test_run_turn_exposes_web_search_tool_when_key_configured():
     assert "web_search" in tool_names
 
 
+async def test_run_turn_exposes_generate_image_tool_when_key_configured():
+    # 配了平台图片 key → generate_image 出现在传给模型的 tools 里(串联:create_server → servicer
+    # → _build_executor → executor.specs)。回归 C1:create_server 必须把 image_gen 参数传给
+    # servicer(曾只改签名漏传调用,导致配了 key 仍静默不暴露)。模型直接收尾,无需真网络/沙箱。
+    provider = _CapturingProvider(_final("ok"))
+    worker_server, wport = await create_worker_server(
+        provider_factory=lambda *a: provider, port=0, image_gen_api_key="sk-img"
+    )
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            await stub.RunTurn(
+                worker_pb2.RunTurnRequest(
+                    agent=worker_pb2.Agent(model="m", provider="fake"),
+                    messages=[],
+                    user_message="画一只猫",
+                    sandbox_endpoint="localhost:1",
+                    work_subdir="s1",
+                )
+            )
+    finally:
+        await worker_server.stop(None)
+    tool_names = {t.name for t in provider.last_request.tools}
+    assert "generate_image" in tool_names
+
+
+async def test_run_turn_hides_generate_image_tool_when_no_key():
+    # 没配图片 key → 不暴露 generate_image(未配图片后端优雅降级)。
+    provider = _CapturingProvider(_final("ok"))
+    worker_server, wport = await create_worker_server(
+        provider_factory=lambda *a: provider, port=0
+    )
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            await stub.RunTurn(
+                worker_pb2.RunTurnRequest(
+                    agent=worker_pb2.Agent(model="m", provider="fake"),
+                    messages=[],
+                    user_message="画一只猫",
+                    sandbox_endpoint="localhost:1",
+                    work_subdir="s1",
+                )
+            )
+    finally:
+        await worker_server.stop(None)
+    tool_names = {t.name for t in provider.last_request.tools}
+    assert "generate_image" not in tool_names
+
+
 async def test_run_turn_hides_web_search_tool_when_no_key():
     # 没配搜索 key → 不暴露 web_search(海外/未接搜索后端优雅降级);其余 worker 原生工具仍在。
     provider = _CapturingProvider(_final("ok"))

@@ -20,6 +20,13 @@ from agent_cloud_common import (
 from agent_cloud_common.codec import msg_from_proto, msg_to_proto, turn_event_to_proto
 
 from agent_cloud_worker.context import build_system_prompt
+from agent_cloud_worker.image_gen import (
+    DEFAULT_IMAGE_ENDPOINT,
+    DEFAULT_IMAGE_MODEL,
+    ImageGenExecutor,
+    generate_image_enabled,
+    make_sophnet_image_generator,
+)
 from agent_cloud_worker.loop import run_turn, run_turn_stream
 from agent_cloud_worker.memory_extract import MemoryParseError, reconcile_memory
 from agent_cloud_worker.provider import (
@@ -87,6 +94,9 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
         web_search_endpoint: str = DEFAULT_SEARCH_ENDPOINT,
         web_search_api_key: str = "",
         web_search_max_results: int = 8,
+        image_gen_endpoint: str = DEFAULT_IMAGE_ENDPOINT,
+        image_gen_api_key: str = "",
+        image_gen_model: str = DEFAULT_IMAGE_MODEL,
     ) -> None:
         self._provider_factory = provider_factory
         self._network_region = network_region
@@ -95,28 +105,34 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
         self._web_search_endpoint = web_search_endpoint
         self._web_search_api_key = web_search_api_key
         self._web_search_max_results = web_search_max_results
+        self._image_gen_endpoint = image_gen_endpoint
+        self._image_gen_api_key = image_gen_api_key
+        self._image_gen_model = image_gen_model
 
     def _web_search_available(self) -> bool:
         # 配了搜索 key + 端点才算可用:决定 web_search 是否暴露 + system prompt 搜索段是否指向工具。
         return bool(self._web_search_api_key and self._web_search_endpoint)
 
+    def _image_gen_available(self) -> bool:
+        # 配了图片生成 key + 端点才算可用:决定 generate_image 是否暴露(同 web_search,未配降级)。
+        return bool(self._image_gen_api_key and self._image_gen_endpoint)
+
     def _build_executor(self, channel: grpc.aio.Channel, request: worker_pb2.RunTurnRequest):
         """构造本回合的工具执行器(RunTurn / RunTurnStream 共用)。
 
-        分层:WebSearchExecutor(可选) → RememberingExecutor → SandboxToolExecutor。
-        web_search / remember 是 worker 原生(本地处理、绝不进沙箱);其余委托沙箱执行。
-        web_search 仅在配了平台搜索 key 时暴露(独立于 LLM key,海外/未配自动降级)。
+        分层:ImageGenExecutor(可选) → WebSearchExecutor(可选) → RememberingExecutor →
+        SandboxToolExecutor。generate_image / web_search / remember 是 worker 原生(本地处理、
+        绝不进沙箱);其余委托沙箱执行。generate_image 拿到图片字节后经 sandbox_exec 的 WriteBinary
+        落进工作区。各 worker 原生工具仅在配了对应平台 key 时暴露(独立于 LLM key,未配自动降级)。
         """
         enabled_tools = list(request.agent.enabled_tools)
-        executor = RememberingExecutor(
-            SandboxToolExecutor(
-                channel,
-                request.work_subdir,
-                enabled_tools,
-                token=request.sandbox_token,
-            ),
-            enabled=remember_enabled(enabled_tools),
+        sandbox_exec = SandboxToolExecutor(
+            channel,
+            request.work_subdir,
+            enabled_tools,
+            token=request.sandbox_token,
         )
+        executor = RememberingExecutor(sandbox_exec, enabled=remember_enabled(enabled_tools))
         if self._web_search_available():
             searcher = make_sophnet_searcher(
                 endpoint=self._web_search_endpoint,
@@ -125,6 +141,18 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
             )
             executor = WebSearchExecutor(
                 executor, enabled=web_search_enabled(enabled_tools), search_fn=searcher
+            )
+        if self._image_gen_available():
+            generator = make_sophnet_image_generator(
+                endpoint=self._image_gen_endpoint,
+                api_key=self._image_gen_api_key,
+                model=self._image_gen_model,
+            )
+            executor = ImageGenExecutor(
+                executor,
+                enabled=generate_image_enabled(enabled_tools),
+                generate_fn=generator,
+                write_binary_fn=sandbox_exec.write_binary,
             )
         return executor
 
@@ -495,6 +523,9 @@ async def create_server(
     web_search_endpoint: str = DEFAULT_SEARCH_ENDPOINT,
     web_search_api_key: str = "",
     web_search_max_results: int = 8,
+    image_gen_endpoint: str = DEFAULT_IMAGE_ENDPOINT,
+    image_gen_api_key: str = "",
+    image_gen_model: str = DEFAULT_IMAGE_MODEL,
 ) -> tuple[grpc.aio.Server, int]:
     server = grpc.aio.server(
         options=[
@@ -511,6 +542,9 @@ async def create_server(
             web_search_endpoint=web_search_endpoint,
             web_search_api_key=web_search_api_key,
             web_search_max_results=web_search_max_results,
+            image_gen_endpoint=image_gen_endpoint,
+            image_gen_api_key=image_gen_api_key,
+            image_gen_model=image_gen_model,
         ),
         server,
     )
