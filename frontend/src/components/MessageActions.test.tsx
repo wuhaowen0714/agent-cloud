@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { MessageActions } from "./MessageActions"
 
@@ -6,6 +6,7 @@ afterEach(() => {
   Object.assign(navigator, { clipboard: undefined })
   // @ts-expect-error 清掉测试装上的 execCommand mock
   delete document.execCommand
+  vi.useRealTimers()
   vi.restoreAllMocks()
 })
 
@@ -55,6 +56,31 @@ describe("MessageActions", () => {
     render(<MessageActions text="copy me" />)
     fireEvent.click(screen.getByRole("button", { name: "复制" }))
     expect(await screen.findByText("复制失败")).toBeInTheDocument()
+  })
+
+  it("同结果连点:反馈计时被重置而非沿用旧定时器(审查 I2)", async () => {
+    vi.useFakeTimers()
+    Object.assign(navigator, { clipboard: undefined })
+    document.execCommand = vi.fn(() => false) // 恒失败 → 两次都是「复制失败」(同值 setState)
+    render(<MessageActions text="x" />)
+    const btn = screen.getByRole("button", { name: "复制" })
+    fireEvent.click(btn)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0) // flush copyText promise
+    })
+    expect(screen.getByText("复制失败")).toBeInTheDocument()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500)
+    })
+    fireEvent.click(btn) // t=1.5s 重试
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200) // t=1.7s:首次的 1.6s 定时器已过点
+    })
+    expect(screen.getByText("复制失败")).toBeInTheDocument() // 仍显示 → 计时确被重置
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500) // 第二次的 1.6s 走完
+    })
+    expect(screen.queryByText("复制失败")).not.toBeInTheDocument()
   })
 
   it("回滚/fork 触发对应回调", () => {

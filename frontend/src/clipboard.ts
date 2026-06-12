@@ -13,6 +13,7 @@ export async function copyText(text: string): Promise<boolean> {
       // 安全上下文里也可能被权限策略拒 → 继续试老路
     }
   }
+  const prev = document.activeElement // 记下焦点:select 会夺焦,完事还回去(别打断正在输入的人)
   const ta = document.createElement("textarea")
   ta.value = text
   ta.setAttribute("readonly", "") // 防移动端弹键盘
@@ -21,7 +22,11 @@ export async function copyText(text: string): Promise<boolean> {
   ta.style.top = "0"
   ta.style.left = "-9999px"
   document.body.appendChild(ta)
+  // Firefox 的 select() 不隐式移焦点,而 execCommand("copy") 取的是焦点处选区 → 必须显式 focus;
+  // setSelectionRange 兜 Safari 对 readonly textarea 的 select() 怪癖。
+  ta.focus({ preventScroll: true })
   ta.select()
+  ta.setSelectionRange(0, ta.value.length)
   let ok = false
   try {
     ok = document.execCommand("copy")
@@ -29,6 +34,7 @@ export async function copyText(text: string): Promise<boolean> {
     ok = false
   } finally {
     ta.remove()
+    if (prev instanceof HTMLElement) prev.focus({ preventScroll: true })
   }
   return ok
 }
