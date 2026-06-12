@@ -23,6 +23,7 @@ const S1 = {
   agent_config_id: "a1",
   title: "重构登录页",
   work_subdir: "workspace",
+  last_active_at: "2026-06-12T12:00:00Z",
   last_context_tokens: null,
 }
 

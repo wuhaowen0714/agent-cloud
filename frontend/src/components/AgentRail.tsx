@@ -12,7 +12,7 @@ export function agentInitial(name: string): string {
   const t = name.trim()
   const m = t.match(/^([A-Za-z])[A-Za-z]*\s*(\d+)$/)
   if (m) return `${m[1].toUpperCase()}${m[2]}`
-  const c = t.charAt(0)
+  const c = [...t][0] ?? "" // 按码点取首字:charAt 会把 emoji 等代理对劈成半个,渲染成 tofu
   return c ? c.toUpperCase() : "?"
 }
 
@@ -30,8 +30,9 @@ export function agentColor(name: string): string {
   return PALETTE[h % PALETTE.length]
 }
 
-// rail tooltip:portal 到 body + fixed。不能留在 aside 内——aside 的 backdrop-blur 会把
-// fixed 后代的包含块变成侧栏(同 RowMenu 注释);且头像列 overflow-y-auto 会裁剪 absolute 浮层。
+// rail tooltip:portal 到 body + fixed。头像列是滚动容器(overflow-y-auto),留在列内的
+// absolute 浮层会被裁剪;portal 出去同时免疫任何祖先 filter/transform 形成的包含块陷阱
+// (面板的 backdrop-blur 即此类,见 RowMenu 注释)。
 function RailTip({ text, anchor }: { text: string; anchor: DOMRect }) {
   return createPortal(
     <div
@@ -90,7 +91,10 @@ export function AgentRail({ onCreated }: { onCreated: (id: string) => void }) {
         A
       </span>
       <span className="w-[22px] border-t border-slate-200" />
-      <div className="flex min-h-0 flex-1 flex-col items-center gap-2 overflow-y-auto">
+      {/* w-full(46px):flex 子项默认收缩到内容宽 30px,而本列 overflow-y-auto 会把 overflow-x
+          一并算成 auto → ring(box-shadow)在 30px 边界被裁,选中环左右弧消失(审查 I-1)。
+          py-1 给首尾头像的环留垂直余量;滚动条按 spec 隐藏。 */}
+      <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-2 overflow-y-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {agents.map((a) => {
           const active = a.id === agentId
           return (

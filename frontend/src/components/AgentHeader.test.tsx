@@ -78,4 +78,12 @@ describe("AgentHeader", () => {
     expect(await screen.findByDisplayValue("main")).toBeInTheDocument()
     expect(consumed).toHaveBeenCalled()
   })
+
+  it("autoRenameId 指向别的 agent → 不进入改名态、不消费(审查 M-5b)", async () => {
+    const consumed = vi.fn()
+    render(wrap(<AgentHeader autoRenameId="a2" onAutoRenameConsumed={consumed} />))
+    expect(await screen.findByText("main")).toBeInTheDocument() // 正常名字展示,非 input
+    expect(screen.queryByDisplayValue("main")).not.toBeInTheDocument()
+    expect(consumed).not.toHaveBeenCalled()
+  })
 })

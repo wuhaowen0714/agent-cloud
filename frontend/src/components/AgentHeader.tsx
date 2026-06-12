@@ -86,7 +86,7 @@ export function AgentHeader({
             {agent.name}
           </span>
           <button
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-400 opacity-0 transition hover:bg-slate-100 hover:text-slate-700 group-hover:opacity-100"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-400 opacity-0 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:opacity-100 group-hover:opacity-100"
             title="agent 设置"
             aria-label="agent 设置"
             onClick={() => openSettings()}

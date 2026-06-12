@@ -5,8 +5,9 @@ import { api } from "../api/client"
 import { useStore } from "../store"
 
 /** rail 底部账户位:圆头像触发器;菜单 portal 到 body、贴触发器右上展开
- * (邮箱行 / Provider Keys / 登出)。portal + fixed 同 RowMenu 理由:aside 的
- * backdrop-blur 会把 fixed 后代的包含块变成侧栏,留在 aside 内会错位。 */
+ * (邮箱行 / Provider Keys / 登出)。portal + fixed:46px 的 rail 装不下 w-52 浮层,
+ * 且 portal 免疫任何祖先 filter/transform 形成的包含块陷阱(面板的 backdrop-blur
+ * 即此类,见 RowMenu 注释)。 */
 export function AccountMenu() {
   const user = useStore((s) => s.user)
   const logout = useStore((s) => s.logout)

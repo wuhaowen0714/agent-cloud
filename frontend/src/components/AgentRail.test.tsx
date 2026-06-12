@@ -45,6 +45,7 @@ describe("agentInitial / agentColor", () => {
     expect(agentInitial("agent12")).toBe("A12")
     expect(agentInitial("hello")).toBe("H")
     expect(agentInitial("主力")).toBe("主")
+    expect(agentInitial("🤖 bot")).toBe("🤖") // 代理对按码点取,不能劈成半个(审查 M-1)
     expect(agentInitial("  ")).toBe("?")
   })
   it("配色稳定且来自色板", () => {
