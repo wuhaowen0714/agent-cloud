@@ -1,5 +1,7 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from agent_cloud_worker.web_search import DEFAULT_SEARCH_ENDPOINT
+
 
 class WorkerSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AGENT_CLOUD_WORKER_", env_file=".env")
@@ -26,6 +28,13 @@ class WorkerSettings(BaseSettings):
     # 避开 google/wikipedia/百度验证码等,失败即换);留空或其它值=不注入(海外/无限制部署)。
     # 默认 cn:生产部署在阿里云境内。
     network_region: str = "cn"
+
+    # web_search 工具(worker 原生):**独立于 LLM key** 的专用搜索凭据。配了 api_key 才把工具
+    # 暴露给模型(空 = 不暴露,海外/未接搜索后端时优雅降级)。端点是 sophnet moltbot;LLM 可能
+    # BYOK 成别家模型,其 key 对此端点无效,故搜索用平台专用 key,绝不复用 LLM key。
+    web_search_api_key: str = ""
+    web_search_endpoint: str = DEFAULT_SEARCH_ENDPOINT
+    web_search_max_results: int = 8
 
 
 def get_worker_settings() -> WorkerSettings:

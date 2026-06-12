@@ -161,3 +161,23 @@ def test_network_region_case_insensitive_other_regions_skip():
     assert "mainland China" not in build_system_prompt(
         documents=[], memory=[], skills=[], network_region="global"
     )
+
+
+def test_cn_network_points_to_web_search_tool_when_available():
+    # 有 web_search 工具时,cn 搜索段改为指向工具、不再让模型 curl 搜索引擎(否则 system 指令
+    # 会与工具描述冲突、把模型推回 curl)。不可达清单仍保留。
+    out = build_system_prompt(
+        documents=[], memory=[], skills=[], network_region="cn", web_search_available=True
+    )
+    assert "mainland China" in out  # 不可达清单仍在
+    assert "web_search tool" in out  # 搜索段指向工具
+    assert "cn.bing.com" not in out  # 不再推 curl 搜索引擎
+
+
+def test_cn_network_uses_curl_search_when_no_web_search():
+    # 没有 web_search 工具(未配搜索 key)时回退 cn.bing.com 直连。
+    out = build_system_prompt(
+        documents=[], memory=[], skills=[], network_region="cn", web_search_available=False
+    )
+    assert "cn.bing.com" in out
+    assert "web_search tool" not in out

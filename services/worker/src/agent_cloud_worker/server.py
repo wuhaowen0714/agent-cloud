@@ -29,6 +29,12 @@ from agent_cloud_worker.provider import (
 from agent_cloud_worker.remember import RememberingExecutor, remember_enabled
 from agent_cloud_worker.sandbox_executor import SandboxToolExecutor
 from agent_cloud_worker.title import TITLE_SYSTEM, clean_title
+from agent_cloud_worker.web_search import (
+    DEFAULT_SEARCH_ENDPOINT,
+    WebSearchExecutor,
+    make_sophnet_searcher,
+    web_search_enabled,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +50,9 @@ _SUMMARIZE_SYSTEM = (
 
 
 def _build_context_and_history(
-    request: worker_pb2.RunTurnRequest, network_region: str = ""
+    request: worker_pb2.RunTurnRequest,
+    network_region: str = "",
+    web_search_available: bool = False,
 ) -> tuple[str, list]:
     system = build_system_prompt(
         documents=[ContextDocument(d.scope, d.type, d.content) for d in request.documents],
@@ -52,15 +60,59 @@ def _build_context_and_history(
         skills=[SkillRef(s.name, s.description, s.location) for s in request.skills],
         history_summary=request.history_summary,
         network_region=network_region,
+        web_search_available=web_search_available,
     )
     history = [msg_from_proto(m) for m in request.messages]
     return system, history
 
 
 class WorkerServicer(worker_pb2_grpc.WorkerServicer):
-    def __init__(self, provider_factory: ProviderFactory, network_region: str = "") -> None:
+    def __init__(
+        self,
+        provider_factory: ProviderFactory,
+        network_region: str = "",
+        *,
+        web_search_endpoint: str = DEFAULT_SEARCH_ENDPOINT,
+        web_search_api_key: str = "",
+        web_search_max_results: int = 8,
+    ) -> None:
         self._provider_factory = provider_factory
         self._network_region = network_region
+        self._web_search_endpoint = web_search_endpoint
+        self._web_search_api_key = web_search_api_key
+        self._web_search_max_results = web_search_max_results
+
+    def _web_search_available(self) -> bool:
+        # 配了搜索 key + 端点才算可用:决定 web_search 是否暴露 + system prompt 搜索段是否指向工具。
+        return bool(self._web_search_api_key and self._web_search_endpoint)
+
+    def _build_executor(self, channel: grpc.aio.Channel, request: worker_pb2.RunTurnRequest):
+        """构造本回合的工具执行器(RunTurn / RunTurnStream 共用)。
+
+        分层:WebSearchExecutor(可选) → RememberingExecutor → SandboxToolExecutor。
+        web_search / remember 是 worker 原生(本地处理、绝不进沙箱);其余委托沙箱执行。
+        web_search 仅在配了平台搜索 key 时暴露(独立于 LLM key,海外/未配自动降级)。
+        """
+        enabled_tools = list(request.agent.enabled_tools)
+        executor = RememberingExecutor(
+            SandboxToolExecutor(
+                channel,
+                request.work_subdir,
+                enabled_tools,
+                token=request.sandbox_token,
+            ),
+            enabled=remember_enabled(enabled_tools),
+        )
+        if self._web_search_available():
+            searcher = make_sophnet_searcher(
+                endpoint=self._web_search_endpoint,
+                api_key=self._web_search_api_key,
+                max_results=self._web_search_max_results,
+            )
+            executor = WebSearchExecutor(
+                executor, enabled=web_search_enabled(enabled_tools), search_fn=searcher
+            )
+        return executor
 
     async def RunTurn(
         self, request: worker_pb2.RunTurnRequest, context: grpc.aio.ServicerContext
@@ -68,7 +120,9 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
         # 解码客户端输入。畸形输入(非法 role / 坏 arguments_json)是 client-fault,
         # 必须映射成 INVALID_ARGUMENT,而不是冒泡成无法与真实 worker bug 区分的 UNKNOWN。
         try:
-            system, history = _build_context_and_history(request, self._network_region)
+            system, history = _build_context_and_history(
+                request, self._network_region, self._web_search_available()
+            )
         except (ValueError, json.JSONDecodeError) as exc:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
             return
@@ -92,15 +146,7 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                 ("grpc.max_receive_message_length", MAX_GRPC_MESSAGE_BYTES),
             ],
         ) as channel:
-            executor = RememberingExecutor(
-                SandboxToolExecutor(
-                    channel,
-                    request.work_subdir,
-                    list(request.agent.enabled_tools),
-                    token=request.sandbox_token,
-                ),
-                enabled=remember_enabled(list(request.agent.enabled_tools)),
-            )
+            executor = self._build_executor(channel, request)
             try:
                 result = await run_turn(
                     provider,
@@ -145,7 +191,9 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
     ):
         # 解码 / 工厂失败在第一个 yield 之前 abort(client/config-fault),映射成明确状态码。
         try:
-            system, history = _build_context_and_history(request, self._network_region)
+            system, history = _build_context_and_history(
+                request, self._network_region, self._web_search_available()
+            )
         except (ValueError, json.JSONDecodeError) as exc:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
             return
@@ -165,15 +213,7 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
             ("grpc.max_receive_message_length", MAX_GRPC_MESSAGE_BYTES),
         ]
         async with grpc.aio.insecure_channel(request.sandbox_endpoint, options=options) as channel:
-            executor = RememberingExecutor(
-                SandboxToolExecutor(
-                    channel,
-                    request.work_subdir,
-                    list(request.agent.enabled_tools),
-                    token=request.sandbox_token,
-                ),
-                enabled=remember_enabled(list(request.agent.enabled_tools)),
-            )
+            executor = self._build_executor(channel, request)
             # 流中途失败(provider 抛错 / loop 守卫)是 worker-fault:收敛为通用 INTERNAL,
             # 不把原始异常文本泄漏给客户端(会暴露内部细节且与 UNKNOWN 无法区分)。
             # context.abort 不在 run_turn_stream 内调用,故此处的宽 except 是安全的。
@@ -428,6 +468,9 @@ async def create_server(
     host: str = "localhost",
     port: int = 0,
     network_region: str = "",
+    web_search_endpoint: str = DEFAULT_SEARCH_ENDPOINT,
+    web_search_api_key: str = "",
+    web_search_max_results: int = 8,
 ) -> tuple[grpc.aio.Server, int]:
     server = grpc.aio.server(
         options=[
@@ -436,7 +479,14 @@ async def create_server(
         ]
     )
     worker_pb2_grpc.add_WorkerServicer_to_server(
-        WorkerServicer(provider_factory, network_region=network_region), server
+        WorkerServicer(
+            provider_factory,
+            network_region=network_region,
+            web_search_endpoint=web_search_endpoint,
+            web_search_api_key=web_search_api_key,
+            web_search_max_results=web_search_max_results,
+        ),
+        server,
     )
     bound_port = server.add_insecure_port(f"{host}:{port}")
     await server.start()

@@ -810,3 +810,53 @@ async def test_run_turn_stream_injects_network_region_into_system():
         await worker_server.stop(None)
     assert "mainland China" in provider.last_request.system
     assert "cn.bing.com" in provider.last_request.system
+
+
+async def test_run_turn_exposes_web_search_tool_when_key_configured():
+    # 配了平台搜索 key → web_search 出现在传给模型的 tools 里(串联:create_server → servicer
+    # → _build_executor → executor.specs)。模型直接收尾不调搜索,故无需真网络。
+    provider = _CapturingProvider(_final("ok"))
+    worker_server, wport = await create_worker_server(
+        provider_factory=lambda *a: provider, port=0, web_search_api_key="sk-search"
+    )
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            await stub.RunTurn(
+                worker_pb2.RunTurnRequest(
+                    agent=worker_pb2.Agent(model="m", provider="fake"),
+                    messages=[],
+                    user_message="今天世界杯谁赢了",
+                    sandbox_endpoint="localhost:1",
+                    work_subdir="s1",
+                )
+            )
+    finally:
+        await worker_server.stop(None)
+    tool_names = {t.name for t in provider.last_request.tools}
+    assert "web_search" in tool_names
+
+
+async def test_run_turn_hides_web_search_tool_when_no_key():
+    # 没配搜索 key → 不暴露 web_search(海外/未接搜索后端优雅降级);其余 worker 原生工具仍在。
+    provider = _CapturingProvider(_final("ok"))
+    worker_server, wport = await create_worker_server(
+        provider_factory=lambda *a: provider, port=0
+    )
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            await stub.RunTurn(
+                worker_pb2.RunTurnRequest(
+                    agent=worker_pb2.Agent(model="m", provider="fake"),
+                    messages=[],
+                    user_message="hi",
+                    sandbox_endpoint="localhost:1",
+                    work_subdir="s1",
+                )
+            )
+    finally:
+        await worker_server.stop(None)
+    tool_names = {t.name for t in provider.last_request.tools}
+    assert "web_search" not in tool_names
+    assert "remember" in tool_names  # 其余 worker 原生工具不受影响
