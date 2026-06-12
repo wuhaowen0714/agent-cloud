@@ -19,6 +19,7 @@ async def main() -> None:
         host=settings.grpc_host,
         port=settings.grpc_port,
         network_region=settings.network_region,
+        max_iterations=settings.max_iterations,
     )
     logger.info("agent-cloud worker listening on %s:%s", settings.grpc_host, port)
     await server.wait_for_termination()

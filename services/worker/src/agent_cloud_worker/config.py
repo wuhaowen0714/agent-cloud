@@ -21,6 +21,10 @@ class WorkerSettings(BaseSettings):
     # 接 OpenAI 推理模型时把本项设为 "max_completion_tokens"。
     max_tokens_param: str = "max_tokens"
 
+    # 单个回合内 LLM↔工具往返的迭代上限。跑满即 stop_reason="max_iterations" 收尾(回合不完整,
+    # 由后端 best-effort 处理)。调大 → 允许更长的自主链路,但最坏耗时/输出预算按倍数上升。
+    max_iterations: int = 20
+
     # Agent 所在网络区域,决定是否向 system prompt 注入"哪些站点不可达"的提示。
     # "cn" 或阿里云 region id("cn-hangzhou" 等)=中国大陆:注入(首选 cn.bing.com 搜索,
     # 避开 google/wikipedia/百度验证码等,失败即换);留空或其它值=不注入(海外/无限制部署)。

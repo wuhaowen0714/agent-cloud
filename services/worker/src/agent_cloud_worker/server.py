@@ -58,9 +58,15 @@ def _build_context_and_history(
 
 
 class WorkerServicer(worker_pb2_grpc.WorkerServicer):
-    def __init__(self, provider_factory: ProviderFactory, network_region: str = "") -> None:
+    def __init__(
+        self,
+        provider_factory: ProviderFactory,
+        network_region: str = "",
+        max_iterations: int = 20,
+    ) -> None:
         self._provider_factory = provider_factory
         self._network_region = network_region
+        self._max_iterations = max_iterations
 
     async def RunTurn(
         self, request: worker_pb2.RunTurnRequest, context: grpc.aio.ServicerContext
@@ -108,6 +114,7 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                     system=system,
                     history=history,
                     user_message=request.user_message,
+                    max_iterations=self._max_iterations,
                 )
             except CompletionBudgetExceeded as exc:
                 # 配置错误(输出预算 ≥ 模型窗口):压缩救不了,绝不能映射成 RESOURCE_EXHAUSTED
@@ -184,6 +191,7 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                     system=system,
                     history=history,
                     user_message=request.user_message,
+                    max_iterations=self._max_iterations,
                 ):
                     yield turn_event_to_proto(event)
             except CompletionBudgetExceeded as exc:
@@ -428,6 +436,7 @@ async def create_server(
     host: str = "localhost",
     port: int = 0,
     network_region: str = "",
+    max_iterations: int = 20,
 ) -> tuple[grpc.aio.Server, int]:
     server = grpc.aio.server(
         options=[
@@ -436,7 +445,10 @@ async def create_server(
         ]
     )
     worker_pb2_grpc.add_WorkerServicer_to_server(
-        WorkerServicer(provider_factory, network_region=network_region), server
+        WorkerServicer(
+            provider_factory, network_region=network_region, max_iterations=max_iterations
+        ),
+        server,
     )
     bound_port = server.add_insecure_port(f"{host}:{port}")
     await server.start()
