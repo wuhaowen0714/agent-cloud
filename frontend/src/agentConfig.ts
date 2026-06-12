@@ -4,6 +4,7 @@ export const BUILTIN_TOOLS: { name: string; desc: string }[] = [
   { name: "read_file", desc: "读文件" },
   { name: "edit", desc: "改文件(精确替换)" },
   { name: "remember", desc: "主动记忆(把耐久事实写入长期记忆)" },
+  { name: "web_search", desc: "联网搜索(需平台配置搜索后端,未配置则不生效)" },
 ]
 const ALL = BUILTIN_TOOLS.map((t) => t.name)
 

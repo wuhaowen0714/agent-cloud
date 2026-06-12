@@ -10,6 +10,9 @@ def test_defaults():
     assert s.request_max_tokens == 32768
     assert s.max_iterations == 20  # 单回合 LLM↔工具往返上限
     assert s.network_region == "cn"  # 默认中国大陆:生产部署在阿里云境内
+    assert s.web_search_api_key == ""  # 默认空 = 不暴露 web_search 工具
+    assert s.web_search_endpoint == "https://www.sophnet.com/api/open-apis/moltbot/search/web"
+    assert s.web_search_max_results == 8
 
 
 def test_env_override(monkeypatch):

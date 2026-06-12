@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 dependencies = [
     "agent-cloud-common",
     "grpcio",
+    "httpx",
     "openai",
     "pydantic-settings",
 ]
