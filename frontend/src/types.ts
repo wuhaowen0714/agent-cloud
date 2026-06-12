@@ -7,7 +7,7 @@ export interface AgentConfig {
 export interface ProviderCredential { id: string; name: string; base_url: string; masked: string; created_at: string }
 export interface MemoryBlock { scope: string; owner_id: string; content: string; version: number }
 export interface UserModel { id: string; model: string; created_at: string }
-export interface Session { id: string; user_id: string; agent_config_id: string; title: string | null; work_subdir: string; last_context_tokens: number | null }
+export interface Session { id: string; user_id: string; agent_config_id: string; title: string | null; work_subdir: string; last_active_at: string; last_context_tokens: number | null }
 
 export interface ToolCall { id: string; name: string; arguments: Record<string, unknown> }
 export interface ToolResult { call_id: string; content: string; is_error: boolean }
