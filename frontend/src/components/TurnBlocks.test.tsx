@@ -15,7 +15,7 @@ describe("TurnBlocks", () => {
     // 顺序断言:正文1 在工具之前,工具在正文2 之前
     expect(text.indexOf("first")).toBeLessThan(text.indexOf("bash"))
     expect(text.indexOf("bash")).toBeLessThan(text.indexOf("second"))
-    expect(text).toContain("a.txt") // 工具结果配对显示在卡片内
+    expect(text).not.toContain("a.txt") // 成功工具结果默认折叠(展开行为见 ToolCallCard.test)
   })
 
   it("auto-expands the last thinking block while streaming", () => {
