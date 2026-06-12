@@ -23,6 +23,14 @@ mkdir -p /opt/agent-cloud/data/workspaces
 # 让 ${AGENT_CLOUD_DB_PASSWORD:?} 等插值与容器 env 同源。
 COMPOSE=(docker compose --env-file "$ROOT/.env" -f deploy/compose.yml)
 "${COMPOSE[@]}" build
+# worker 用固定容器名 agent-cloud-worker(network 模式下 backend 据此把它接入每个沙箱专属
+# 网络,必需)。compose recreate 固定名容器时会先把旧容器【改名加 hash 前缀】做备份再建新
+# 的;若上一次 recreate 中途失败留下了一个备份名容器,这次改名就撞名 → "Conflict ... already
+# in use" + 退出码 1(虽然 worker 最终仍被拉起成新镜像,但脚本报错、误导为部署失败)。
+# up 前显式清掉 worker 当前容器与任何残留备份(子串匹配同时覆盖 agent-cloud-worker 与
+# <hash>_agent-cloud-worker),让 up 全新创建,彻底规避。worker 短暂停机(deploy 本就 recreate
+# 它),可接受;backend/web/db 是自动名(-1 后缀),无此改名备份问题,交给 up 正常处理。
+docker ps -aq --filter "name=agent-cloud-worker" | xargs -r docker rm -f >/dev/null 2>&1 || true
 "${COMPOSE[@]}" up -d
 
 # 安全:清掉升级前残留的沙箱容器。pre-fix 的旧沙箱挂在共享网 agent-cloud-net、且无
