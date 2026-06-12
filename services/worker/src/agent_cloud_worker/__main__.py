@@ -15,7 +15,10 @@ async def main() -> None:
     settings = get_worker_settings()
     factory = build_provider_factory(settings)
     server, port = await create_server(
-        provider_factory=factory, host=settings.grpc_host, port=settings.grpc_port
+        provider_factory=factory,
+        host=settings.grpc_host,
+        port=settings.grpc_port,
+        network_region=settings.network_region,
     )
     logger.info("agent-cloud worker listening on %s:%s", settings.grpc_host, port)
     await server.wait_for_termination()

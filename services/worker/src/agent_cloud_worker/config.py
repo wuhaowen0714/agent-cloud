@@ -21,6 +21,12 @@ class WorkerSettings(BaseSettings):
     # 接 OpenAI 推理模型时把本项设为 "max_completion_tokens"。
     max_tokens_param: str = "max_tokens"
 
+    # Agent 所在网络区域,决定是否向 system prompt 注入"哪些站点不可达"的提示。
+    # "cn" 或阿里云 region id("cn-hangzhou" 等)=中国大陆:注入(首选 cn.bing.com 搜索,
+    # 避开 google/wikipedia/百度验证码等,失败即换);留空或其它值=不注入(海外/无限制部署)。
+    # 默认 cn:生产部署在阿里云境内。
+    network_region: str = "cn"
+
 
 def get_worker_settings() -> WorkerSettings:
     return WorkerSettings()

@@ -78,7 +78,9 @@ async def main() -> None:
     from testcontainers.postgres import PostgresContainer
 
     factory = build_provider_factory(wsettings)
-    worker_server, wport = await create_worker_server(provider_factory=factory, port=0)
+    worker_server, wport = await create_worker_server(
+        provider_factory=factory, port=0, network_region=wsettings.network_region
+    )
     print(f"worker gRPC listening on localhost:{wport}")
 
     with PostgresContainer("postgres:16", driver="asyncpg") as pg:

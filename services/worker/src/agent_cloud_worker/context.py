@@ -93,6 +93,39 @@ Do not try to install OS packages — use a pip or npm package, or a Python stdl
 instead."""
 
 
+# 中国大陆网络区域提示(network_region "cn"/"cn-*" 时注入)。模型默认按训练习惯首选 google/
+# wikipedia/duckduckgo 搜索,但境内服务器连不通——一路超时/验证码白费回合(实测:agent 反复
+# curl google.com / en.wikipedia.org 全 Forbidden)。明确告知所在网络 + 给可达入口(阿里云大陆
+# 实测:cn.bing.com/search 纯 curl 直接拿结果;百度对脚本是验证码墙)+ "失败即换、勿反复重试"。
+_CN_NETWORK_HINT = """\
+Network location (IMPORTANT — this changes which sites you can reach):
+- This sandbox runs on a server in mainland China. Many international sites are unreachable \
+from here: they time out or hang. Do NOT use these — attempts will fail and waste your turns: \
+Google (and Google Search), Wikipedia / Wikimedia, DuckDuckGo, YouTube, X / Twitter, \
+Facebook, Instagram, Reddit, Medium, Hugging Face.
+- To search the web, use an engine reachable from here. Best for the command line: Bing China \
+— `curl -sL -A "Mozilla/5.0" "https://cn.bing.com/search?q=YOUR+QUERY"` returns real results \
+directly. Sogou (https://www.sogou.com/web?query=...) also works. Avoid Baidu's HTML search: \
+it returns a CAPTCHA to scripted clients. For knowledge you would normally get from Wikipedia, \
+search via Bing and read a reachable source.
+- When fetching pages with curl/wget, send a browser User-Agent (`-A "Mozilla/5.0"`) and \
+follow redirects (`-L`); otherwise many sites return a redirect or a bot-check page.
+- Most developer resources stay reachable (GitHub, Stack Overflow, PyPI, npm, and most \
+official language/framework docs) — use them normally. GitHub can be intermittently slow from \
+here: if a request times out, retry once before switching. If a site is consistently refused \
+or hangs, assume it is blocked from mainland China and switch to a reachable alternative \
+instead of retrying the same URL."""
+
+
+def _render_network(network_region: str) -> list[str]:
+    # 仅在已知"受限"区域注入站点可达性提示;其它区域(海外/无限制)留空,保持 prompt 干净。
+    # "cn" 或阿里云 region id("cn-hangzhou" 等,运维易这么填)都视为中国大陆。
+    region = network_region.strip().lower()
+    if region == "cn" or region.startswith("cn-"):
+        return [_CN_NETWORK_HINT]
+    return []
+
+
 def _render_summary(history_summary: str) -> list[str]:
     # 压缩后此前历史折叠成的摘要。放在末尾(贴近随后的消息历史),并标明这是浓缩的早期对话,
     # 而非用户配置 —— 让模型把它当作上下文延续而不是新指令。
@@ -112,11 +145,13 @@ def build_system_prompt(
     memory: list[MemoryItem],
     skills: list[SkillRef],
     history_summary: str = "",
+    network_region: str = "",
 ) -> str:
-    """基础环境提示词 + 配置文档(用户级在前)+ 记忆 + 技能元数据 + 此前对话摘要,
-    拼成分层 system 文本(spec §5.3 / §6)。"""
+    """基础环境提示词 + 网络区域提示 + 配置文档(用户级在前)+ 记忆 + 技能元数据 +
+    此前对话摘要,拼成分层 system 文本(spec §5.3 / §6)。"""
     sections = [
         BASE_SYSTEM_PROMPT,
+        *_render_network(network_region),
         *_render_docs(documents),
         *_render_memory(memory),
         *_render_skills(skills),
