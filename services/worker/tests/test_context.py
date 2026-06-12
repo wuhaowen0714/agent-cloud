@@ -125,3 +125,39 @@ def test_memory_single_layer_renders_only_its_section():
     )
     assert "about the user" in out
     assert "private to you" not in out
+
+
+def test_cn_network_region_injects_unreachable_site_hint():
+    # network_region="cn":注入"所在网络 + 哪些站点不可达 + 用哪个搜索入口"的提示。否则模型
+    # 按训练习惯首选 google/wikipedia,境内服务器连不通,一路超时/验证码白费回合(实测)。
+    out = build_system_prompt(
+        documents=[ContextDocument(scope="user", type="USER", content="USERDOC")],
+        memory=[],
+        skills=[],
+        network_region="cn",
+    )
+    assert "mainland China" in out
+    assert "cn.bing.com" in out  # 实测大陆可达、纯 curl 直接拿结果的首选入口
+    assert "Wikipedia" in out and "DuckDuckGo" in out  # 明确列为不可达,让模型避开
+    # 网络提示紧跟基础环境提示之后、用户文档之前(优先级高、显眼;用户文档仍可在其后覆盖)
+    assert out.index("autonomous AI agent") < out.index("mainland China") < out.index("USERDOC")
+
+
+def test_no_network_hint_by_default():
+    # 默认(未配置 region)不注入区域提示:prompt 保持通用,海外/无限制部署不受影响。
+    out = build_system_prompt(documents=[], memory=[], skills=[])
+    assert "mainland China" not in out
+    assert "cn.bing.com" not in out
+
+
+def test_network_region_case_insensitive_other_regions_skip():
+    # region 大小写不敏感;阿里云 region id(cn-hangzhou)也视为大陆;非 cn 区域(海外)不注入。
+    assert "mainland China" in build_system_prompt(
+        documents=[], memory=[], skills=[], network_region="CN"
+    )
+    assert "mainland China" in build_system_prompt(
+        documents=[], memory=[], skills=[], network_region="cn-hangzhou"
+    )
+    assert "mainland China" not in build_system_prompt(
+        documents=[], memory=[], skills=[], network_region="global"
+    )

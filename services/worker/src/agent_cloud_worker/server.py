@@ -43,20 +43,24 @@ _SUMMARIZE_SYSTEM = (
 )
 
 
-def _build_context_and_history(request: worker_pb2.RunTurnRequest) -> tuple[str, list]:
+def _build_context_and_history(
+    request: worker_pb2.RunTurnRequest, network_region: str = ""
+) -> tuple[str, list]:
     system = build_system_prompt(
         documents=[ContextDocument(d.scope, d.type, d.content) for d in request.documents],
         memory=[MemoryItem(m.scope, m.content) for m in request.memory],
         skills=[SkillRef(s.name, s.description, s.location) for s in request.skills],
         history_summary=request.history_summary,
+        network_region=network_region,
     )
     history = [msg_from_proto(m) for m in request.messages]
     return system, history
 
 
 class WorkerServicer(worker_pb2_grpc.WorkerServicer):
-    def __init__(self, provider_factory: ProviderFactory) -> None:
+    def __init__(self, provider_factory: ProviderFactory, network_region: str = "") -> None:
         self._provider_factory = provider_factory
+        self._network_region = network_region
 
     async def RunTurn(
         self, request: worker_pb2.RunTurnRequest, context: grpc.aio.ServicerContext
@@ -64,7 +68,7 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
         # 解码客户端输入。畸形输入(非法 role / 坏 arguments_json)是 client-fault,
         # 必须映射成 INVALID_ARGUMENT,而不是冒泡成无法与真实 worker bug 区分的 UNKNOWN。
         try:
-            system, history = _build_context_and_history(request)
+            system, history = _build_context_and_history(request, self._network_region)
         except (ValueError, json.JSONDecodeError) as exc:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
             return
@@ -141,7 +145,7 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
     ):
         # 解码 / 工厂失败在第一个 yield 之前 abort(client/config-fault),映射成明确状态码。
         try:
-            system, history = _build_context_and_history(request)
+            system, history = _build_context_and_history(request, self._network_region)
         except (ValueError, json.JSONDecodeError) as exc:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
             return
@@ -420,7 +424,10 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
 
 
 async def create_server(
-    provider_factory: ProviderFactory, host: str = "localhost", port: int = 0
+    provider_factory: ProviderFactory,
+    host: str = "localhost",
+    port: int = 0,
+    network_region: str = "",
 ) -> tuple[grpc.aio.Server, int]:
     server = grpc.aio.server(
         options=[
@@ -428,7 +435,9 @@ async def create_server(
             ("grpc.max_receive_message_length", MAX_GRPC_MESSAGE_BYTES),
         ]
     )
-    worker_pb2_grpc.add_WorkerServicer_to_server(WorkerServicer(provider_factory), server)
+    worker_pb2_grpc.add_WorkerServicer_to_server(
+        WorkerServicer(provider_factory, network_region=network_region), server
+    )
     bound_port = server.add_insecure_port(f"{host}:{port}")
     await server.start()
     return server, bound_port

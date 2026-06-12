@@ -13,7 +13,12 @@ from agent_cloud_common import (
 )
 from agent_cloud_common.codec import turn_event_from_proto
 from agent_cloud_sandbox.server import create_server as create_sandbox_server
-from agent_cloud_worker.provider import ContextWindowExceeded, FakeProvider, ProviderTextDelta
+from agent_cloud_worker.provider import (
+    ContextWindowExceeded,
+    FakeProvider,
+    ProviderCompleted,
+    ProviderTextDelta,
+)
 from agent_cloud_worker.server import create_server as create_worker_server
 
 _GRPC_OPTIONS = [
@@ -411,6 +416,10 @@ class _CapturingProvider:
         self.last_request = request
         return self._result
 
+    async def stream(self, request):
+        self.last_request = request
+        yield ProviderCompleted(message=self._result.message, usage=self._result.usage)
+
 
 async def test_summarize_puts_prior_summary_in_system_not_user_message():
     # I3:已有摘要应进入 system(系统提供的已有产物),而非塞进末尾 user 消息(会被当成新指令)。
@@ -751,3 +760,53 @@ async def test_extract_memory_unparseable_maps_to_internal():
     finally:
         await worker_server.stop(None)
     assert exc.value.code() == grpc.StatusCode.INTERNAL
+
+
+async def test_run_turn_injects_network_region_into_system():
+    # network_region 经 create_server → servicer → build_system_prompt 串入 system prompt,
+    # 让模型知道所在网络、避开被墙站点(否则反复 curl google/wikipedia 失败,白费回合)。
+    provider = _CapturingProvider(_final("ok"))
+    worker_server, wport = await create_worker_server(
+        provider_factory=lambda *a: provider, port=0, network_region="cn"
+    )
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            await stub.RunTurn(
+                worker_pb2.RunTurnRequest(
+                    agent=worker_pb2.Agent(model="m", provider="fake"),
+                    messages=[],
+                    user_message="搜一下今天的新闻",
+                    sandbox_endpoint="localhost:1",
+                    work_subdir="s1",
+                )
+            )
+    finally:
+        await worker_server.stop(None)
+    assert "mainland China" in provider.last_request.system
+    assert "cn.bing.com" in provider.last_request.system
+
+
+async def test_run_turn_stream_injects_network_region_into_system():
+    # 生产实际走流式 RPC:确认 network_region 同样串入 RunTurnStream 的 system prompt。
+    provider = _CapturingProvider(_final("ok"))
+    worker_server, wport = await create_worker_server(
+        provider_factory=lambda *a: provider, port=0, network_region="cn"
+    )
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            async for _ in stub.RunTurnStream(
+                worker_pb2.RunTurnRequest(
+                    agent=worker_pb2.Agent(model="m", provider="fake"),
+                    messages=[],
+                    user_message="搜一下今天的新闻",
+                    sandbox_endpoint="localhost:1",
+                    work_subdir="s1",
+                )
+            ):
+                pass
+    finally:
+        await worker_server.stop(None)
+    assert "mainland China" in provider.last_request.system
+    assert "cn.bing.com" in provider.last_request.system

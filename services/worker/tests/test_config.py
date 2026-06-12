@@ -8,6 +8,7 @@ def test_defaults():
     assert s.openai_base_url == "https://api.openai.com/v1"
     assert s.openai_max_retries == 2
     assert s.request_max_tokens == 32768
+    assert s.network_region == "cn"  # 默认中国大陆:生产部署在阿里云境内
 
 
 def test_env_override(monkeypatch):
