@@ -180,6 +180,7 @@ bash scripts/dev_up.sh
 | `AGENT_CLOUD_WORKER_REQUEST_MAX_TOKENS` | worker | `32768` | 单次输出上限(撞上限有兜底:文本截断落库提示、工具参数截断回合内自修复)。⚠️ 接窗口 ≤ 此值的小模型请调低——预算放不进窗口的 400 会被识别为配置错误(FAILED_PRECONDITION),不会触发压缩 |
 | `AGENT_CLOUD_WORKER_NETWORK_REGION` | worker | `cn` | agent 所在网络区域。`cn`/`cn-*`(中国大陆)时给 agent 的 system prompt 注入站点可达性提示(避开 google/wikipedia 等被墙站,搜索引导用 cn.bing.com);海外部署设 `global` 等值关闭 |
 | `AGENT_CLOUD_WORKER_MAX_ITERATIONS` | worker | `20` | 单个回合内 LLM↔工具往返的迭代上限;跑满即 `max_iterations` 收尾(回合不完整,后端 best-effort 处理)。调大允许更长自主链路,最坏耗时/输出预算随之上升;正常 `end_turn` 收尾的回合不受影响 |
+| `AGENT_CLOUD_WORKER_TIMEZONE_OFFSET_HOURS` | worker | `8` | 注入 system prompt 的"今天日期"用的固定时区偏移(小时,范围 `(-24, 24)`,越界启动即报错);默认 +8(北京)。让模型知道当前日期、查"今天/今年"不瞎猜;海外按当地改(⚠️ 夏令时地区会差 1 小时) |
 | `AGENT_CLOUD_WORKER_WEB_SEARCH_API_KEY` | worker | — | web_search 工具的**专用搜索 key**(独立于 LLM key)。**配了才把 web_search 暴露给 agent**;空=不暴露 |
 | `AGENT_CLOUD_WORKER_WEB_SEARCH_ENDPOINT` | worker | sophnet moltbot | 搜索后端(POST,`Bearer` 鉴权,body `{"query":...}`) |
 | `AGENT_CLOUD_WORKER_WEB_SEARCH_MAX_RESULTS` | worker | `8` | 每次搜索返回给模型的结果条数(标题+链接+摘要) |

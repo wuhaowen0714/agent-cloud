@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 
 import grpc
 from agent_cloud.v1 import sandbox_pb2_grpc, worker_pb2, worker_pb2_grpc
@@ -53,7 +54,15 @@ def _build_context_and_history(
     request: worker_pb2.RunTurnRequest,
     network_region: str = "",
     web_search_available: bool = False,
+    tz_offset_hours: float = 8.0,
 ) -> tuple[str, list]:
+    # 现算"今天日期"(指定时区),注入 system prompt——模型不知真实日期,查时事会瞎猜。
+    # 星期用固定英文查表(不用 strftime %A:那依赖进程 locale,不同环境可能输出非英文/乱码)。
+    now = datetime.now(timezone(timedelta(hours=tz_offset_hours)))
+    weekday = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")[
+        now.weekday()
+    ]
+    current_date = f"{now:%Y-%m-%d} ({weekday})"
     system = build_system_prompt(
         documents=[ContextDocument(d.scope, d.type, d.content) for d in request.documents],
         memory=[MemoryItem(m.scope, m.content) for m in request.memory],
@@ -61,6 +70,7 @@ def _build_context_and_history(
         history_summary=request.history_summary,
         network_region=network_region,
         web_search_available=web_search_available,
+        current_date=current_date,
     )
     history = [msg_from_proto(m) for m in request.messages]
     return system, history
@@ -73,6 +83,7 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
         network_region: str = "",
         max_iterations: int = 20,
         *,
+        timezone_offset_hours: float = 8.0,
         web_search_endpoint: str = DEFAULT_SEARCH_ENDPOINT,
         web_search_api_key: str = "",
         web_search_max_results: int = 8,
@@ -80,6 +91,7 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
         self._provider_factory = provider_factory
         self._network_region = network_region
         self._max_iterations = max_iterations
+        self._timezone_offset_hours = timezone_offset_hours
         self._web_search_endpoint = web_search_endpoint
         self._web_search_api_key = web_search_api_key
         self._web_search_max_results = web_search_max_results
@@ -123,7 +135,10 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
         # 必须映射成 INVALID_ARGUMENT,而不是冒泡成无法与真实 worker bug 区分的 UNKNOWN。
         try:
             system, history = _build_context_and_history(
-                request, self._network_region, self._web_search_available()
+                request,
+                self._network_region,
+                self._web_search_available(),
+                self._timezone_offset_hours,
             )
         except (ValueError, json.JSONDecodeError) as exc:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
@@ -195,7 +210,10 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
         # 解码 / 工厂失败在第一个 yield 之前 abort(client/config-fault),映射成明确状态码。
         try:
             system, history = _build_context_and_history(
-                request, self._network_region, self._web_search_available()
+                request,
+                self._network_region,
+                self._web_search_available(),
+                self._timezone_offset_hours,
             )
         except (ValueError, json.JSONDecodeError) as exc:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
@@ -473,6 +491,7 @@ async def create_server(
     port: int = 0,
     network_region: str = "",
     max_iterations: int = 20,
+    timezone_offset_hours: float = 8.0,
     web_search_endpoint: str = DEFAULT_SEARCH_ENDPOINT,
     web_search_api_key: str = "",
     web_search_max_results: int = 8,
@@ -488,6 +507,7 @@ async def create_server(
             provider_factory,
             network_region=network_region,
             max_iterations=max_iterations,
+            timezone_offset_hours=timezone_offset_hours,
             web_search_endpoint=web_search_endpoint,
             web_search_api_key=web_search_api_key,
             web_search_max_results=web_search_max_results,
