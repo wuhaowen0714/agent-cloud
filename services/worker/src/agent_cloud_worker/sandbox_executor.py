@@ -33,6 +33,7 @@ class SandboxToolExecutor:
         max_attempts: int = 10,
         retry_backoff: float = 1.0,
         token: str = "",
+        exec_timeout: float = 360.0,
     ) -> None:
         self._stub = sandbox_pb2_grpc.SandboxStub(channel) if channel is not None else None
         self._work_subdir = work_subdir
@@ -43,6 +44,10 @@ class SandboxToolExecutor:
         # 以隐藏冷启动(spec §4.1)。其它错误立即转成 is_error 结果。
         self._max_attempts = max_attempts
         self._retry_backoff = retry_backoff
+        # ExecTool RPC 客户端超时:略大于沙箱端 bash 硬上限(默认 300s)作纵深兜底——沙箱整体
+        # 无响应(非单命令卡)时不让 worker 无限等(终端路径已有 channel_ready 兜底,ExecTool
+        # 此前没有)。超时 → DEADLINE_EXCEEDED(非 UNAVAILABLE 不重试)→ 转 is_error 交回模型。
+        self._exec_timeout = exec_timeout
 
     def specs(self) -> list[ToolSpec]:
         return filtered_tool_specs(self._enabled_tools)
@@ -64,7 +69,9 @@ class SandboxToolExecutor:
         )
         for attempt in range(self._max_attempts):
             try:
-                resp = await self._stub.ExecTool(req, metadata=self._md)
+                resp = await self._stub.ExecTool(
+                    req, metadata=self._md, timeout=self._exec_timeout
+                )
                 return ToolResult(call_id=call.id, content=resp.content, is_error=resp.is_error)
             except grpc.aio.AioRpcError as exc:
                 # 冷启动期的 UNAVAILABLE 重试;其它错误立即转成 is_error 结果交回模型

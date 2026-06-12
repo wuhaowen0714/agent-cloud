@@ -108,6 +108,7 @@ async def test_spawn_publish_mode_mounts_workspace_and_returns_localhost_endpoin
     assert kw["detach"] is True
     assert kw["cap_drop"] == ["ALL"]
     assert "no-new-privileges" in kw["security_opt"][0]
+    assert kw["init"] is True  # tini 当 PID1 收僵尸,防超时杀掉的后台进程累积撞 pids_limit
     assert kw["labels"]["managed-by"] == "agent-cloud"
     assert kw["labels"]["user_id"] == str(uid)
     assert kw["ports"] == {"50051/tcp": None}

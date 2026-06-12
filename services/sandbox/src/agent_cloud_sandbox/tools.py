@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import signal
 import subprocess
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -11,6 +15,10 @@ from agent_cloud_common import apply_edits
 # RESOURCE_EXHAUSTED 崩溃,因此在沙箱侧先截断。
 _MAX_OUTPUT = 100_000
 _TRUNCATION_MARKER = "\n...[truncated]"
+
+# bash 单命令执行上限(秒,env 可配)。超时杀整个进程组并返回错误,防止不退出的命令
+# (起服务、sleep、`cmd &` 后台进程持有管道)永久卡死整个沙箱(线上事故根因)。
+_BASH_TIMEOUT_SECONDS = float(os.environ.get("AGENT_CLOUD_SANDBOX_BASH_TIMEOUT", "300"))
 
 
 def _resolve_within(workdir: Path, path: str) -> Path:
@@ -41,13 +49,96 @@ def _clean_stderr(stderr: str) -> str:
 # bash 执行任意命令;进程/文件系统隔离由真实部署的沙箱(microVM/gVisor + cgroups,
 # spec §11)负责,不是这段本地实现的职责。
 def _bash(workdir: Path, args: dict) -> str:
-    proc = subprocess.run(args["command"], shell=True, cwd=workdir, capture_output=True, text=True)
-    # 成功时只回 stdout:gRPC 的 fork/poll 噪声会落到子进程 stderr,排除 stderr 即可
-    # 让正常输出保持干净(spec §3 噪声污染)。失败时把 stderr 一并带上便于排错。
+    # start_new_session:命令跑在独立进程组(setsid),便于超时/超量时 killpg 杀整组——否则
+    # `cmd &` 起的后台进程残留、持有 stdout 管道,读取永远等不到 EOF(经典 background-job hang,
+    # 线上卡死整个沙箱的根因)。stdin=DEVNULL:读 stdin 的命令立刻拿到 EOF,不挂起等输入。
+    proc = subprocess.Popen(
+        args["command"],
+        shell=True,
+        cwd=workdir,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+
+    def _kill_group() -> None:
+        # 杀整个进程组(SIGKILL),含 shell 起的后台子进程。用 proc.pid 作 pgid(start_new_session
+        # 使 proc 成组长,pgid == pid)——不调 os.getpgid:wait() 可能已 reap 退出的 shell,getpgid
+        # 会 ProcessLookupError 被吞 → 后台漏杀。组内只要还有进程,pgid 就有效,killpg 能杀到。
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, signal.SIGKILL)
+
+    timed_out = False
+    capped = False
+
+    def _read_capped(pipe, sink: list[str]) -> None:
+        # 有界读:累计到 _MAX_OUTPUT 即停止累积并立刻 killpg(别等总超时),其后继续 read 但丢弃
+        # (drain,避免写端被管道背压卡住)。防止海量输出(yes / 死循环 echo / cat /dev/urandom)
+        # 把全部输出缓进内存 → 容器 OOM 被杀(communicate 无界缓冲,事后 _truncate 救不了:内存
+        # 早爆了)。这是线上事故的另一条复活路径(512m 容器秒级 exit 137)。
+        nonlocal capped
+        total = 0
+        try:
+            while True:
+                chunk = pipe.read(8192)
+                if not chunk:
+                    break
+                if total < _MAX_OUTPUT:
+                    sink.append(chunk)
+                    total += len(chunk)
+                    if total >= _MAX_OUTPUT:
+                        capped = True
+                        _kill_group()
+        finally:
+            with contextlib.suppress(Exception):
+                pipe.close()
+
+    out_parts: list[str] = []
+    err_parts: list[str] = []
+    t_out = threading.Thread(target=_read_capped, args=(proc.stdout, out_parts), daemon=True)
+    t_err = threading.Thread(target=_read_capped, args=(proc.stderr, err_parts), daemon=True)
+    t_out.start()
+    t_err.start()
+
+    def _on_timeout() -> None:
+        nonlocal timed_out
+        timed_out = True
+        _kill_group()
+
+    timer = threading.Timer(_BASH_TIMEOUT_SECONDS, _on_timeout)
+    timer.start()
+    try:
+        # join 读线程 = 等到 stdout+stderr 双双 EOF,即所有持管道的进程(含 `cmd &` 后台)都已
+        # 结束。后台 hang 时由 timer killpg(或超量 _kill_group)让 EOF 到来,join 才解除——故
+        # 不能在 proc.wait() 后就 cancel timer:shell 退出 ≠ 后台进程退出。
+        t_out.join()
+        t_err.join()
+        proc.wait()
+    finally:
+        timer.cancel()
+
+    stdout = "".join(out_parts)
+    stderr = _clean_stderr("".join(err_parts))
+    if timed_out:
+        raise RuntimeError(
+            _truncate(
+                f"command timed out after {_BASH_TIMEOUT_SECONDS:.0f}s and was killed "
+                f"(whole process group). A long-running server/daemon must be detached so it "
+                f"won't hold the pipe: `nohup <cmd> >/dev/null 2>&1 &`. Tune the limit via "
+                f"AGENT_CLOUD_SANDBOX_BASH_TIMEOUT. Partial output: {stdout}{stderr}"
+            )
+        )
+    # 输出超量:已截断 + 主动杀(防继续狂吐撑爆内存)。当成功结果返回(带截断标记),不报 exit
+    # error——returncode 此时是被我们 SIGKILL 的 -9,但那是主动截断、不是命令失败。
+    if capped:
+        return _truncate(stdout)
+    # 成功时只回 stdout:gRPC 的 fork/poll 噪声落在子进程 stderr,排除即可保持正常输出干净
+    # (spec §3 噪声污染)。失败时把 stderr 一并带上便于排错。
     if proc.returncode != 0:
-        stderr = _clean_stderr(proc.stderr)
-        raise RuntimeError(_truncate(f"exit {proc.returncode}: {proc.stdout}{stderr}"))
-    return _truncate(proc.stdout)
+        raise RuntimeError(_truncate(f"exit {proc.returncode}: {stdout}{stderr}"))
+    return _truncate(stdout)
 
 
 def _write_file(workdir: Path, args: dict) -> str:
