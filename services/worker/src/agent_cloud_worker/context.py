@@ -146,6 +146,20 @@ def _render_network(network_region: str, web_search_available: bool = False) -> 
     return ["\n".join([_CN_NETWORK_HEADER, _CN_UNREACHABLE, search, _CN_NETWORK_TAIL])]
 
 
+def _render_date(current_date: str) -> list[str]:
+    # 注入"今天日期"(worker 每回合现算,故动态)。模型不知真实日期,查"今天/今年/最近"的时事
+    # 会瞎猜;给它当天日期 + 星期作锚。空串(未提供)则不注入,保持 prompt 干净。
+    if not current_date.strip():
+        return []
+    return [
+        f"Today's date is {current_date}. When the user refers to relative dates — "
+        '"today", "yesterday", "this week", "this month", "this year", "recently" — '
+        "interpret them relative to this date. Your training knowledge may be out of date, so "
+        "for recent or current events, search for up-to-date information rather than relying on "
+        "memory."
+    ]
+
+
 def _render_summary(history_summary: str) -> list[str]:
     # 压缩后此前历史折叠成的摘要。放在末尾(贴近随后的消息历史),并标明这是浓缩的早期对话,
     # 而非用户配置 —— 让模型把它当作上下文延续而不是新指令。
@@ -167,11 +181,13 @@ def build_system_prompt(
     history_summary: str = "",
     network_region: str = "",
     web_search_available: bool = False,
+    current_date: str = "",
 ) -> str:
-    """基础环境提示词 + 网络区域提示 + 配置文档(用户级在前)+ 记忆 + 技能元数据 +
+    """基础环境提示词 + 当前日期 + 网络区域提示 + 配置文档(用户级在前)+ 记忆 + 技能元数据 +
     此前对话摘要,拼成分层 system 文本(spec §5.3 / §6)。"""
     sections = [
         BASE_SYSTEM_PROMPT,
+        *_render_date(current_date),
         *_render_network(network_region, web_search_available),
         *_render_docs(documents),
         *_render_memory(memory),

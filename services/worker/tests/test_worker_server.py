@@ -892,3 +892,42 @@ async def test_max_iterations_is_configurable_and_enforced(sandbox):
     finally:
         await worker_server.stop(None)
     assert resp.stop_reason == "max_iterations"
+
+
+async def test_run_turn_injects_current_date_into_system():
+    # worker 现算的"今天日期"经串联进 system prompt(让模型知道今天/今年,查时事不瞎猜)。
+    provider = _CapturingProvider(_final("ok"))
+    worker_server, wport = await create_worker_server(
+        provider_factory=lambda *a: provider, port=0
+    )
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            await stub.RunTurn(
+                worker_pb2.RunTurnRequest(
+                    agent=worker_pb2.Agent(model="m", provider="fake"),
+                    messages=[],
+                    user_message="今年发生了什么",
+                    sandbox_endpoint="localhost:1",
+                    work_subdir="s1",
+                )
+            )
+    finally:
+        await worker_server.stop(None)
+    assert "Today's date is" in provider.last_request.system
+
+
+def test_timezone_offset_actually_changes_injected_date():
+    # offset 真生效:相差 26h(>24h)的两时区,任意时刻注入的日期必不同(否则配置形同虚设)。
+    import re
+
+    from agent_cloud_worker.server import _build_context_and_history
+
+    req = worker_pb2.RunTurnRequest(
+        agent=worker_pb2.Agent(model="m", provider="fake"), user_message="x"
+    )
+    sys_plus14, _ = _build_context_and_history(req, tz_offset_hours=14)
+    sys_minus12, _ = _build_context_and_history(req, tz_offset_hours=-12)
+    d1 = re.search(r"Today's date is (\d{4}-\d{2}-\d{2})", sys_plus14).group(1)
+    d2 = re.search(r"Today's date is (\d{4}-\d{2}-\d{2})", sys_minus12).group(1)
+    assert d1 != d2

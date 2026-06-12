@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from agent_cloud_worker.web_search import DEFAULT_SEARCH_ENDPOINT
@@ -26,6 +27,12 @@ class WorkerSettings(BaseSettings):
     # 单个回合内 LLM↔工具往返的迭代上限。跑满即 stop_reason="max_iterations" 收尾(回合不完整,
     # 由后端 best-effort 处理)。调大 → 允许更长的自主链路,但最坏耗时/输出预算按倍数上升。
     max_iterations: int = 20
+
+    # 注入 system prompt 的"今天日期"用的固定时区偏移(小时,不含夏令时)。默认 +8(北京):
+    # worker 取此时区当前日期告诉模型,解决模型不知"今天/今年"查时事瞎猜。范围 (-24, 24)——越界
+    # 启动即 fail-fast(否则每回合 timezone() 抛错被误判成客户端错误)。海外部署按当地改
+    # (⚠️ DST 地区如美西在夏令时期会差 1 小时,跨午夜窗口可能差一天)。
+    timezone_offset_hours: float = Field(default=8.0, gt=-24, lt=24)
 
     # Agent 所在网络区域,决定是否向 system prompt 注入"哪些站点不可达"的提示。
     # "cn" 或阿里云 region id("cn-hangzhou" 等)=中国大陆:注入(首选 cn.bing.com 搜索,

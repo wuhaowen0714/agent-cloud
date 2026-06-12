@@ -181,3 +181,19 @@ def test_cn_network_uses_curl_search_when_no_web_search():
     )
     assert "cn.bing.com" in out
     assert "web_search tool" not in out
+
+
+def test_current_date_injected_when_provided():
+    # 提供 current_date → 注入"今天日期"+ 相对日期引导,排在基础环境提示之后。
+    out = build_system_prompt(
+        documents=[], memory=[], skills=[], current_date="2026-06-12 (Friday)"
+    )
+    assert "Today's date is 2026-06-12 (Friday)" in out
+    assert "relative dates" in out
+    assert out.index("autonomous AI agent") < out.index("Today's date is")
+
+
+def test_no_date_section_when_empty():
+    # 默认(未提供 current_date)不注入日期段,保持 prompt 干净。
+    out = build_system_prompt(documents=[], memory=[], skills=[])
+    assert "Today's date is" not in out
