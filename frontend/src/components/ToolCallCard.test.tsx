@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import { ToolCallCard } from "./ToolCallCard"
 
@@ -16,7 +16,7 @@ describe("ToolCallCard", () => {
     expect(screen.queryByText(/def f\(\)/)).not.toBeInTheDocument()
   })
 
-  it("bash: command is the summary, output is the result", () => {
+  it("bash: command 是摘要;成功输出默认折叠,点头部展开", () => {
     render(
       <ToolCallCard
         call={{ id: "c2", name: "bash", arguments: { command: "ls -la" } }}
@@ -25,10 +25,12 @@ describe("ToolCallCard", () => {
     )
     expect(screen.getByText("bash")).toBeInTheDocument()
     expect(screen.getByText("ls -la")).toBeInTheDocument()
-    expect(screen.getByText("total 0")).toBeInTheDocument()
+    expect(screen.queryByText("total 0")).not.toBeInTheDocument() // 成功默认折叠
+    fireEvent.click(screen.getByRole("button"))
+    expect(screen.getByText("total 0")).toBeInTheDocument() // 点头部展开
   })
 
-  it("renders an error result", () => {
+  it("失败结果默认展开(无需点击即可见)", () => {
     render(
       <ToolCallCard
         call={{ id: "c3", name: "bash", arguments: { command: "boom" } }}
@@ -36,6 +38,18 @@ describe("ToolCallCard", () => {
       />,
     )
     expect(screen.getByText("exit 1: nope")).toBeInTheDocument()
+  })
+
+  it("失败默认展开后可手动收起(收起不被错误态强制反弹)", () => {
+    render(
+      <ToolCallCard
+        call={{ id: "c5", name: "bash", arguments: { command: "boom" } }}
+        result={{ call_id: "c5", content: "exit 1: nope", is_error: true }}
+      />,
+    )
+    expect(screen.getByText("exit 1: nope")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button"))
+    expect(screen.queryByText("exit 1: nope")).not.toBeInTheDocument()
   })
 
   it("no result yet → renders the running state without crashing", () => {

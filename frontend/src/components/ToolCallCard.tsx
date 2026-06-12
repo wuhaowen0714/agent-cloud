@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import type { ToolProgress } from "../blocks"
 import type { ToolCall, ToolResult } from "../types"
 
@@ -28,6 +28,11 @@ export function ToolCallCard({
   const [open, setOpen] = useState(false)
   const { summary, details } = describe(call)
   const error = result?.is_error ?? false
+  // 失败结果默认展开(错误通常要立刻看);成功保持折叠。仅在 error 由 false→true 时触发一次,
+  // 故用户手动收起后不会被反弹。
+  useEffect(() => {
+    if (error) setOpen(true)
+  }, [error])
 
   if (progress) {
     // 参数生成中(LLM 流式累积):只给轻量进度,不渲染内容。ToolCallStarted 到达后
@@ -58,8 +63,8 @@ export function ToolCallCard({
       {/* 头部:工具名徽章 + 主摘要 + 状态;有细节时整行可点开 */}
       <button
         type="button"
-        disabled={!details}
-        aria-expanded={details ? open : undefined}
+        disabled={!details && !result?.content}
+        aria-expanded={details || result?.content ? open : undefined}
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-start gap-2 px-2.5 py-1.5 text-left disabled:cursor-default"
       >
@@ -76,7 +81,9 @@ export function ToolCallCard({
             <span className="font-semibold text-brand-600">✓</span>
           )}
         </span>
-        {details && <span className="mt-0.5 shrink-0 text-slate-400">{open ? "▾" : "▸"}</span>}
+        {(details || result?.content) && (
+          <span className="mt-0.5 shrink-0 text-slate-400">{open ? "▾" : "▸"}</span>
+        )}
       </button>
 
       {/* 展开:完整写入内容 / 参数 */}
@@ -86,8 +93,8 @@ export function ToolCallCard({
         </pre>
       )}
 
-      {/* 结果:输出或错误(成功 teal 侧、出错红底) */}
-      {result && result.content && (
+      {/* 结果:输出或错误(成功 teal 侧、出错红底)。默认折叠,随头部 open 展开(失败自动展开)。 */}
+      {open && result && result.content && (
         <pre
           className={`max-h-60 overflow-auto whitespace-pre-wrap break-words border-t px-2.5 py-2 font-mono ${
             error ? "border-red-100 bg-red-50 text-red-700" : "border-slate-100 bg-slate-50 text-slate-600"
