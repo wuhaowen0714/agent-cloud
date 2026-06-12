@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import fcntl
 import os
 import pty
@@ -48,7 +49,11 @@ class PtySession:
         self._extra_bash_args = extra_bash_args or []
         self._master: int | None = None
         self._proc: asyncio.subprocess.Process | None = None
-        self._queue: asyncio.Queue[bytes] = asyncio.Queue()
+        # 有界输出队列(256×64KB≈16MB 上界):满则暂停读 → 内核反压到 PTY 写端,
+        # 防 `yes`/`cat 大文件` 把内存撑爆(inprocess 模式即 backend 自身)。
+        self._queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=256)
+        self._reader_paused = False
+        self._exit_watcher: asyncio.Task[None] | None = None
         self._closed = False
 
     @staticmethod
@@ -96,9 +101,28 @@ class PtySession:
         os.set_blocking(master, False)
         self._master = master
         asyncio.get_running_loop().add_reader(master, self._on_readable)
+        # 监控子进程退出:bash 退出但后台作业(`sleep 1000 &`)持有 slave 时 master 永不
+        # EOF,read() 会挂死。proc 退出即主动入队哨兵,保证收尾(审查 M4)。
+        self._exit_watcher = asyncio.create_task(self._watch_exit())
+
+    async def _watch_exit(self) -> None:
+        assert self._proc is not None
+        await self._proc.wait()
+        with contextlib.suppress(Exception):
+            await self._queue.put(b"")  # 哨兵:即使 master 未 EOF 也让 read() 收尾
 
     def _on_readable(self) -> None:
         assert self._master is not None
+        loop = asyncio.get_running_loop()
+        # 背压:队列满 → 摘掉 reader(数据留在 tty 缓冲,内核反压 PTY 写端),
+        # read() 消费出空位后恢复。
+        if self._queue.full():
+            try:
+                loop.remove_reader(self._master)
+            except (ValueError, OSError):
+                pass
+            self._reader_paused = True
+            return
         try:
             data = os.read(self._master, 65536)
         except (BlockingIOError, InterruptedError):
@@ -109,25 +133,63 @@ class PtySession:
             self._queue.put_nowait(data)
         else:
             try:
-                asyncio.get_running_loop().remove_reader(self._master)
+                loop.remove_reader(self._master)
             except (ValueError, OSError):
                 pass
             self._queue.put_nowait(b"")  # EOF 哨兵
 
     async def read(self) -> bytes:
         """下一段 PTY 输出;子进程退出后返回 b""(哨兵)。"""
-        return await self._queue.get()
+        data = await self._queue.get()
+        # 之前因满暂停过 → 现在腾出空位,恢复读
+        if self._reader_paused and self._master is not None and not self._closed:
+            self._reader_paused = False
+            try:
+                asyncio.get_running_loop().add_reader(self._master, self._on_readable)
+            except (ValueError, OSError):
+                pass
+        return data
 
     async def write(self, data: bytes) -> None:
-        if self._master is not None and not self._closed:
+        # master 非阻塞:tty 输入缓冲满(前台进程不读 stdin + 大段粘贴)时 os.write 抛
+        # BlockingIOError 且只写部分。必须循环写余下字节、满时等可写,否则静默丢输入。
+        if self._master is None or self._closed:
+            return
+        loop = asyncio.get_running_loop()
+        mv = memoryview(data)
+        while mv:
             try:
-                os.write(self._master, data)
+                n = os.write(self._master, mv)
+                mv = mv[n:]
+            except (BlockingIOError, InterruptedError):
+                fut: asyncio.Future[None] = loop.create_future()
+
+                def _writable(_f: asyncio.Future[None] = fut) -> None:
+                    loop.remove_writer(self._master)
+                    if not _f.done():
+                        _f.set_result(None)
+
+                loop.add_writer(self._master, _writable)
+                try:
+                    await fut
+                except asyncio.CancelledError:
+                    with contextlib.suppress(ValueError, OSError):
+                        loop.remove_writer(self._master)
+                    raise
             except OSError:
-                pass  # 子进程已退出,写入丢弃
+                return  # 子进程已退出,写入丢弃
 
     def resize(self, rows: int, cols: int) -> None:
-        if self._master is not None:
-            self._set_winsize(self._master, rows or 24, cols or 80)
+        if self._master is None:
+            return
+        # 钳到 1..65535:struct.pack("H") 溢出会抛 struct.error(非 OSError),
+        # 任意客户端发超界 resize 即可打死输入泵 → 半死终端(审查 M3)。
+        rows = max(1, min(65535, rows or 24))
+        cols = max(1, min(65535, cols or 80))
+        try:
+            self._set_winsize(self._master, rows, cols)
+        except OSError:
+            pass
 
     @staticmethod
     def _set_winsize(fd: int, rows: int, cols: int) -> None:
@@ -141,6 +203,8 @@ class PtySession:
         if self._closed:
             return
         self._closed = True
+        if self._exit_watcher is not None:
+            self._exit_watcher.cancel()
         if self._master is not None:
             try:
                 asyncio.get_running_loop().remove_reader(self._master)

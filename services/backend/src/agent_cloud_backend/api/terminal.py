@@ -69,9 +69,12 @@ async def _pump_ws_to_worker(ws, call, on_activity=None) -> None:
         if t is not None:
             try:
                 r = json.loads(t)
+                # 钳到 1..65535:proto uint32 不接受负值、PTY 侧 struct.pack("H") 会溢出
+                rows = max(1, min(65535, int(r["rows"])))
+                cols = max(1, min(65535, int(r["cols"])))
                 await call.write(
                     sandbox_pb2.TerminalClientMsg(
-                        resize=sandbox_pb2.TerminalResize(rows=int(r["rows"]), cols=int(r["cols"]))
+                        resize=sandbox_pb2.TerminalResize(rows=rows, cols=cols)
                     )
                 )
                 if on_activity is not None:
@@ -132,12 +135,6 @@ async def terminal_ws(
         with contextlib.suppress(Exception):
             await prev.close(code=4001)
 
-    conn = await manager.get_endpoint_for_user(user.id)
-    # 终端工作目录 = 用户工作区根(与 agent/文件抽屉同一处,卖点:互相可见)。与 turn.py
-    # 一致:docker 沙箱已把 <host>/<uid>/workspace 挂到 /workspace → work_subdir="."。
-    # inprocess 下沙箱 base 已是 <base>/<uid>,故用 "workspace"(= session.work_subdir 默认,
-    # 不能带 uid 否则 <base>/<uid>/<uid>/workspace 重复)。
-    work_subdir = "." if settings.sandbox_provisioner == "docker" else "workspace"
     # 续租(第二档):用户活动(input/resize)节流 touch last_used_at,防 reaper 中途回收。
     last_touch = 0.0
 
@@ -152,25 +149,34 @@ async def terminal_ws(
                 await SandboxRegistryRepository(db).touch_for_user(user.id)
                 await db.commit()
 
-    channel, call = _open_worker_terminal(settings.worker_endpoint, conn)
+    # 外层 try 覆盖沙箱获取/开流之后的一切,保证 _release 必达(否则 provision 失败会
+    # 在 _active_terminals 留死登记,审查 L1)。
     try:
-        await call.write(
-            sandbox_pb2.TerminalClientMsg(
-                start=sandbox_pb2.TerminalStart(work_subdir=work_subdir, rows=24, cols=80)
-            )
-        )
-        a = asyncio.create_task(_pump_ws_to_worker(websocket, call, _on_activity))
-        b = asyncio.create_task(_pump_worker_to_ws(call, websocket))
+        conn = await manager.get_endpoint_for_user(user.id)
+        # 终端工作目录 = 用户工作区根(与 agent/文件抽屉同一处,卖点:互相可见)。与 turn.py
+        # 一致:docker 沙箱已把 <host>/<uid>/workspace 挂到 /workspace → work_subdir="."。
+        # inprocess 下沙箱 base 已是 <base>/<uid>,故用 "workspace"(不带 uid 否则路径重复)。
+        work_subdir = "." if settings.sandbox_provisioner == "docker" else "workspace"
+        channel, call = _open_worker_terminal(settings.worker_endpoint, conn)
         try:
-            await asyncio.wait({a, b}, return_when=asyncio.FIRST_COMPLETED)
+            await call.write(
+                sandbox_pb2.TerminalClientMsg(
+                    start=sandbox_pb2.TerminalStart(work_subdir=work_subdir, rows=24, cols=80)
+                )
+            )
+            a = asyncio.create_task(_pump_ws_to_worker(websocket, call, _on_activity))
+            b = asyncio.create_task(_pump_worker_to_ws(call, websocket))
+            try:
+                await asyncio.wait({a, b}, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                a.cancel()
+                b.cancel()
+                with contextlib.suppress(Exception):
+                    await call.done_writing()
         finally:
-            a.cancel()
-            b.cancel()
             with contextlib.suppress(Exception):
-                await call.done_writing()
+                await channel.close()
     finally:
         _release(user.id, websocket)
-        with contextlib.suppress(Exception):
-            await channel.close()
         with contextlib.suppress(Exception):
             await websocket.close()
