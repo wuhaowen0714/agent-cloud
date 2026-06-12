@@ -27,8 +27,11 @@ class SandboxServicer(sandbox_pb2_grpc.SandboxServicer):
             md = dict(context.invocation_metadata() or ())
             if not hmac.compare_digest(md.get("x-sandbox-token", ""), self._token):
                 await context.abort(grpc.StatusCode.UNAUTHENTICATED, "invalid sandbox token")
-        content, is_error = run_tool(
-            self._base, request.work_subdir, request.tool_name, request.arguments_json
+        # run_tool 内部是阻塞的(subprocess 等输出)。直接在 async handler 里同步调用会冻结整个
+        # gRPC 事件循环 → 同沙箱的 Terminal 与其它 ExecTool 全部卡住(线上"终端也卡"的根因)。
+        # to_thread 把阻塞 IO 移出事件循环,恢复真正的并发。
+        content, is_error = await asyncio.to_thread(
+            run_tool, self._base, request.work_subdir, request.tool_name, request.arguments_json
         )
         return sandbox_pb2.ExecToolResponse(content=content, is_error=is_error)
 

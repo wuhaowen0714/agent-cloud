@@ -116,7 +116,7 @@ async def test_execute_retries_unavailable_then_succeeds():
             self.fail_times = fail_times
             self.calls = 0
 
-        async def ExecTool(self, req, metadata=None):
+        async def ExecTool(self, req, metadata=None, timeout=None):
             self.calls += 1
             if self.calls <= self.fail_times:
                 raise _Unavailable()
@@ -134,7 +134,7 @@ async def test_execute_gives_up_after_max_attempts():
         def __init__(self):
             self.calls = 0
 
-        async def ExecTool(self, req, metadata=None):
+        async def ExecTool(self, req, metadata=None, timeout=None):
             self.calls += 1
             raise _Unavailable()
 
@@ -153,7 +153,7 @@ async def test_exec_tool_sends_token_metadata():
     captured = {}
 
     class _Stub:
-        async def ExecTool(self, req, metadata=None):
+        async def ExecTool(self, req, metadata=None, timeout=None):
             captured["md"] = metadata
             from agent_cloud.v1 import sandbox_pb2
 
@@ -172,7 +172,7 @@ async def test_exec_tool_no_token_no_metadata():
     captured = {}
 
     class _Stub:
-        async def ExecTool(self, req, metadata=None):
+        async def ExecTool(self, req, metadata=None, timeout=None):
             captured["md"] = metadata
             from agent_cloud.v1 import sandbox_pb2
 

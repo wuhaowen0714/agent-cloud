@@ -1,6 +1,7 @@
 import json
+import time
 
-from agent_cloud_sandbox.tools import _MAX_OUTPUT, run_tool
+from agent_cloud_sandbox.tools import _MAX_OUTPUT, _TRUNCATION_MARKER, run_tool
 
 
 def test_write_then_read(tmp_path):
@@ -61,6 +62,55 @@ def test_bash_failure_strips_grpc_fork_noise(tmp_path):
     assert "real-error" in content
     assert "ev_poll_posix" not in content
     assert "FD from fork parent" not in content
+
+
+def test_bash_timeout_kills_runaway_command(monkeypatch, tmp_path):
+    # 不退出的命令(sleep)→ 超时杀进程组、转 is_error。时间断言防"假绿":必须真被杀(~1s),
+    # 而非等 sleep 自己结束(v2 回归就是杀不掉、卡满 30s 但 err/"timed out" 断言照样过)。
+    from agent_cloud_sandbox import tools
+
+    monkeypatch.setattr(tools, "_BASH_TIMEOUT_SECONDS", 1.0)
+    t0 = time.monotonic()
+    content, err = run_tool(tmp_path, "s1", "bash", json.dumps({"command": "sleep 30"}))
+    elapsed = time.monotonic() - t0
+    assert err is True
+    assert "timed out" in content
+    assert elapsed < 5, f"应被超时杀掉(~1s),实际 {elapsed:.1f}s——kill 没生效"
+
+
+def test_bash_timeout_kills_background_pipe_holder(monkeypatch, tmp_path):
+    # 经典 background-job hang:后台进程持有 stdout 管道,无 timeout 永久卡(沙箱卡死);
+    # timeout + killpg 整组超时杀。时间断言确保真杀掉(~1s)而非卡到 sleep 结束。
+    from agent_cloud_sandbox import tools
+
+    monkeypatch.setattr(tools, "_BASH_TIMEOUT_SECONDS", 1.0)
+    t0 = time.monotonic()
+    content, err = run_tool(
+        tmp_path, "s1", "bash", json.dumps({"command": "sleep 30 & echo started"})
+    )
+    elapsed = time.monotonic() - t0
+    assert err is True
+    assert "timed out" in content
+    assert elapsed < 5, f"后台进程应被 killpg 杀(~1s),实际 {elapsed:.1f}s"
+
+
+def test_bash_caps_runaway_output(tmp_path):
+    # 海量输出(yes 无限)必须有界读 + 超量主动杀:不能全缓进内存(512m 容器秒级 OOM),也不能
+    # 卡满超时。截断到 _MAX_OUTPUT 且快速返回(C2 事故复活路径)。
+    t0 = time.monotonic()
+    content, err = run_tool(tmp_path, "s1", "bash", json.dumps({"command": "yes"}))
+    elapsed = time.monotonic() - t0
+    assert len(content) <= _MAX_OUTPUT + len(_TRUNCATION_MARKER) + 16
+    assert elapsed < 15, f"超量应主动杀、快速返回,实际 {elapsed:.1f}s"
+
+
+def test_bash_stdin_is_devnull(tmp_path):
+    # 读 stdin 的命令(cat 无参)在 DEVNULL 下立即拿到 EOF 返回,而非永久挂起等输入。
+    t0 = time.monotonic()
+    content, err = run_tool(tmp_path, "s1", "bash", json.dumps({"command": "cat"}))
+    elapsed = time.monotonic() - t0
+    assert err is False
+    assert elapsed < 5
 
 
 def test_edit_replaces_text(tmp_path):

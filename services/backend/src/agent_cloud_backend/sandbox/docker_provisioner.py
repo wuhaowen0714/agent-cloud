@@ -113,6 +113,10 @@ class DockerProvisioner:
             tmpfs={"/tmp": "rw,size=128m"},  # /tmp 走 tmpfs,不落容器可写层、限大小
             cap_drop=["ALL"],
             security_opt=["no-new-privileges:true"],
+            # tini 当 PID1 收僵尸:bash 超时被 killpg 杀掉的后台子进程会过继给容器 PID1
+            # (沙箱 server, asyncio,不 waitpid 任意子进程)→ 僵尸累积、占满 pids_limit(256)
+            # → 再次"沙箱不可用"。init=True 让 docker 注入 tini 作 PID1 自动收割僵尸。
+            init=True,
         )
         net_name = f"acsbx-net-{sandbox_id}"
         client = self._docker()
