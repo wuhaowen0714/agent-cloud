@@ -95,8 +95,9 @@ async def test_generates_and_saves_to_workspace():
     # 落盘到 media/picture/,文件名带 id,字节原样透传
     assert saved["path"] == "media/picture/img_abc123.png"
     assert saved["data"] == _PNG
-    # content 含路径,供前端解析渲染
+    # content 含路径(供前端解析渲染)+ 明确"已展示、勿重复"(防模型在正文再插一个坏 markdown 图)
     assert "media/picture/img_abc123.png" in res.content
+    assert "do not embed it again" in res.content
 
 
 async def test_delegates_non_generate_image_to_inner():
