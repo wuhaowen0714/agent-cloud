@@ -78,7 +78,7 @@ export function Composer({
       clearCompaction(sessionId)
     }
   }, [sessionId, compaction, clearCompaction])
-  // 订阅式读取(与 AgentList 共享缓存):patchAgent 失效后 chip 文本自动更新。
+  // 订阅式读取(与 AgentRail 共享缓存):patchAgent 失效后 chip 文本自动更新。
   const { data: agents = [] } = useQuery({
     queryKey: ["agents", userId],
     queryFn: () => api.listAgents(),
