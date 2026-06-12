@@ -1,4 +1,5 @@
 import type { Block } from "../blocks"
+import { stripWorkspaceImageMarkdown } from "../chatText"
 import { Markdown } from "./Markdown"
 import { ThinkingPanel } from "./ThinkingPanel"
 import { ToolCallCard } from "./ToolCallCard"
@@ -12,7 +13,8 @@ export function TurnBlocks({ blocks, streaming = false }: { blocks: Block[]; str
           return <ThinkingPanel key={b.id} text={b.text} active={streaming && i === blocks.length - 1} />
         }
         if (b.kind === "text") {
-          return <Markdown key={b.id}>{b.text}</Markdown>
+          // 剥掉指向工作区的 markdown 图(已由工具卡片展示;正文裸路径渲染会破损)
+          return <Markdown key={b.id}>{stripWorkspaceImageMarkdown(b.text)}</Markdown>
         }
         return <ToolCallCard key={b.id} call={b.call} result={b.result} progress={b.progress} />
       })}

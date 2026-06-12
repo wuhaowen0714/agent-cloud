@@ -30,8 +30,11 @@ GENERATE_IMAGE_SPEC = ToolSpec(
         "Generate an image from a text prompt (text-to-image) and save it into the workspace. "
         "Use this when the user asks you to create, draw, design, or illustrate a picture. "
         "Describe the desired image in detail in 'prompt' (subject, style, lighting, composition). "
-        "The image is saved under media/picture/ in the working directory and the saved path is "
-        "returned; it is shown to the user automatically. This does NOT edit existing images."
+        "The image is saved under media/picture/ in the working directory and shown to the user "
+        "automatically as soon as it is generated. Do NOT embed it again in your reply with "
+        "markdown image syntax such as ![](path), and do NOT paste the file path — it is already "
+        "displayed to the user; just briefly describe the image in words. This does NOT edit "
+        "existing images."
     ),
     input_schema={
         "type": "object",
@@ -241,5 +244,10 @@ class ImageGenExecutor:
             )
         # content 既给模型读,也供前端解析路径渲染图(前端按 call.name==generate_image 提路径)。
         return ToolResult(
-            call_id=call.id, content=f"Generated image saved to {written}", is_error=False
+            call_id=call.id,
+            content=(
+                f"Image generated and shown to the user (saved at {written}). It is already "
+                "displayed — do not embed it again or repeat the path in your reply."
+            ),
+            is_error=False,
         )
