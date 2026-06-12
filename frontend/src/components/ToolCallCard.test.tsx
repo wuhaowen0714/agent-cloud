@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { api } from "../api/client"
 import { ToolCallCard } from "./ToolCallCard"
 
 describe("ToolCallCard", () => {
@@ -82,5 +83,51 @@ describe("ToolCallCard pending(参数生成中)", () => {
       />,
     )
     expect(screen.getByText("已生成 42 字符")).toBeInTheDocument()
+  })
+})
+
+describe("ToolCallCard generate_image", () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it("成功结果:解析落盘路径并在卡片内渲染图片", async () => {
+    vi.spyOn(api, "previewUrl").mockResolvedValue("blob:fake-img")
+    render(
+      <ToolCallCard
+        call={{ id: "g1", name: "generate_image", arguments: { prompt: "a cat" } }}
+        result={{
+          call_id: "g1",
+          content: "Generated image saved to media/picture/img_abc.png",
+          is_error: false,
+        }}
+      />,
+    )
+    const img = await screen.findByRole("img")
+    expect(img).toHaveAttribute("src", "blob:fake-img")
+    // 路径来自结果文本,用带 token 的 fetch 取回 blob 渲染
+    expect(api.previewUrl).toHaveBeenCalledWith("media/picture/img_abc.png")
+  })
+
+  it("失败结果:不渲染图片(也不去取 blob)", () => {
+    const spy = vi.spyOn(api, "previewUrl").mockResolvedValue("blob:x")
+    render(
+      <ToolCallCard
+        call={{ id: "g2", name: "generate_image", arguments: { prompt: "x" } }}
+        result={{ call_id: "g2", content: "generate_image failed: timeout", is_error: true }}
+      />,
+    )
+    expect(screen.queryByRole("img")).toBeNull()
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it("非 generate_image 工具:不渲染图片", () => {
+    const spy = vi.spyOn(api, "previewUrl").mockResolvedValue("blob:x")
+    render(
+      <ToolCallCard
+        call={{ id: "g3", name: "bash", arguments: { command: "ls" } }}
+        result={{ call_id: "g3", content: "ok", is_error: false }}
+      />,
+    )
+    expect(screen.queryByRole("img")).toBeNull()
+    expect(spy).not.toHaveBeenCalled()
   })
 })

@@ -42,3 +42,35 @@ async def test_no_token_means_open(tmp_path):
         assert resp.is_error is False
     finally:
         await server.stop(None)
+
+
+async def _write_binary(port, token_md, *, content=b"\x89PNG\r\n\x1a\n\xff\x00\xfe"):
+    md = (("x-sandbox-token", token_md),) if token_md is not None else ()
+    async with grpc.aio.insecure_channel(f"localhost:{port}") as ch:
+        stub = sandbox_pb2_grpc.SandboxStub(ch)
+        return await stub.WriteBinary(
+            sandbox_pb2.WriteBinaryRequest(
+                path="media/picture/x.png", content=content, work_subdir="."
+            ),
+            metadata=md,
+        )
+
+
+async def test_write_binary_token_enforced_and_writes(tmp_path):
+    # 新增 RPC 必须同样受 token 保护(否则成为未鉴权的任意写文件旁路),且落地是原始二进制。
+    server, port = await create_server(tmp_path, host="localhost", port=0, token="sekret")
+    try:
+        png = b"\x89PNG\r\n\x1a\n\xff\x00\xfedata\x01\x02"
+        resp = await _write_binary(port, "sekret", content=png)
+        assert resp.is_error is False
+        assert resp.path == "media/picture/x.png"
+        assert (tmp_path / "media" / "picture" / "x.png").read_bytes() == png
+        # 错误 token / 无 token 一律被拒
+        with pytest.raises(grpc.aio.AioRpcError) as ei:
+            await _write_binary(port, "wrong")
+        assert ei.value.code() == grpc.StatusCode.UNAUTHENTICATED
+        with pytest.raises(grpc.aio.AioRpcError) as ei2:
+            await _write_binary(port, None)
+        assert ei2.value.code() == grpc.StatusCode.UNAUTHENTICATED
+    finally:
+        await server.stop(None)

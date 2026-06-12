@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1c\x61gent_cloud/v1/sandbox.proto\x12\x0e\x61gent_cloud.v1\"\x8d\x01\n\x11TerminalClientMsg\x12.\n\x05start\x18\x01 \x01(\x0b\x32\x1d.agent_cloud.v1.TerminalStartH\x00\x12\x0f\n\x05input\x18\x02 \x01(\x0cH\x00\x12\x30\n\x06resize\x18\x03 \x01(\x0b\x32\x1e.agent_cloud.v1.TerminalResizeH\x00\x42\x05\n\x03msg\"@\n\rTerminalStart\x12\x13\n\x0bwork_subdir\x18\x01 \x01(\t\x12\x0c\n\x04rows\x18\x02 \x01(\r\x12\x0c\n\x04\x63ols\x18\x03 \x01(\r\",\n\x0eTerminalResize\x12\x0c\n\x04rows\x18\x01 \x01(\r\x12\x0c\n\x04\x63ols\x18\x02 \x01(\r\"A\n\x11TerminalServerMsg\x12\x10\n\x06output\x18\x01 \x01(\x0cH\x00\x12\x13\n\texit_code\x18\x02 \x01(\x05H\x00\x42\x05\n\x03msg\"b\n\x0f\x45xecToolRequest\x12\x0f\n\x07\x63\x61ll_id\x18\x01 \x01(\t\x12\x11\n\ttool_name\x18\x02 \x01(\t\x12\x16\n\x0e\x61rguments_json\x18\x03 \x01(\t\x12\x13\n\x0bwork_subdir\x18\x04 \x01(\t\"5\n\x10\x45xecToolResponse\x12\x0f\n\x07\x63ontent\x18\x01 \x01(\t\x12\x10\n\x08is_error\x18\x02 \x01(\x08\x32\xae\x01\n\x07Sandbox\x12M\n\x08\x45xecTool\x12\x1f.agent_cloud.v1.ExecToolRequest\x1a .agent_cloud.v1.ExecToolResponse\x12T\n\x08Terminal\x12!.agent_cloud.v1.TerminalClientMsg\x1a!.agent_cloud.v1.TerminalServerMsg(\x01\x30\x01\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1c\x61gent_cloud/v1/sandbox.proto\x12\x0e\x61gent_cloud.v1\"\x8d\x01\n\x11TerminalClientMsg\x12.\n\x05start\x18\x01 \x01(\x0b\x32\x1d.agent_cloud.v1.TerminalStartH\x00\x12\x0f\n\x05input\x18\x02 \x01(\x0cH\x00\x12\x30\n\x06resize\x18\x03 \x01(\x0b\x32\x1e.agent_cloud.v1.TerminalResizeH\x00\x42\x05\n\x03msg\"@\n\rTerminalStart\x12\x13\n\x0bwork_subdir\x18\x01 \x01(\t\x12\x0c\n\x04rows\x18\x02 \x01(\r\x12\x0c\n\x04\x63ols\x18\x03 \x01(\r\",\n\x0eTerminalResize\x12\x0c\n\x04rows\x18\x01 \x01(\r\x12\x0c\n\x04\x63ols\x18\x02 \x01(\r\"A\n\x11TerminalServerMsg\x12\x10\n\x06output\x18\x01 \x01(\x0cH\x00\x12\x13\n\texit_code\x18\x02 \x01(\x05H\x00\x42\x05\n\x03msg\"b\n\x0f\x45xecToolRequest\x12\x0f\n\x07\x63\x61ll_id\x18\x01 \x01(\t\x12\x11\n\ttool_name\x18\x02 \x01(\t\x12\x16\n\x0e\x61rguments_json\x18\x03 \x01(\t\x12\x13\n\x0bwork_subdir\x18\x04 \x01(\t\"5\n\x10\x45xecToolResponse\x12\x0f\n\x07\x63ontent\x18\x01 \x01(\t\x12\x10\n\x08is_error\x18\x02 \x01(\x08\"H\n\x12WriteBinaryRequest\x12\x0c\n\x04path\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\x0c\x12\x13\n\x0bwork_subdir\x18\x03 \x01(\t\"D\n\x13WriteBinaryResponse\x12\x0c\n\x04path\x18\x01 \x01(\t\x12\x10\n\x08is_error\x18\x02 \x01(\x08\x12\r\n\x05\x65rror\x18\x03 \x01(\t2\x86\x02\n\x07Sandbox\x12M\n\x08\x45xecTool\x12\x1f.agent_cloud.v1.ExecToolRequest\x1a .agent_cloud.v1.ExecToolResponse\x12V\n\x0bWriteBinary\x12\".agent_cloud.v1.WriteBinaryRequest\x1a#.agent_cloud.v1.WriteBinaryResponse\x12T\n\x08Terminal\x12!.agent_cloud.v1.TerminalClientMsg\x1a!.agent_cloud.v1.TerminalServerMsg(\x01\x30\x01\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -43,6 +43,10 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_EXECTOOLREQUEST']._serialized_end=469
   _globals['_EXECTOOLRESPONSE']._serialized_start=471
   _globals['_EXECTOOLRESPONSE']._serialized_end=524
-  _globals['_SANDBOX']._serialized_start=527
-  _globals['_SANDBOX']._serialized_end=701
+  _globals['_WRITEBINARYREQUEST']._serialized_start=526
+  _globals['_WRITEBINARYREQUEST']._serialized_end=598
+  _globals['_WRITEBINARYRESPONSE']._serialized_start=600
+  _globals['_WRITEBINARYRESPONSE']._serialized_end=668
+  _globals['_SANDBOX']._serialized_start=671
+  _globals['_SANDBOX']._serialized_end=933
 # @@protoc_insertion_point(module_scope)

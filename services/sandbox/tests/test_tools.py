@@ -1,7 +1,12 @@
 import json
 import time
 
-from agent_cloud_sandbox.tools import _MAX_OUTPUT, _TRUNCATION_MARKER, run_tool
+from agent_cloud_sandbox.tools import (
+    _MAX_OUTPUT,
+    _TRUNCATION_MARKER,
+    run_tool,
+    run_write_binary,
+)
 
 
 def test_write_then_read(tmp_path):
@@ -222,3 +227,60 @@ def test_symlink_escape_rejected(tmp_path):
     content, err = run_tool(tmp_path, "s1", "read_file", '{"path": "link/hosts"}')
     assert err is True
     assert "escapes working directory" in content
+
+
+# --- run_write_binary:worker 原生工具(图片生成)的二进制落盘 ---
+
+# 含非 UTF-8 字节的真二进制(PNG 魔数 + 0xFF/0x00):若误用 write_text 会 UnicodeEncodeError 或损坏。
+_PNG_BYTES = b"\x89PNG\r\n\x1a\n\x00\x01\xff\xfe\xfdbinary\x00data"
+
+
+def test_write_binary_roundtrip(tmp_path):
+    rel, err = run_write_binary(tmp_path, "s1", "media/picture/img.png", _PNG_BYTES)
+    assert err is False
+    assert rel == "media/picture/img.png"
+    # 自动建嵌套父目录,落地是逐字节相同的原始二进制(非 base64/非文本)
+    written = tmp_path / "s1" / "media" / "picture" / "img.png"
+    assert written.read_bytes() == _PNG_BYTES
+
+
+def test_write_binary_overwrites(tmp_path):
+    run_write_binary(tmp_path, "s1", "a.png", b"old")
+    rel, err = run_write_binary(tmp_path, "s1", "a.png", b"new-bytes")
+    assert err is False
+    assert (tmp_path / "s1" / "a.png").read_bytes() == b"new-bytes"
+
+
+def test_write_binary_path_escape_rejected(tmp_path):
+    rel, err = run_write_binary(tmp_path, "s1", "../evil.png", _PNG_BYTES)
+    assert err is True
+    assert "escapes working directory" in rel
+    assert not (tmp_path / "evil.png").exists()
+
+
+def test_write_binary_work_subdir_escape_rejected(tmp_path):
+    rel, err = run_write_binary(tmp_path, "../evil", "img.png", _PNG_BYTES)
+    assert err is True
+    assert "invalid work_subdir" in rel
+    assert not (tmp_path.parent / "evil").exists()
+
+
+def test_write_binary_empty_work_subdir_rejected(tmp_path):
+    rel, err = run_write_binary(tmp_path, "", "img.png", _PNG_BYTES)
+    assert err is True
+    assert "invalid work_subdir" in rel
+
+
+def test_write_binary_empty_path_rejected(tmp_path):
+    rel, err = run_write_binary(tmp_path, "s1", "", _PNG_BYTES)
+    assert err is True
+    assert "path is required" in rel
+
+
+def test_write_binary_os_error_does_not_leak_base(tmp_path):
+    # 父路径已是文件时写入失败 → OS 错误必须剥掉宿主绝对路径(同 run_tool §6)。
+    run_write_binary(tmp_path, "s1", "blocker", b"x")  # 先占一个普通文件
+    rel, err = run_write_binary(tmp_path, "s1", "blocker/child.png", _PNG_BYTES)
+    assert err is True
+    assert str(tmp_path) not in rel
+    assert str(tmp_path.resolve()) not in rel

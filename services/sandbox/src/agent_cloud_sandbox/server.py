@@ -6,9 +6,10 @@ from pathlib import Path
 
 import grpc
 from agent_cloud.v1 import sandbox_pb2, sandbox_pb2_grpc
+from agent_cloud_common import MAX_GRPC_MESSAGE_BYTES
 
 from agent_cloud_sandbox.pty_session import PtySession
-from agent_cloud_sandbox.tools import _resolve_within, run_tool
+from agent_cloud_sandbox.tools import _resolve_within, run_tool, run_write_binary
 
 
 class SandboxServicer(sandbox_pb2_grpc.SandboxServicer):
@@ -34,6 +35,23 @@ class SandboxServicer(sandbox_pb2_grpc.SandboxServicer):
             run_tool, self._base, request.work_subdir, request.tool_name, request.arguments_json
         )
         return sandbox_pb2.ExecToolResponse(content=content, is_error=is_error)
+
+    async def WriteBinary(
+        self, request: sandbox_pb2.WriteBinaryRequest, context: grpc.aio.ServicerContext
+    ) -> sandbox_pb2.WriteBinaryResponse:
+        # ⚠️ 复制 ExecTool 的 token 校验(本文件注释明确要求:新增 RPC 必须复制,否则成为未鉴权
+        # 旁路——可绕过模型直接往用户工作区写任意文件)。
+        if self._token:
+            md = dict(context.invocation_metadata() or ())
+            if not hmac.compare_digest(md.get("x-sandbox-token", ""), self._token):
+                await context.abort(grpc.StatusCode.UNAUTHENTICATED, "invalid sandbox token")
+        # 写盘是阻塞 IO,to_thread 移出事件循环(同 ExecTool:否则冻结 Terminal/其它 RPC)。
+        result, is_error = await asyncio.to_thread(
+            run_write_binary, self._base, request.work_subdir, request.path, request.content
+        )
+        if is_error:
+            return sandbox_pb2.WriteBinaryResponse(path="", is_error=True, error=result)
+        return sandbox_pb2.WriteBinaryResponse(path=result, is_error=False, error="")
 
     async def Terminal(self, request_iterator, context: grpc.aio.ServicerContext):
         # ⚠️ 复制 ExecTool 的 token 校验(server.py 注释明确要求:新增 RPC 必须复制,
@@ -86,7 +104,14 @@ async def create_server(
 
     token 非空 → servicer 校验调用方 metadata x-sandbox-token;空 → 开放(向后兼容)。
     """
-    server = grpc.aio.server()
+    # 接收上限设大:WriteBinary 要收图片字节(可能数 MB),gRPC 默认 4MiB 会 RESOURCE_EXHAUSTED
+    # (worker 端 channel 已两侧开到 MAX_GRPC_MESSAGE_BYTES,但接收上限由本 server 自己说了算)。
+    server = grpc.aio.server(
+        options=[
+            ("grpc.max_receive_message_length", MAX_GRPC_MESSAGE_BYTES),
+            ("grpc.max_send_message_length", MAX_GRPC_MESSAGE_BYTES),
+        ]
+    )
     sandbox_pb2_grpc.add_SandboxServicer_to_server(SandboxServicer(base_workdir, token), server)
     bound_port = server.add_insecure_port(f"{host}:{port}")
     await server.start()

@@ -84,3 +84,29 @@ class SandboxToolExecutor:
                     content=f"sandbox RPC failed: {exc.code().name}",
                     is_error=True,
                 )
+
+    async def write_binary(self, path: str, content: bytes) -> str:
+        """把二进制字节落进工作区(worker 原生工具如 generate_image 用),返回写入的相对路径;失败
+        抛 RuntimeError。走独立的 WriteBinary RPC:bytes 不经 JSON/base64,落地即原始文件
+        (write_file 是 write_text,塞二进制会损坏 + 让 /files/raw 的 MIME 探测失效)。"""
+        if self._stub is None:
+            raise RuntimeError("sandbox channel unavailable")
+        req = sandbox_pb2.WriteBinaryRequest(
+            path=path, content=content, work_subdir=self._work_subdir
+        )
+        for attempt in range(self._max_attempts):
+            try:
+                resp = await self._stub.WriteBinary(
+                    req, metadata=self._md, timeout=self._exec_timeout
+                )
+                if resp.is_error:
+                    raise RuntimeError(resp.error or "write_binary failed")
+                return resp.path
+            except grpc.aio.AioRpcError as exc:
+                # 冷启动期 UNAVAILABLE 重试(同 ExecTool);其它错误收敛成简短消息——不把
+                # AioRpcError 原文(含 debug peer 内网地址)外带给模型/用户(与 execute 一致)。
+                if exc.code() == grpc.StatusCode.UNAVAILABLE and attempt < self._max_attempts - 1:
+                    await asyncio.sleep(self._retry_backoff)
+                    continue
+                raise RuntimeError(f"sandbox write_binary failed: {exc.code().name}") from exc
+        raise RuntimeError("sandbox write_binary failed: retries exhausted")

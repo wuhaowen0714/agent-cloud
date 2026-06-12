@@ -24,6 +24,10 @@ async def main() -> None:
         web_search_endpoint=settings.web_search_endpoint,
         web_search_api_key=settings.web_search_api_key,
         web_search_max_results=settings.web_search_max_results,
+        image_gen_endpoint=settings.image_gen_endpoint,
+        # 留空回退到 web_search 的同一 sophnet 平台 key(用户只配一个 key 即可两用)。
+        image_gen_api_key=settings.image_gen_api_key or settings.web_search_api_key,
+        image_gen_model=settings.image_gen_model,
     )
     logger.info("agent-cloud worker listening on %s:%s", settings.grpc_host, port)
     await server.wait_for_termination()
