@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { Folder, Sparkles, Wrench } from "lucide-react"
+import { Folder, SquareTerminal, Sparkles, Wrench } from "lucide-react"
 import { useRef, useState } from "react"
 import { api } from "../api/client"
 import { useStore } from "../store"
@@ -23,6 +23,7 @@ export function TopBar() {
   const agentId = useStore((s) => s.agentId)
   const sessionId = useStore((s) => s.sessionId)
   const toggleFileDrawer = useStore((s) => s.toggleFileDrawer)
+  const toggleTerminal = useStore((s) => s.toggleTerminal)
   // 工具/技能弹层:一次只开一个;无选中 agent 时按钮禁用(开关是 per-agent 的)
   const [open, setOpen] = useState<"tools" | "skills" | null>(null)
   const toolsBtn = useRef<HTMLButtonElement>(null)
@@ -73,6 +74,16 @@ export function TopBar() {
       >
         <Sparkles size={14} className="text-slate-400" />
         <span className="hidden sm:inline">技能</span>
+      </button>
+      <button
+        type="button"
+        title="终端"
+        aria-label="终端"
+        onClick={toggleTerminal}
+        className={CHIP_BTN}
+      >
+        <SquareTerminal size={14} className="text-slate-400" />
+        <span className="hidden sm:inline">终端</span>
       </button>
       <button
         type="button"

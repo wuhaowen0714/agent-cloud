@@ -2,6 +2,10 @@ syntax = "proto3";
 
 package agent_cloud.v1;
 
+// 终端双向流消息(TerminalClientMsg/TerminalServerMsg)定义在 sandbox.proto;
+// worker 的 Terminal 是到 sandbox 的纯透传桥,复用同 package 的同名消息。
+import "agent_cloud/v1/sandbox.proto";
+
 // worker:跑一个回合(后端→worker)。一元 RunTurn + 流式 RunTurnStream。
 service Worker {
   rpc RunTurn(RunTurnRequest) returns (RunTurnResponse);
@@ -9,6 +13,9 @@ service Worker {
   rpc Summarize(SummarizeRequest) returns (SummarizeResponse);
   rpc ExtractMemory(ExtractMemoryRequest) returns (ExtractMemoryResponse);
   rpc GenerateTitle(GenerateTitleRequest) returns (GenerateTitleResponse);
+  // 交互式终端透传桥(backend→worker→sandbox)。sandbox 连接信息走 gRPC
+  // metadata(x-sandbox-endpoint / x-sandbox-token),不进消息体。
+  rpc Terminal(stream TerminalClientMsg) returns (stream TerminalServerMsg);
 }
 
 // 会话标题:基于首条用户提问起 ≤16 字短名(backend 回合后异步调用)。

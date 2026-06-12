@@ -6,6 +6,7 @@ import { ChatView } from "./components/ChatView"
 import { FileDrawer } from "./components/files/FileDrawer"
 import { SettingsDrawer } from "./components/settings/SettingsDrawer"
 import { Sidebar } from "./components/Sidebar"
+import { TerminalWindow } from "./components/terminal/TerminalWindow"
 import { TopBar } from "./components/TopBar"
 import { useStore } from "./store"
 
@@ -15,6 +16,13 @@ let booted = false
 export default function App() {
   const [booting, setBooting] = useState(true)
   const user = useStore((s) => s.user)
+  const terminalOpen = useStore((s) => s.terminalOpen)
+  // 终端常驻挂载闸:首次打开后保持挂载(收起只是滑出动画,WS/PTY/缓冲保留——
+  // Ghostty quick-terminal 语义)。logout 时整棵树卸载,连接随之断开,不跨用户泄漏。
+  const [terminalMounted, setTerminalMounted] = useState(false)
+  useEffect(() => {
+    if (terminalOpen) setTerminalMounted(true)
+  }, [terminalOpen])
 
   // 启动:用 httpOnly refresh cookie 静默换 access,再拉 me;成功则进入主界面,否则登录页。
   useEffect(() => {
@@ -52,6 +60,7 @@ export default function App() {
       </main>
       <FileDrawer />
       <SettingsDrawer />
+      {terminalMounted && <TerminalWindow />}
     </div>
   )
 }

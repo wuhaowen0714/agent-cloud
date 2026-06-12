@@ -43,9 +43,7 @@ def test_bash_success_returns_stdout_only(tmp_path):
 
 def test_bash_nonzero_includes_stderr(tmp_path):
     # On failure stderr is still surfaced (in the error message) so the model can debug. #3
-    content, err = run_tool(
-        tmp_path, "s1", "bash", '{"command": "echo boom 1>&2; exit 3"}'
-    )
+    content, err = run_tool(tmp_path, "s1", "bash", '{"command": "echo boom 1>&2; exit 3"}')
     assert err is True
     assert "boom" in content
 
@@ -129,9 +127,7 @@ def test_absolute_path_rejected(tmp_path):
 
 def test_work_subdir_escape_rejected(tmp_path):
     # The sandbox owns per-user isolation (spec §11): work_subdir must not escape base. #4
-    content, err = run_tool(
-        tmp_path, "../evil", "write_file", '{"path": "a.txt", "content": "x"}'
-    )
+    content, err = run_tool(tmp_path, "../evil", "write_file", '{"path": "a.txt", "content": "x"}')
     assert err is True
     assert "invalid work_subdir" in content
     # nothing written outside base
@@ -139,9 +135,7 @@ def test_work_subdir_escape_rejected(tmp_path):
 
 
 def test_work_subdir_absolute_rejected(tmp_path):
-    content, err = run_tool(
-        tmp_path, "/etc", "write_file", '{"path": "a.txt", "content": "x"}'
-    )
+    content, err = run_tool(tmp_path, "/etc", "write_file", '{"path": "a.txt", "content": "x"}')
     assert err is True
     assert "invalid work_subdir" in content
 

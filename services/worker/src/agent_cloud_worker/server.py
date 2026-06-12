@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Callable
 
 import grpc
-from agent_cloud.v1 import worker_pb2, worker_pb2_grpc
+from agent_cloud.v1 import sandbox_pb2_grpc, worker_pb2, worker_pb2_grpc
 from agent_cloud_common import (
     MAX_GRPC_MESSAGE_BYTES,
     CompletionRequest,
@@ -203,6 +204,36 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                 logger.exception("RunTurnStream failed mid-stream")
                 await context.abort(grpc.StatusCode.INTERNAL, "turn failed")
                 return
+
+    async def Terminal(self, request_iterator, context: grpc.aio.ServicerContext):
+        # 纯透传桥:backend→worker→sandbox。sandbox 连接信息走 gRPC metadata
+        # (不进消息体、不回前端)。双向泵:client→sandbox、sandbox→client。
+        md = dict(context.invocation_metadata() or ())
+        endpoint = md.get("x-sandbox-endpoint", "")
+        token = md.get("x-sandbox-token", "")
+        if not endpoint:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "missing sandbox endpoint")
+        options = [
+            ("grpc.max_send_message_length", MAX_GRPC_MESSAGE_BYTES),
+            ("grpc.max_receive_message_length", MAX_GRPC_MESSAGE_BYTES),
+        ]
+        async with grpc.aio.insecure_channel(endpoint, options=options) as ch:
+            sbx = sandbox_pb2_grpc.SandboxStub(ch)
+            sbx_call = sbx.Terminal(metadata=(("x-sandbox-token", token),))
+
+            async def _forward_in() -> None:
+                try:
+                    async for msg in request_iterator:
+                        await sbx_call.write(msg)
+                finally:
+                    await sbx_call.done_writing()
+
+            fwd = asyncio.create_task(_forward_in())
+            try:
+                async for out in sbx_call:
+                    yield out
+            finally:
+                fwd.cancel()
 
     async def Summarize(
         self, request: worker_pb2.SummarizeRequest, context: grpc.aio.ServicerContext

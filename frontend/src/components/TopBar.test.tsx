@@ -68,6 +68,12 @@ describe("TopBar", () => {
     expect(screen.getByText("技能")).toBeInTheDocument()
     expect(screen.getByText("文件")).toBeInTheDocument()
   })
+
+  it("点终端按钮翻转 terminalOpen", () => {
+    render(wrap(<TopBar />))
+    fireEvent.click(screen.getByRole("button", { name: "终端" }))
+    expect(useStore.getState().terminalOpen).toBe(true)
+  })
 })
 
 describe("TopBar 工具/技能开关入口", () => {
