@@ -27,10 +27,13 @@ RUN git config --system safe.directory '*' \
     && git config --system user.email agent@sandbox.local
 
 # 依赖路由:让 pip/npm 等把包装进 /workspace 卷(跨容器重建保留)。详见 spec §8.1。
-# 镜像源走国内(阿里云 pip / npmmirror):部署目标机境外网络受限,默认 PyPI/npm registry
+# 镜像源走国内(清华 pip / npmmirror):部署目标机境外网络受限,默认 PyPI/npm registry
 # 拉不动——构建期装 grpcio 等会卡,运行期 agent pip/npm install 同理。与 app.Dockerfile 一致。
+# PIP_DEFAULT_TIMEOUT/RETRIES:容忍 mirror 偶发 ReadTimeout(默认 15s 扛不住慢响应)。
 ENV HOME=/workspace/.home \
-    PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ \
+    PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+    PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=10 \
     npm_config_registry=https://registry.npmmirror.com \
     PYTHONUSERBASE=/workspace/.home/.local \
     PIP_USER=1 \
