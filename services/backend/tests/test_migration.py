@@ -71,3 +71,40 @@ def test_memory_versioning_schema(migration_pg_url: str):
     assert "memory_entries.version" in cols
     assert "sessions.memory_through_seq" in cols
     assert "uq_memory_scope_owner_version" in cons
+
+
+def test_scheduled_tasks_schema(migration_pg_url: str):
+    sync_url = migration_pg_url.replace("+asyncpg", "")
+    os.environ["AGENT_CLOUD_DATABASE_URL"] = migration_pg_url
+    command.upgrade(Config("alembic.ini"), "head")
+
+    engine = create_engine(sync_url)
+    with engine.connect() as conn:
+        tables = {
+            r[0]
+            for r in conn.execute(
+                text("SELECT tablename FROM pg_tables WHERE schemaname='public'")
+            )
+        }
+        cols = {
+            r[0]
+            for r in conn.execute(
+                text(
+                    "SELECT table_name||'.'||column_name FROM information_schema.columns "
+                    "WHERE table_schema='public'"
+                )
+            )
+        }
+        idx = {
+            r[0]
+            for r in conn.execute(
+                text(
+                    "SELECT indexname FROM pg_indexes WHERE schemaname='public' "
+                    "AND tablename='scheduled_tasks'"
+                )
+            )
+        }
+    assert "scheduled_tasks" in tables
+    assert "sessions.scheduled_task_id" in cols
+    assert "sessions.unread" in cols
+    assert "ix_scheduled_tasks_due" in idx
