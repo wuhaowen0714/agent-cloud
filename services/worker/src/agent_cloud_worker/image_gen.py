@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -21,6 +22,24 @@ DEFAULT_IMAGE_MODEL = "Qwen-Image"
 
 # 落盘子目录(相对工作区)。前端按此路径用 /files/raw 取图渲染。
 _IMAGE_SUBDIR = "media/picture"
+
+# 生成图文件名用的语义 slug 上限(中文按字符计)。
+_SLUG_MAX = 40
+
+
+def _slugify(text: str) -> str:
+    """把 prompt 提炼成文件名安全的语义 slug,让生成/编辑的图有可读文件名(而非纯随机 id)。
+    取首行、去路径分隔符/Windows 非法字符/控制字符(防 prompt 注入路径)、去点(防 ..)、
+    空白折叠为连字符、限长;空则回退 'image'。中文保留中文,英文按连字符。
+    注:sandbox _resolve_within 围栏只防逃出整个 workdir、不防跨子目录——把图留在
+    media/picture/ 完全靠本函数剥离路径分隔符,改这里时务必保持。"""
+    text = (text or "").strip()
+    text = text.splitlines()[0] if text else ""
+    text = re.sub(r'[/\\:*?"<>|\x00-\x1f]', " ", text)  # 路径分隔 + Windows 非法 + 控制字符
+    text = text.replace(".", " ")  # 去点:防 .. 与隐藏文件
+    text = re.sub(r"\s+", "-", text.strip())  # 空白(含全角)折叠为单连字符
+    text = re.sub(r"-{2,}", "-", text).strip("-")
+    return text[:_SLUG_MAX].strip("-") or "image"
 
 # generate_image 工具(worker 原生:调外部图片生成 API,**绝不进沙箱**——生成 key 不下放最小信任
 # 的沙箱)。端点是 sophnet,用独立于 LLM 的专用 key(同 web_search:用户可能 BYOK 别家模型,其
@@ -288,7 +307,7 @@ class ImageGenExecutor:
                 content=f"generate_image failed: {type(exc).__name__}: {exc}",
                 is_error=True,
             )
-        rel_path = f"{_IMAGE_SUBDIR}/img_{self._id_fn()}.png"
+        rel_path = f"{_IMAGE_SUBDIR}/{_slugify(prompt)}-{self._id_fn()}.png"
         try:
             written = await self._write_binary_fn(rel_path, data)
         except Exception as exc:  # noqa: BLE001 — 落盘失败也收敛成 is_error
@@ -487,7 +506,7 @@ class ImageEditExecutor:
                 content=f"edit_image failed: {type(exc).__name__}: {exc}",
                 is_error=True,
             )
-        rel_path = f"{_IMAGE_SUBDIR}/edit_{self._id_fn()}.png"
+        rel_path = f"{_IMAGE_SUBDIR}/edited-{_slugify(prompt)}-{self._id_fn()}.png"
         try:
             written = await self._write_binary_fn(rel_path, out)
         except Exception as exc:  # noqa: BLE001 — 落盘失败也收敛
