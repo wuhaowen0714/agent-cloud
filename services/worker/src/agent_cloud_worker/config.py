@@ -18,8 +18,12 @@ class WorkerSettings(BaseSettings):
     # OpenAI 兼容端点凭据(v1:单组,所有 agent 共用;每 key_ref 选择 + KMS 留后续)
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
-    openai_timeout_seconds: float = 60.0
-    openai_max_retries: int = 2
+    # 单次请求超时:LLM 端点偶发"首 token 卡住"(连接正常但久不吐字,2026-06-13 实测 sophnet
+    # 间歇性 ~60s 不响应,连接 0.03s 没问题→非网络)。超时即被 SDK 重试,但卡满超时才重试,
+    # 用户感知"卡住不答"。压到 45s:健康首 token(含大上下文 prefill)远低于此、不误杀,卡住
+    # 时早 15s 重试。多 1 次重试(2→3)多一次甩开间歇性卡顿的机会。两者皆可经 env 覆盖。
+    openai_timeout_seconds: float = 45.0
+    openai_max_retries: int = 3
 
     # 单次请求输出上限。撞上限(finish_reason=length)有兜底:文本截断会落库提示、
     # 工具参数截断会回合内自修复(见 loop/_TRUNCATED_CALL_RESULT),但上限给足更省事。
