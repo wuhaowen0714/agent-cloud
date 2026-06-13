@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from agent_cloud_common import ToolCall, ToolResult, ToolSpec, apply_edits
+from agent_cloud_common import ToolCall, ToolResult, ToolSpec, apply_edits, extract_text
 
 
 @dataclass
@@ -86,7 +86,7 @@ def _write_file(workdir: Path, args: dict) -> str:
 
 
 def _read_file(workdir: Path, args: dict) -> str:
-    return _resolve_within(workdir, args["path"]).read_text()
+    return extract_text(_resolve_within(workdir, args["path"]))
 
 
 def _edit(workdir: Path, args: dict) -> str:
@@ -127,7 +127,12 @@ def builtin_tools() -> list[Tool]:
         Tool(
             spec=ToolSpec(
                 name="read_file",
-                description="Read a file (relative to the working directory).",
+                description=(
+                    "Read a file (relative to the working directory). Plain-text and code "
+                    "files are returned as-is; PDF, Word (.docx), PowerPoint (.pptx) and "
+                    "Excel (.xlsx) files are automatically extracted to text so you can "
+                    "read their contents directly."
+                ),
                 input_schema={
                     "type": "object",
                     "properties": {"path": {"type": "string"}},

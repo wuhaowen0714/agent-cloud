@@ -8,6 +8,7 @@ from agent_cloud_common.events import (
     TurnDone,
     TurnEvent,
 )
+from agent_cloud_common.extract import extract_text
 from agent_cloud_common.grpc_limits import MAX_GRPC_MESSAGE_BYTES
 from agent_cloud_common.tools import builtin_tool_specs
 from agent_cloud_common.types import (
@@ -37,6 +38,7 @@ __all__ = [
     "MemoryItem",
     "SkillRef",
     "apply_edits",
+    "extract_text",
     "builtin_tool_specs",
     "MAX_GRPC_MESSAGE_BYTES",
     "TextDelta",
