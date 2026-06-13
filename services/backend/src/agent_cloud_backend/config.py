@@ -70,9 +70,6 @@ class Settings(BaseSettings):
     memory_idle_seconds: int = 1800  # 空闲多久算"可提炼"(默认同沙箱 idle TTL)
     memory_max_versions: int = 20  # 每块保留版本数,超出裁剪
 
-    # 注册播种:新用户自动获得的默认 agent(开箱即用)。
-    default_agent_model: str = "DeepSeek-V4-Pro"
-
     # 平台(sophnet)可选模型清单 + 新建 session 的默认模型(session 选 sophnet 时的 model 候选;
     # BYOK provider 的模型走用户 credential.models)。env 覆盖走 JSON:
     # AGENT_CLOUD_PLATFORM_MODELS='["DeepSeek-V4-Pro","GLM-5.1"]'。
