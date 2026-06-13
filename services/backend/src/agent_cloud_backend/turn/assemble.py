@@ -64,7 +64,6 @@ async def build_run_turn_request(
         agent=worker_pb2.Agent(
             model=agent.model,
             provider=agent.provider,
-            thinking_level=agent.thinking_level or "",
             enabled_tools=list(agent.enabled_tools),
             key_ref=agent.key_ref or "",
             api_key=api_key,
