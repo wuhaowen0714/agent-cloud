@@ -1,35 +1,34 @@
-import type { UserModel } from "./types"
+// 模型选择按 provider 维度组织(session 级):平台 sophnet + 各 BYOK provider。
+// 模型候选 = 平台清单(后端 /platform/models)∪ 每个 credential 自己的 models。
 
-// 模型选单的预设;DEFAULT_MODEL 是「创建 agent 免填模型」时的预设值。
-export const PRESET_MODELS = ["DeepSeek-V4-Pro", "DeepSeek-V4-Flash", "GLM-5.1"]
-export const DEFAULT_MODEL = "DeepSeek-V4-Pro"
+export const PLATFORM_PROVIDER = "sophnet" // 平台默认 provider(对应后端全局 key)
+export const DEFAULT_MODEL = "DeepSeek-V4-Pro" // 平台 config 不可达时的前端兜底
 
-export interface ModelOption {
-  model: string
-  custom?: UserModel // 仅用户自定义条目携带(供删除);预设/在用没有
+export interface ProviderOption {
+  name: string // 展示名:平台为 "sophnet",BYOK 为 credential.name
+  credentialId: string | null // null = 平台 sophnet 全局 key
+  models: string[] // 该 provider 下可选模型
 }
 
-// 合并去重:预设 → 在用 → 自定义;trim、去空、保序。
-export function mergeModelOptions(inUse: string[], customs: UserModel[]): ModelOption[] {
-  const seen = new Set<string>()
-  const out: ModelOption[] = []
-  for (const m of PRESET_MODELS) {
-    seen.add(m)
-    out.push({ model: m })
-  }
-  for (const raw of inUse) {
-    const m = raw?.trim()
-    if (m && !seen.has(m)) {
-      seen.add(m)
-      out.push({ model: m })
-    }
-  }
-  for (const c of customs) {
-    const m = c.model.trim()
-    if (m && !seen.has(m)) {
-      seen.add(m)
-      out.push({ model: m, custom: c })
-    }
-  }
-  return out
+// 平台 + 各 BYOK credential → 图一第一栏的 provider 选项。
+export function buildProviderOptions(
+  platformModels: string[],
+  credentials: { id: string; name: string; models: string[] }[],
+): ProviderOption[] {
+  return [
+    { name: PLATFORM_PROVIDER, credentialId: null, models: platformModels },
+    ...credentials.map((c) => ({ name: c.name, credentialId: c.id, models: c.models })),
+  ]
+}
+
+// 给定 session 的 (model, credential_id),在 provider 选项里定位它属于哪个 provider。
+// 找不到(凭据被删/模型已不在清单)→ 回退平台,让 UI 仍能渲染当前 model。
+export function findProvider(
+  providers: ProviderOption[],
+  credentialId: string | null,
+): ProviderOption {
+  return (
+    providers.find((p) => p.credentialId === credentialId) ??
+    providers[0] ?? { name: PLATFORM_PROVIDER, credentialId: null, models: [] }
+  )
 }

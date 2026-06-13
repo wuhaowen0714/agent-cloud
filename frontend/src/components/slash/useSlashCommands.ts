@@ -1,12 +1,14 @@
 import { useQueryClient } from "@tanstack/react-query"
+
 import { api, HttpError } from "../../api/client"
+import { findProvider } from "../../models"
 import { useStore } from "../../store"
 import type { AgentConfig, Message, Session } from "../../types"
-import { useModelOptions } from "../model/useModelOptions"
+import { useProviderOptions } from "../model/useModelOptions"
 import type { CompactResult, SlashContext, StatusInfo } from "./commands"
 
-// 把命令动作接到 store / api / react-query。读缓存的 key 与各处一致:
-// agents/sessions 按 userId 命名,messages 按 sessionId。
+// 把命令动作接到 store / api / react-query。模型已下放到 session:/model 与 status 都按
+// 当前会话工作。读缓存的 key 与各处一致:agents/sessions 按 userId,messages 按 sessionId。
 export function useSlashCommands(ui: {
   notify: (msg: string) => void
   showStatus: () => void
@@ -20,9 +22,9 @@ export function useSlashCommands(ui: {
   const startCompaction = useStore((s) => s.startCompaction)
   const finishCompaction = useStore((s) => s.finishCompaction)
   const openSettings = useStore((s) => s.openSettings)
-  const { options } = useModelOptions() // /model 建议与模型选单共用一个选项源
+  const { providers } = useProviderOptions() // /model 建议与图一选单共用 provider 选项源
 
-  const agents = (): AgentConfig[] => qc.getQueryData<AgentConfig[]>(["agents", userId]) ?? []
+  const sessions = (): Session[] => qc.getQueryData<Session[]>(["sessions", userId]) ?? []
 
   return {
     newSession: async () => {
@@ -33,15 +35,14 @@ export function useSlashCommands(ui: {
       return true
     },
     setModel: async (model) => {
-      if (!agentId) return false
-      await api.patchAgent(agentId, { model })
-      await qc.invalidateQueries({ queryKey: ["agents", userId] })
+      if (!sessionId) return false
+      await api.patchSession(sessionId, { model }) // session 级:保持当前 provider/凭据
+      await qc.invalidateQueries({ queryKey: ["sessions", userId] })
       return true
     },
     compact: async (): Promise<void> => {
       // 捕获发起时的会话:压缩可能跨「用户切到别的会话」期间完成,结果必须写回发起的
-      // 那个会话(running/result 都按 sid 存进 store),与「当前看哪个会话」彻底解耦,
-      // 否则反馈会串到切过去的会话(原 bug)。
+      // 那个会话(running/result 都按 sid 存进 store),与「当前看哪个会话」彻底解耦。
       const sid = sessionId
       if (!sid) return
       startCompaction(sid)
@@ -54,16 +55,16 @@ export function useSlashCommands(ui: {
       }
       finishCompaction(sid, result)
     },
-    modelSuggestions: () => options.map((o) => o.model),
+    modelSuggestions: () => providers.flatMap((p) => p.models),
     status: (): StatusInfo => {
-      const a = agents().find((x) => x.id === agentId) ?? null
-      const sessions = qc.getQueryData<Session[]>(["sessions", userId]) ?? []
-      const sess = sessions.find((x) => x.id === sessionId) ?? null
+      const agents = qc.getQueryData<AgentConfig[]>(["agents", userId]) ?? []
+      const a = agents.find((x) => x.id === agentId) ?? null
+      const sess = sessions().find((x) => x.id === sessionId) ?? null
       const msgs = sessionId ? (qc.getQueryData<Message[]>(["messages", sessionId]) ?? []) : []
       return {
         agentName: a?.name ?? null,
-        model: a?.model ?? null,
-        provider: a?.provider ?? null,
+        model: sess?.model ?? null,
+        provider: sess ? findProvider(providers, sess.credential_id).name : null,
         sessionTitle: sess?.title ?? null,
         sessionIdShort: sessionId ? sessionId.slice(0, 8) : null,
         messageCount: msgs.length,

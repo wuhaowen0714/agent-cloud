@@ -11,7 +11,12 @@ class SessionRepository(BaseRepository[Session]):
     model = Session
 
     async def create_for(
-        self, user_id: uuid.UUID, agent_config_id: uuid.UUID, title: str | None
+        self,
+        user_id: uuid.UUID,
+        agent_config_id: uuid.UUID,
+        title: str | None,
+        model: str,
+        credential_id: uuid.UUID | None = None,
     ) -> Session:
         # 用户级共享工作空间:同一用户的所有 agent/session 共用
         # base_root/<user_id>/workspace/(base 本就按 user_id 划分且跨沙箱重建稳定)。
@@ -20,6 +25,8 @@ class SessionRepository(BaseRepository[Session]):
             id=uuid.uuid4(),
             user_id=user_id,
             agent_config_id=agent_config_id,
+            model=model,
+            credential_id=credential_id,
             title=title,
             work_subdir="workspace",
         )

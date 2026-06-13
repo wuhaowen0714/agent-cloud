@@ -19,13 +19,11 @@ async def test_build_request_from_db(session):
         AgentConfig(
             user_id=user.id,
             name="coder",
-            model="claude-x",
-            provider="anthropic",
             enabled_tools=["bash"],
         )
     )
     await session.flush()
-    s = await SessionRepository(session).create_for(user.id, agent.id, None)
+    s = await SessionRepository(session).create_for(user.id, agent.id, None, model="m")
     await session.flush()
     await ContextDocumentRepository(session).upsert("user", "USER", user.id, "# user")
     await ContextDocumentRepository(session).upsert("agent", "AGENTS", agent.id, "# agent")
@@ -56,7 +54,7 @@ async def test_build_request_from_db(session):
         exclude_message_id=None,
     )
     assert req.session_id == str(s.id) and req.user_id == str(user.id)
-    assert req.agent.model == "claude-x" and list(req.agent.enabled_tools) == ["bash"]
+    assert req.agent.model == "m" and list(req.agent.enabled_tools) == ["bash"]
     assert {d.type for d in req.documents} == {"USER", "AGENTS"}
     assert any(m.content == "likes tea" for m in req.memory)
     assert [m.text for m in req.messages] == ["earlier", "replied"]  # 完整历史保留
@@ -69,10 +67,10 @@ async def test_memory_injects_only_current_block(session):
     user = await UserRepository(session).create(User(email="b@example.com"))
     await session.flush()
     agent = await AgentConfigRepository(session).create(
-        AgentConfig(user_id=user.id, name="a", model="m", provider="openai")
+        AgentConfig(user_id=user.id, name="a")
     )
     await session.flush()
-    s = await SessionRepository(session).create_for(user.id, agent.id, None)
+    s = await SessionRepository(session).create_for(user.id, agent.id, None, model="m")
     await session.flush()
     repo = MemoryEntryRepository(session)
     await repo.write_version("user", user.id, "OLD block", None, expected_version=0)
@@ -90,10 +88,10 @@ async def test_build_request_excludes_current_user_message(session):
     user = await UserRepository(session).create(User(email="b@example.com"))
     await session.flush()
     agent = await AgentConfigRepository(session).create(
-        AgentConfig(user_id=user.id, name="c", model="m", provider="p")
+        AgentConfig(user_id=user.id, name="c")
     )
     await session.flush()
-    s = await SessionRepository(session).create_for(user.id, agent.id, None)
+    s = await SessionRepository(session).create_for(user.id, agent.id, None, model="m")
     await session.flush()
     current = await MessageRepository(session).append(
         s.id, OrmMessage(session_id=s.id, seq=0, role="user", content={"text": "current"})
@@ -113,10 +111,10 @@ async def test_build_request_includes_enabled_skills(session):
     user = await UserRepository(session).create(User(email="sk@example.com"))
     await session.flush()
     agent = await AgentConfigRepository(session).create(
-        AgentConfig(user_id=user.id, name="c", model="m", provider="p")
+        AgentConfig(user_id=user.id, name="c")
     )
     await session.flush()
-    s = await SessionRepository(session).create_for(user.id, agent.id, None)
+    s = await SessionRepository(session).create_for(user.id, agent.id, None, model="m")
     await session.flush()
     skill = await SkillRepository(session).create(
         Skill(
@@ -140,10 +138,10 @@ async def test_build_request_skills_default_empty(session):
     user = await UserRepository(session).create(User(email="sk2@example.com"))
     await session.flush()
     agent = await AgentConfigRepository(session).create(
-        AgentConfig(user_id=user.id, name="c", model="m", provider="p")
+        AgentConfig(user_id=user.id, name="c")
     )
     await session.flush()
-    s = await SessionRepository(session).create_for(user.id, agent.id, None)
+    s = await SessionRepository(session).create_for(user.id, agent.id, None, model="m")
     await session.commit()
     req = await build_run_turn_request(
         session, s, sandbox_endpoint="x", user_message="hi", exclude_message_id=None
@@ -155,10 +153,10 @@ async def test_build_request_work_subdir_override(session):
     user = await UserRepository(session).create(User(email="ws@example.com"))
     await session.flush()
     agent = await AgentConfigRepository(session).create(
-        AgentConfig(user_id=user.id, name="c", model="m", provider="p")
+        AgentConfig(user_id=user.id, name="c")
     )
     await session.flush()
-    s = await SessionRepository(session).create_for(user.id, agent.id, None)
+    s = await SessionRepository(session).create_for(user.id, agent.id, None, model="m")
     await session.commit()
     # 默认:用 session.work_subdir
     req = await build_run_turn_request(
@@ -179,10 +177,10 @@ async def test_build_request_drops_summarized_and_sends_history_summary(session)
     user = await UserRepository(session).create(User(email="sum@example.com"))
     await session.flush()
     agent = await AgentConfigRepository(session).create(
-        AgentConfig(user_id=user.id, name="c", model="m", provider="p")
+        AgentConfig(user_id=user.id, name="c")
     )
     await session.flush()
-    s = await SessionRepository(session).create_for(user.id, agent.id, None)
+    s = await SessionRepository(session).create_for(user.id, agent.id, None, model="m")
     await session.flush()
     # seq 0,1 已折叠;seq 2,3 保留
     await MessageRepository(session).append(

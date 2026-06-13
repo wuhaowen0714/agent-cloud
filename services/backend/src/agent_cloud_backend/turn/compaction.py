@@ -8,10 +8,9 @@ from agent_cloud_common.codec import msg_to_proto
 
 from agent_cloud_backend.config import Settings
 from agent_cloud_backend.db import get_sessionmaker
-from agent_cloud_backend.repositories.agent_config import AgentConfigRepository
 from agent_cloud_backend.repositories.message import MessageRepository
 from agent_cloud_backend.repositories.session import SessionRepository
-from agent_cloud_backend.turn.credentials import resolve_agent_key
+from agent_cloud_backend.turn.credentials import resolve_session_key
 from agent_cloud_backend.turn.memory_extract import extract_session_memory
 from agent_cloud_backend.turn.messages import orm_to_common, strip_unanswered_user_messages
 from agent_cloud_backend.turn.worker_client import summarize_via_worker
@@ -40,9 +39,6 @@ async def compact(
         session = await SessionRepository(db).get(session_id)
         if session is None:
             return False
-        agent = await AgentConfigRepository(db).get(session.agent_config_id)
-        if agent is None:  # FK 是 RESTRICT,正常不可能;防御性,与 session 检查对齐
-            return False
         history = await MessageRepository(db).list_by_session(session_id)
         history_after = [m for m in history if m.seq > session.summary_through_seq]
         folded = _fold_boundary(history_after, keep_recent)
@@ -57,15 +53,14 @@ async def compact(
             session.summary_through_seq = boundary_seq
             await db.commit()
             return True
-        # BYO-Key:摘要也用本人凭据(无/不属本人 → 回退全局)。
-        api_key, base_url = await resolve_agent_key(
-            db, agent.key_ref or "", session.user_id, settings
+        # BYO-Key:摘要也用本人凭据(None/不属本人 → 回退平台)。
+        api_key, base_url = await resolve_session_key(
+            db, session.credential_id, session.user_id, settings
         )
         req = worker_pb2.SummarizeRequest(
             agent=worker_pb2.Agent(
-                model=agent.model,
-                provider=agent.provider,
-                key_ref=agent.key_ref or "",
+                model=session.model,
+                provider=("sophnet" if session.credential_id is None else "custom"),
                 api_key=api_key,
                 base_url=base_url,
             ),

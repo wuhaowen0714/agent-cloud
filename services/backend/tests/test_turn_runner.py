@@ -37,10 +37,10 @@ async def _make_session_row(engine):
         u = await UserRepository(db).create(User(email=f"{uuid.uuid4()}@e.com"))
         await db.flush()
         a = await AgentConfigRepository(db).create(
-            AgentConfig(user_id=u.id, name="a", model="m", provider="p")
+            AgentConfig(user_id=u.id, name="a")
         )
         await db.flush()
-        s = await SessionRepository(db).create_for(u.id, a.id, None)
+        s = await SessionRepository(db).create_for(u.id, a.id, None, model="m")
         await db.commit()
         return s.id
 

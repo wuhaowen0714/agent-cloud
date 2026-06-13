@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { api } from "../api/client"
 import { parseUserMessage } from "../chatText"
@@ -48,7 +48,6 @@ export function Composer({
   })
 
   const userId = useStore((s) => s.userId)
-  const agentId = useStore((s) => s.agentId)
   // 只认「当前会话」的压缩状态:在别的会话发起的压缩绝不在这里显示(修跨会话串台)。
   const sessionId = useStore((s) => s.sessionId)
   const compactions = useStore((s) => s.compactions)
@@ -88,13 +87,19 @@ export function Composer({
       clearCompaction(sessionId)
     }
   }, [sessionId, compaction, clearCompaction])
-  // 订阅式读取(与 AgentRail 共享缓存):patchAgent 失效后 chip 文本自动更新。
-  const { data: agents = [] } = useQuery({
-    queryKey: ["agents", userId],
-    queryFn: () => api.listAgents(),
+  // 订阅式读取:patchSession 失效后 chip 的 provider/model 自动更新。
+  const qc = useQueryClient()
+  const { data: sessions = [] } = useQuery({
+    queryKey: ["sessions", userId],
+    queryFn: () => api.listSessions(),
     enabled: !!userId,
   })
-  const currentModel = agents.find((a) => a.id === agentId)?.model
+  const currentSession = sessions.find((s) => s.id === sessionId)
+  const updateSessionModel = async (model: string, credentialId: string | null) => {
+    if (!sessionId) return
+    await api.patchSession(sessionId, { model, credential_id: credentialId })
+    await qc.invalidateQueries({ queryKey: ["sessions", userId] })
+  }
 
   // @ 文件引用:光标所在 @ 词活跃才拉索引(staleTime 内打字不抖动,新文件最迟 30s 可见)。
   // retry 1:浮层场景要快速反馈;失败提示后,下个 @ 词重新激活 enabled 时会再拉。
@@ -380,14 +385,17 @@ export function Composer({
           </Button>
         )}
       </div>
-      {/* 左下模型 chip(仿 Claude Code):即点即切,持久到当前 agent(与 /model 同语义)。
-          streaming 中跟随输入区一起禁用;失败走 flash 反馈(与斜杠路径对齐)。 */}
-      {agentId && currentModel && (
+      {/* 左下模型 chip(图一):provider + model 两栏,即点即切,落到当前 session。
+          streaming 中跟随输入区一起禁用;失败走 flash 反馈。 */}
+      {currentSession && (
         <div className={`mt-1.5 flex items-center ${busy ? "pointer-events-none opacity-50" : ""}`}>
           <ModelMenu
             variant="chip"
-            value={currentModel}
-            onChange={(m) => void ctx.setModel(m).catch(() => ctx.notify("切换模型失败"))}
+            model={currentSession.model}
+            credentialId={currentSession.credential_id}
+            onChange={(m, c) =>
+              void updateSessionModel(m, c).catch(() => ctx.notify("切换模型失败"))
+            }
           />
         </div>
       )}

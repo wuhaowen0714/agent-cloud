@@ -47,8 +47,8 @@ async def stack(engine, tmp_path):
     providers = {}
 
     def factory(model, provider, api_key, base_url):
-        # provider name carries which script to use (test wires it via agent.provider)
-        return providers[provider]
+        # 模型已下放到 session;每用户用不同 model 名挂不同脚本,经 session.model 区分。
+        return providers[model]
 
     worker_server, wport = await create_worker_server(provider_factory=factory, port=0)
     provisioner = InProcessProvisioner(base_root=tmp_path)
@@ -75,14 +75,12 @@ async def _user_session(client, email, provider_name):
     ).json()
     uid = reg["user"]["id"]
     h = {"Authorization": f"Bearer {reg['access_token']}"}
-    aid = (
+    aid = (await client.post("/agent-configs", json={"name": "c"}, headers=h)).json()["id"]
+    sid = (
         await client.post(
-            "/agent-configs",
-            json={"name": "c", "model": "m", "provider": provider_name},
-            headers=h,
+            "/sessions", json={"agent_config_id": aid, "model": provider_name}, headers=h
         )
     ).json()["id"]
-    sid = (await client.post("/sessions", json={"agent_config_id": aid}, headers=h)).json()["id"]
     return uid, sid, h
 
 

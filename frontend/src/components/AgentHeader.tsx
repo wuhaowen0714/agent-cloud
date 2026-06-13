@@ -107,7 +107,6 @@ export function AgentHeader({
           />
         </div>
       )}
-      <div className="truncate px-0.5 text-xs text-slate-400">{agent.model}</div>
     </div>
   )
 }

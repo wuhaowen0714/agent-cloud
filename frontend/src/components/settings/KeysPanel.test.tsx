@@ -8,11 +8,23 @@ import { KeysPanel } from "./KeysPanel"
 vi.mock("../../api/client", () => ({
   api: {
     listCredentials: vi.fn().mockResolvedValue([
-      { id: "c1", name: "openrouter", base_url: "https://or/v1", masked: "sk-…1234", created_at: "" },
+      {
+        id: "c1",
+        name: "openrouter",
+        base_url: "https://or/v1",
+        masked: "sk-…1234",
+        models: ["gpt-4o"],
+        created_at: "",
+      },
     ]),
-    createCredential: vi
-      .fn()
-      .mockResolvedValue({ id: "c2", name: "x", base_url: "", masked: "sk-…9999", created_at: "" }),
+    createCredential: vi.fn().mockResolvedValue({
+      id: "c2",
+      name: "x",
+      base_url: "",
+      masked: "sk-…9999",
+      models: [],
+      created_at: "",
+    }),
     deleteCredential: vi.fn().mockResolvedValue(undefined),
   },
 }))
@@ -42,6 +54,7 @@ describe("KeysPanel", () => {
         name: "x",
         base_url: "",
         api_key: "sk-9999",
+        models: [],
       }),
     )
   })

@@ -23,10 +23,10 @@ async def _seed(engine, user_id, n_messages):
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
         agent = await AgentConfigRepository(db).create(
-            AgentConfig(user_id=user_id, name="a", model="m", provider="p")
+            AgentConfig(user_id=user_id, name="a")
         )
         await db.flush()
-        s = await SessionRepository(db).create_for(user_id, agent.id, None)
+        s = await SessionRepository(db).create_for(user_id, agent.id, None, model="m")
         await db.flush()
         for i in range(n_messages):
             await MessageRepository(db).append(
