@@ -98,7 +98,7 @@ git remote add st st-e-ecs-2:/opt/agent-cloud/repo.git || git remote set-url st 
 ```
 > 此处 `git push st` 在 B0 建好 st-e 裸仓库后才能成功,故放 B0 内。
 
-### B0. st-e 准备(零停机,ali 仍正常服务)
+### B0. st-e 准备 + ali 预备(零停机,ali 仍正常服务)
 ```bash
 # compose 插件
 ssh st-e-ecs-2 'sudo apt-get update -qq && sudo apt-get install -y docker-compose-plugin && docker compose version'
@@ -108,15 +108,21 @@ ssh st-e-ecs-2 'sudo mkdir -p /opt/agent-cloud/data/workspaces && sudo chown -R 
 ssh st-e-ecs-2 'git init --bare /opt/agent-cloud/repo.git'
 git push st main                                         # 本机 → st-e 裸仓库
 ssh st-e-ecs-2 'git clone /opt/agent-cloud/repo.git /opt/agent-cloud/app'
+# 【I3】ali 工作树提前拉到含 Part A 的 main 并确认 ali-entry 落地(放窗口外,失败可从容处理;
+#       B4-5 因此无需再 pull,消除"停了应用栈却没 entry 配置→8080 两头落空"竞态)
+git push ali main
+ssh ali-ecs 'cd /opt/agent-cloud/app && git fetch && git checkout main && git pull --ff-only && test -f deploy/ali-entry/nginx.conf && echo "ali-entry 就位"'
 ```
 
 ### B1. .env 直传(**流式、绝不打印进日志/上下文**)
 ```bash
-ssh ali-ecs 'cat /opt/agent-cloud/app/.env' | ssh st-e-ecs-2 'cat > /opt/agent-cloud/app/.env'
+# 【C6】接收端 umask 077:文件创建即 600,消除"明文 .env 短暂 world-readable"窗口(st-e 是共享机)
+ssh ali-ecs 'cat /opt/agent-cloud/app/.env' | ssh st-e-ecs-2 'umask 077; cat > /opt/agent-cloud/app/.env'
 ssh st-e-ecs-2 'cd /opt/agent-cloud/app
   grep -q "^AGENT_CLOUD_WEB_PORT="          .env || echo "AGENT_CLOUD_WEB_PORT=18080"        >> .env
   grep -q "^AGENT_CLOUD_SANDBOX_MEM_LIMIT=" .env || echo "AGENT_CLOUD_SANDBOX_MEM_LIMIT=2g"  >> .env
-  chmod 600 .env'
+  chmod 600 .env
+  grep -q "^AGENT_CLOUD_DB_PASSWORD=.\+" .env && echo "DB_PASSWORD 已就位" || { echo "FATAL: DB_PASSWORD 缺失/为空"; exit 1; }'
 ```
 > `cat | ssh cat>` 的字节只在 ali→本机管道→st-e 之间流动,Bash 工具仅捕获最终命令 stdout(空),密钥不进上下文。
 
@@ -124,75 +130,105 @@ ssh st-e-ecs-2 'cd /opt/agent-cloud/app
 **搬 ali 已构建好的镜像**(而非在 st-e 重建):规避 st-e 访问 npm/pypi/apt 的不确定性,且让 st-e 与现行 prod **逐位一致**。compose.yml 同时有 `build:` 与 `image:`,镜像已存在时 `up`(不带 `--build`)直接用、不重建。
 ```bash
 ssh st-e-ecs-2 'cd /opt/agent-cloud/app && git pull --ff-only'   # 取到新 compose.yml(18080 端口插值)
-# 把 ali 现有镜像 save→load 到 st-e(app 镜像 backend/worker 共用,一份即可)
+# 【I7】把 ali 现有镜像 save→load,两端都 inspect 校验,任一缺失即停(不静默吞空流)
 for img in agent-cloud-app:latest agent-cloud-web:latest agent-cloud-sandbox:latest; do
+  ssh ali-ecs "docker image inspect $img >/dev/null" || { echo "FATAL: ali 缺 $img"; break; }
   ssh ali-ecs "docker save $img" | ssh st-e-ecs-2 "docker load"
+  ssh st-e-ecs-2 "docker image inspect $img >/dev/null" || { echo "FATAL: st-e load $img 失败"; break; }
 done
-# 基础镜像:st-e 拉 postgres(Docker Hub 可达性以此步实际验证;ali 的 nginx:alpine 由 B4-5 compose up 自动拉)
-ssh st-e-ecs-2 'docker pull postgres:16-alpine'
+ssh st-e-ecs-2 'docker pull postgres:16-alpine'   # Docker Hub 可达性以此步验证;nginx:alpine 由 B4-7 自动拉
+# 【C6】起 db 前断言 pgdata 卷不存在 —— 若已存在(重跑),卷内角色密码可能与新 .env 不符 → backend 连不上
+ssh st-e-ecs-2 'docker volume inspect agent-cloud_pgdata >/dev/null 2>&1 && { echo "FATAL: pgdata 卷已存在,先确认密码一致再继续"; exit 1; } || echo "pgdata 全新,OK"'
 # 只起 db(用 .env 的 DB 密码全新初始化;backend 暂不起,避免 alembic 在空库建表与 dump 冲突)
 ssh st-e-ecs-2 'cd /opt/agent-cloud/app && docker compose --env-file .env -f deploy/compose.yml up -d db'
 ssh st-e-ecs-2 'cd /opt/agent-cloud/app && docker compose --env-file .env -f deploy/compose.yml ps'  # 等 db healthy
-# objstore 卷此刻尚未被任何已起服务引用,显式建好,供 B3 灌入
-ssh st-e-ecs-2 'docker volume create agent-cloud_objstore'
 ```
+> 不再手动 `docker volume create agent-cloud_objstore`:手建的卷缺 compose label,`up` 时行为跨版本不定;objstore 改为 B4 在 `up -d` 建好带 label 的空卷后再灌(见 B4-6)。
 > 备选:若想用 main 最新代码而非 ali 镜像,且 st-e 能连包仓库,可改为 `docker build` + `compose build`(32 核很快)。本 runbook 默认搬镜像以求稳。
 
-### B3. 预同步大块数据(零停机;切换时再补增量)
+### B3. 预同步 workspaces(零停机;切换时再补增量)
 ```bash
-# workspaces:经本机 /tmp 暂存做两段 rsync(后续切换增量极快)。宿主文件归属无所谓
-# (backend/sandbox 容器均以 root 访问,root 越权读写;不加 sudo/-o/-g)。
+# 经本机 /tmp 暂存两段 rsync(两台服务器不互通 SSH)。宿主文件归属无所谓(backend/sandbox 均 root 访问)。
+# 【C4】两段都带 --delete:/tmp 是 ali 精确镜像,再精确推给 st-e;否则 ali 上已删文件会在 st-e 复活。
+#   注意:第二段 --delete 会清掉 st-e workspaces 里 /tmp 没有的东西 —— B0 刚 mkdir 应为空,符合预期。
 mkdir -p /tmp/ac-migrate/workspaces
 rsync -a --delete -e ssh ali-ecs:/opt/agent-cloud/data/workspaces/ /tmp/ac-migrate/workspaces/
-rsync -a          -e ssh /tmp/ac-migrate/workspaces/ st-e-ecs-2:/opt/agent-cloud/data/workspaces/
+rsync -a --delete -e ssh /tmp/ac-migrate/workspaces/ st-e-ecs-2:/opt/agent-cloud/data/workspaces/
 ```
 
 ### B4. 切换(**停机窗口开始**;此步前向用户确认)
 ```bash
-# 1) ali:停写入端(db 保留供 dump)
+# 1) ali:停写入端(db 保留供 dump)。worker 不直连 db(走 gRPC),停 backend+worker 即无写库路径。
 ssh ali-ecs 'cd /opt/agent-cloud/app && docker compose --env-file .env -f deploy/compose.yml stop backend worker web'
+# 【I1】确认真的 Exited(优雅关闭可能有 in-flight 事务),再 dump
+ssh ali-ecs 'cd /opt/agent-cloud/app && docker compose --env-file .env -f deploy/compose.yml ps backend worker'  # 须见 exited
 
-# 2) pgdata 逻辑迁移:ali pg_dump → st-e psql(两边都 postgres:16,容器内 trust 本地 socket,无需密码)
-ssh ali-ecs 'docker exec agent-cloud-db-1 pg_dump -U postgres -d agent_cloud --clean --if-exists' \
-  | ssh st-e-ecs-2 'docker exec -i agent-cloud-db-1 psql -U postgres -d agent_cloud -v ON_ERROR_STOP=1'
+# 2) 【C2/C3】pgdata 逻辑迁移:灌入【全新空库】→ 不用 --clean;--no-owner/--no-privileges 去掉 OWNER/GRANT;
+#    psql -1 单事务 = 全成功或全回滚,【绝不半灌】。两边都 postgres:16,容器内 trust socket 无需密码。
+ssh ali-ecs 'docker exec agent-cloud-db-1 pg_dump -U postgres -d agent_cloud --no-owner --no-privileges' \
+  | ssh st-e-ecs-2 'docker exec -i agent-cloud-db-1 psql -U postgres -d agent_cloud -v ON_ERROR_STOP=1 -1'
 
-# 3) 末次增量:workspaces(rsync 仅传变化)+ objstore(424K 直接整包)
+# 3) 【C5 校验闸】逐表行数 + alembic_version 两端必须一致;任一 MISMATCH → 立即停,走 B6 回滚(ali 还活着)。
+for t in users sessions messages provider_credentials agent_configs agent_skill_enables \
+         context_documents memory_entries refresh_tokens sandbox_registry skills user_models alembic_version; do
+  a=$(ssh ali-ecs    "docker exec agent-cloud-db-1 psql -U postgres -d agent_cloud -tAc 'SELECT count(*) FROM $t'")
+  s=$(ssh st-e-ecs-2 "docker exec agent-cloud-db-1 psql -U postgres -d agent_cloud -tAc 'SELECT count(*) FROM $t'")
+  printf '%-22s ali=%-6s st-e=%-6s %s\n' "$t" "$a" "$s" "$([ "$a" = "$s" ] && echo OK || echo '*** MISMATCH — 停 ***')"
+done
+ssh ali-ecs    "docker exec agent-cloud-db-1 psql -U postgres -d agent_cloud -tAc 'SELECT version_num FROM alembic_version'"
+ssh st-e-ecs-2 "docker exec agent-cloud-db-1 psql -U postgres -d agent_cloud -tAc 'SELECT version_num FROM alembic_version'"
+
+# 4) 末次增量:workspaces(rsync 仅传变化,两段都 --delete)
 rsync -a --delete -e ssh ali-ecs:/opt/agent-cloud/data/workspaces/ /tmp/ac-migrate/workspaces/
-rsync -a          -e ssh /tmp/ac-migrate/workspaces/ st-e-ecs-2:/opt/agent-cloud/data/workspaces/
+rsync -a --delete -e ssh /tmp/ac-migrate/workspaces/ st-e-ecs-2:/opt/agent-cloud/data/workspaces/
+
+# 5) st-e 起全栈(此时 Compose 建好【带 label】的空 objstore 卷;backend alembic=no-op)
+ssh st-e-ecs-2 'cd /opt/agent-cloud/app && docker compose --env-file .env -f deploy/compose.yml up -d'
+
+# 6) 【C1】objstore 注入:只 backend 挂 objstore → 停 backend、灌 ali 对象库(覆盖 backend 刚写的内置技能,
+#    ali 库本就含它们)、再起 backend;然后校验对象数/字节数两端一致。
+ssh st-e-ecs-2 'cd /opt/agent-cloud/app && docker compose --env-file .env -f deploy/compose.yml stop backend'
 ssh ali-ecs 'docker run --rm -v agent-cloud_objstore:/v:ro -w /v alpine tar -cf - .' \
   | ssh st-e-ecs-2 'docker run --rm -i -v agent-cloud_objstore:/v -w /v alpine tar -xf -'
-
-# 4) st-e:起全栈(backend 启动跑 alembic = no-op,挂上迁移好的数据)
-ssh st-e-ecs-2 'cd /opt/agent-cloud/app && docker compose --env-file .env -f deploy/compose.yml up -d'
+ssh ali-ecs    'docker run --rm -v agent-cloud_objstore:/v:ro alpine sh -c "find /v -type f | wc -l; du -sb /v"'
+ssh st-e-ecs-2 'docker run --rm -v agent-cloud_objstore:/v:ro alpine sh -c "find /v -type f | wc -l; du -sb /v"'  # 须与 ali 相等
+ssh st-e-ecs-2 'cd /opt/agent-cloud/app && docker compose --env-file .env -f deploy/compose.yml up -d backend'
 ssh st-e-ecs-2 'cd /opt/agent-cloud/app && docker compose --env-file .env -f deploy/compose.yml ps'
 ssh st-e-ecs-2 'curl -fsS localhost:18080/api/health'        # web(18080)→ backend
 
-# 5) ali:停整个应用栈(保留容器+卷作回滚),起 302 重定向入口
+# 7) 【I4 可达性闸】翻 302 前,从 ali(阿里云,网络路径接近老用户)确认能到 st-e 公网入口。
+#    不通则【绝不翻 302】(否则把老用户 302 进死路且不可挽回)→ 走 B6 回滚。
+ssh ali-ecs 'curl -fsS --max-time 10 http://106.75.235.242:18080/api/health && echo "ali→st-e 公网可达,可翻 302" || echo "FATAL: 不通,勿翻 302"'
+
+# 8) ali:停整个应用栈(保留容器+卷作回滚),起 302 入口(ali-entry 配置 B0 已就位)
 ssh ali-ecs 'cd /opt/agent-cloud/app && docker compose --env-file .env -f deploy/compose.yml stop'
-ssh ali-ecs 'cd /opt/agent-cloud/app && git pull --ff-only'   # 取到 deploy/ali-entry/
+ssh ali-ecs 'ss -ltn "( sport = :8080 )" | grep -q ":8080" && echo "8080 仍占用,稍等" || echo "8080 已释放"'
 ssh ali-ecs 'cd /opt/agent-cloud/app/deploy/ali-entry && docker compose up -d'
 ```
 
 ### B5. 验证(停机窗口结束判据)
 ```bash
-curl -fsS http://106.75.235.242:18080/api/health    # 直连主入口(用户已开网关端口)
+curl -fsS http://106.75.235.242:18080/api/health    # 直连主入口
 curl -sSI http://47.94.140.245:8080/foo/bar | grep -i '^location'
 #   期望: Location: http://106.75.235.242:18080/foo/bar(302 + 路径保留)
 curl -fsSL http://47.94.140.245:8080/api/health     # -L 跟随重定向,端到端通
 ```
-浏览器开 `http://47.94.140.245:8080/`:自动跳到 `106.75.235.242:18080` → **重新登录**(预期内,localStorage 按源)→ 列会话(数据已迁)→ 发一条消息走完整回合(st-e→worker→沙箱,验证 SSE 流式)→ 开一次终端(验证 WS)→ 传/下载一个文件(验证大带宽直连)。
+- 浏览器开 `http://47.94.140.245:8080/`:自动跳 `106.75.235.242:18080` → **重新登录**(预期内,localStorage 按源)→ 列会话(数据已迁)→ 发消息走完整回合(SSE 流式)→ 开终端(WS)→ 传/下载文件(大带宽直连)。
+- 【I4】**从真实老用户网络**(非本机/非 st-e 本地)打开 `http://106.75.235.242:18080/`,确认非标端口 18080 在用户网络可达。
+- 【M2】沙箱隔离回归:发消息后 `ssh st-e-ecs-2 'docker network ls --filter label=managed-by=agent-cloud'`,确认新沙箱起在专属 `acsbx-net-<id>` 网络(而非共享网)。
 
-### B6. 回滚(任一验证失败)
+### B6. 回滚(任一校验/可达性失败)
 ```bash
 ssh ali-ecs 'cd /opt/agent-cloud/app/deploy/ali-entry && docker compose down'    # 撤重定向,放回 8080
-ssh ali-ecs 'cd /opt/agent-cloud/app && docker compose --env-file .env -f deploy/compose.yml start'  # 原栈复活
+# 【I6】用 up -d(非 start):幂等,容器在就启动、不在就按 compose+现存卷重建,数据卷未删故不丢
+ssh ali-ecs 'cd /opt/agent-cloud/app && docker compose --env-file .env -f deploy/compose.yml up -d'
 ```
 ali 数据自始至终未删 → ~1 分钟回到迁移前。st-e 保持现状待排查。(302 非 301,浏览器不持久缓存,回滚后老 URL 行为立即恢复。)
 
 ### B7. 善后(稳定运行数日后)
 - 删本机暂存 `/tmp/ac-migrate`。
 - 确认稳定后再考虑清理 ali 应用栈(保留重定向容器);ali 数据卷在确信无需回滚前**不删**。
-- 今后部署:`git push st main` + `ssh st-e-ecs-2 '/opt/agent-cloud/app/deploy/deploy.sh'`;ali 只跑重定向。
+- 今后部署:`git push st main` + `ssh st-e-ecs-2 '/opt/agent-cloud/app/deploy/deploy.sh'`;ali 只跑重定向。**注意 deploy.sh 会 build**,首次之后用它前需确认 st-e 能连 npm/pypi/Hub,否则继续 save/load 搬镜像。
 - 通知老用户新主入口 `http://106.75.235.242:18080/`(访问老地址也会自动跳过去)。
 
 ---
@@ -201,14 +237,19 @@ ali 数据自始至终未删 → ~1 分钟回到迁移前。st-e 保持现状待
 
 | 风险 | 对策 |
 |---|---|
-| `.env` 不一致致旧密文/会话失效 | 逐字直传,仅追加两个端口/内存变量;DB 密码随之一致 |
-| db 在 backend 起 alembic 后再灌 dump → 冲突 | B2 只起 db;dump 灌入后(B4-4)才起 backend,alembic 变 no-op |
-| ali 带宽瓶颈(实测 3.5 Mbps vs st-e 168 Mbps) | 入口改 302 重定向,流量不过境 ali;已与用户确认接受地址栏变化 + 一次性重登 |
-| 老用户被新 IP 地址栏吓到 / 不知要重登 | B7 通知用户;老入口永久有效,自动跳转 |
-| 明文 HTTP 公网暴露(st-e:18080 直连) | 用户已决定暂不限制/不加密;与现有 user→ali 明文姿态一致;后续可加 |
-| st-e 构建网络不确定(npm/pypi 可能被掐) | 不在 st-e 重建,直接 `docker save\|load` 搬 ali 现有镜像;与 prod 逐位一致 |
-| st-e 18080 网关未放通 | B5 直连 curl 验证;未通则联系用户开通后再继续 |
+| `.env` 不一致致旧密文/会话失效 | 逐字直传,仅追加两个端口/内存变量;DB 密码随之一致;B1 断言 DB_PASSWORD 非空 |
+| `.env` 明文短暂 world-readable(共享机) | 【C6】接收端 `umask 077`,创建即 600 |
+| **pg 灌库半成功且无察觉** | 【C2/C3】灌全新空库不用 `--clean`;`--no-owner/--no-privileges` + `psql -1` 单事务全有或全无 |
+| **静默灌错/灌空库后不可逆清场** | 【C5】B4-3 校验闸:逐表行数 + alembic_version 两端一致才继续;不符即停回滚 |
+| **objstore 卷缺 compose label → 报错/灌空** | 【C1】不手建卷;`up -d` 后停 backend 灌入再起,并校验对象数/字节数一致 |
+| pgdata 卷重跑残留 → 密码不匹配 | 【C6】起 db 前断言 `agent-cloud_pgdata` 卷不存在 |
+| workspaces 已删文件在 st-e 复活 | 【C4】两段 rsync 均 `--delete` |
+| 8080 切换两头落空 | 【I3】ali pull+ali-entry 校验提前到 B0;B4 stop 后查 8080 释放 |
+| **老用户网络到不了 18080 → 302 进死路** | 【I4】翻 302 前从 ali 侧 + 真实用户网络验证 `106.75.235.242:18080` 可达,不通不翻 |
+| ali 带宽瓶颈(实测 3.5 vs 168 Mbps) | 入口用 302 重定向,流量不过境 ali;已确认接受地址栏变化 + 一次性重登 |
+| st-e 构建网络不确定 | 不在 st-e 重建,`docker save\|load` 搬 ali 镜像(I7 两端 inspect 校验);prod 逐位一致 |
+| 明文 HTTP 公网暴露(st-e:18080) | 用户已决定暂不限制;与现有 user→ali 明文姿态一致;后续可加 |
 | 密钥进日志 | `.env` 流式直传不打印;dump 走容器内 socket 无密码;不 echo 任何 secret |
-| 误删数据 | 全程不 `down -v`;ali 卷保留;st-e 灌库用 `--clean --if-exists` 幂等可重跑 |
+| 误删数据 | 全程不 `down -v`;ali 卷保留;回滚用 `up -d` |
 
 ## 7. 待确认:无(三项决策已定;Phase 1 切换前再口头确认一次)
