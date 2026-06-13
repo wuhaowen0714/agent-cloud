@@ -11,6 +11,7 @@ export function FilePreview({ entry, onClose }: { entry: FileEntry; onClose: () 
   const [err, setErr] = useState(false)
   // markdown/html 默认渲染展示,可切回源码(text/image 无此切换)
   const [view, setView] = useState<"rendered" | "source">("rendered")
+  const [downloading, setDownloading] = useState(false)
   const renderable = kind === "markdown" || kind === "html"
 
   useEffect(() => {
@@ -42,6 +43,8 @@ export function FilePreview({ entry, onClose }: { entry: FileEntry; onClose: () 
   }, [entry.path, kind])
 
   const download = async () => {
+    if (downloading) return // 防重复点击;大文件 fetch blob 需时间
+    setDownloading(true)
     try {
       const u = await api.downloadUrl(entry.path)
       const a = document.createElement("a")
@@ -53,6 +56,8 @@ export function FilePreview({ entry, onClose }: { entry: FileEntry; onClose: () 
       setTimeout(() => URL.revokeObjectURL(u), 0) // 同步 revoke 可能在某些浏览器取消下载,延后释放
     } catch {
       setErr(true) // 下载失败不再静默(此前裸 await,点击毫无反馈)
+    } finally {
+      setDownloading(false)
     }
   }
 
@@ -82,8 +87,12 @@ export function FilePreview({ entry, onClose }: { entry: FileEntry; onClose: () 
                 {view === "rendered" ? "源码" : "渲染"}
               </button>
             )}
-            <button className="text-brand-600 hover:text-brand-700" onClick={download}>
-              下载
+            <button
+              className="text-brand-600 hover:text-brand-700 disabled:text-slate-300"
+              onClick={download}
+              disabled={downloading}
+            >
+              {downloading ? "下载中…" : "下载"}
             </button>
             <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>
               ✕
@@ -92,9 +101,13 @@ export function FilePreview({ entry, onClose }: { entry: FileEntry; onClose: () 
         </header>
         <div className="overflow-auto p-3">
           {err && <div className="text-sm text-red-600">无法预览,请下载查看。</div>}
-          {!err && kind === "image" && url && (
-            <img src={url} alt={entry.name} className="mx-auto max-h-[70vh]" />
-          )}
+          {!err &&
+            kind === "image" &&
+            (url ? (
+              <img src={url} alt={entry.name} className="mx-auto max-h-[70vh]" />
+            ) : (
+              <div className="py-8 text-center text-sm text-slate-400">加载中…</div>
+            ))}
           {!err && kind === "text" && sourceView}
           {!err && renderable && view === "source" && sourceView}
           {!err && kind === "markdown" && view === "rendered" && (
@@ -119,8 +132,12 @@ export function FilePreview({ entry, onClose }: { entry: FileEntry; onClose: () 
           {!err && kind === "download" && (
             <div className="py-8 text-center text-sm text-slate-500">
               文件较大或为二进制,无法预览。
-              <button className="ml-1 text-brand-600 hover:underline" onClick={download}>
-                点此下载
+              <button
+                className="ml-1 text-brand-600 hover:underline disabled:text-slate-300 disabled:no-underline"
+                onClick={download}
+                disabled={downloading}
+              >
+                {downloading ? "下载中…" : "点此下载"}
               </button>
             </div>
           )}
