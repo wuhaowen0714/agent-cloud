@@ -6,9 +6,14 @@
 # pip 按需解析、全程走镜像,与 sandbox.Dockerfile 同款做法。代价是不锁版本(个人部署可接受)。
 FROM python:3.12-slim
 
+# pip 走清华 mirror(国内快且稳)。PIP_DEFAULT_TIMEOUT/RETRIES:mirror 偶发 ReadTimeout
+# (默认 15s 超时扛不住慢响应,构建会死在拉 build 依赖如 hatchling);调大超时 + 多重试容忍
+# 抖动(任何源都可能瞬时抖,这是关键防护)。见 deploy/README。
 ENV PYTHONUNBUFFERED=1 \
-    PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ \
-    PIP_NO_CACHE_DIR=1
+    PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=10
 
 WORKDIR /app
 # 只装运行所需的三个包(sandbox 有自己的镜像);common 在同一命令里从本地路径满足
