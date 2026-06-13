@@ -36,10 +36,9 @@ afterEach(() => {
 })
 
 describe("AgentHeader", () => {
-  it("显示名字与模型;⚙ 打开 agent 设置", async () => {
+  it("显示名字;⚙ 打开 agent 设置", async () => {
     render(wrap(<AgentHeader {...noAuto} />))
     expect(await screen.findByText("main")).toBeInTheDocument()
-    expect(screen.getByText("DeepSeek-V4-Pro")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "agent 设置" }))
     expect(useStore.getState().settingsOpen).toBe(true)
   })

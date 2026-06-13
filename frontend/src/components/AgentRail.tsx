@@ -4,7 +4,6 @@ import { useState } from "react"
 import { createPortal } from "react-dom"
 import { nextAgentName } from "../agentConfig"
 import { api } from "../api/client"
-import { DEFAULT_MODEL } from "../models"
 import { useStore } from "../store"
 import { AccountMenu } from "./AccountMenu"
 
@@ -65,11 +64,7 @@ export function AgentRail({ onCreated }: { onCreated: (id: string) => void }) {
     // 会把已存在的 Agent N 重名再建一次。
     mutationFn: () => {
       const fresh = qc.getQueryData<typeof agents>(["agents", userId]) ?? agents
-      return api.createAgent({
-        name: nextAgentName(fresh.map((a) => a.name)),
-        model: DEFAULT_MODEL,
-        provider: "openai",
-      })
+      return api.createAgent({ name: nextAgentName(fresh.map((a) => a.name)) })
     },
     onSuccess: async (a) => {
       await qc.invalidateQueries({ queryKey: ["agents", userId] })
@@ -119,7 +114,7 @@ export function AgentRail({ onCreated }: { onCreated: (id: string) => void }) {
               type="button"
               aria-label={a.name}
               aria-current={active || undefined}
-              onMouseEnter={showTip(`${a.name} · ${a.model}`)}
+              onMouseEnter={showTip(a.name)}
               onMouseLeave={() => setTip(null)}
               onClick={() => {
                 // 点已选中的 agent 不重置(setAgent 会清掉当前会话选择)

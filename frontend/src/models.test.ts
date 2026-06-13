@@ -1,20 +1,28 @@
 import { describe, expect, it } from "vitest"
-import { DEFAULT_MODEL, mergeModelOptions, PRESET_MODELS } from "./models"
+
+import { buildProviderOptions, DEFAULT_MODEL, findProvider, PLATFORM_PROVIDER } from "./models"
 
 describe("models", () => {
-  it("预设含默认模型", () => {
-    expect(PRESET_MODELS).toContain(DEFAULT_MODEL)
+  it("默认模型 + 平台 provider 常量", () => {
     expect(DEFAULT_MODEL).toBe("DeepSeek-V4-Pro")
+    expect(PLATFORM_PROVIDER).toBe("sophnet")
   })
 
-  it("合并顺序:预设 → 在用 → 自定义;trim 去空去重;自定义携带行", () => {
-    const customs = [
-      { id: "c1", model: "GLM-5.1", created_at: "" }, // 与预设重复 → 不再出现
-      { id: "c2", model: "my-model", created_at: "" },
-    ]
-    const opts = mergeModelOptions(["gpt-x", " DeepSeek-V4-Pro ", ""], customs)
-    expect(opts.map((o) => o.model)).toEqual([...PRESET_MODELS, "gpt-x", "my-model"])
-    expect(opts.find((o) => o.model === "my-model")?.custom?.id).toBe("c2")
-    expect(opts.find((o) => o.model === "GLM-5.1")?.custom).toBeUndefined()
+  it("buildProviderOptions:平台 sophnet 在首,各 credential 跟随", () => {
+    const ps = buildProviderOptions(
+      ["DeepSeek-V4-Pro", "GLM-5.1"],
+      [{ id: "c1", name: "openrouter", models: ["gpt-4o", "claude"] }],
+    )
+    expect(ps).toEqual([
+      { name: "sophnet", credentialId: null, models: ["DeepSeek-V4-Pro", "GLM-5.1"] },
+      { name: "openrouter", credentialId: "c1", models: ["gpt-4o", "claude"] },
+    ])
+  })
+
+  it("findProvider:按 credentialId 定位;null=平台;找不到(凭据被删)回退首个", () => {
+    const ps = buildProviderOptions(["m1"], [{ id: "c1", name: "or", models: ["x"] }])
+    expect(findProvider(ps, null).name).toBe("sophnet")
+    expect(findProvider(ps, "c1").name).toBe("or")
+    expect(findProvider(ps, "gone").name).toBe("sophnet")
   })
 })

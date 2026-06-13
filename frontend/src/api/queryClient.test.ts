@@ -4,7 +4,7 @@ import type { Session } from "../types"
 import { pollSessionTitle } from "./queryClient"
 
 const sess = (title: string | null): Session => ({
-  id: "s1", user_id: "u1", agent_config_id: "a1", title,
+  id: "s1", user_id: "u1", agent_config_id: "a1", model: "m", credential_id: null, title,
   work_subdir: "workspace", last_active_at: "2026-06-12T12:00:00Z", last_context_tokens: null,
 })
 

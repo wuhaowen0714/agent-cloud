@@ -4,11 +4,11 @@ import type {
   FileEntry,
   MemoryBlock,
   Message,
+  PlatformModels,
   ProviderCredential,
   Session,
   Skill,
   User,
-  UserModel,
 } from "../types"
 import { authedFetch, setAccess } from "./auth"
 
@@ -73,11 +73,15 @@ export const api = {
 
   // ── agents / sessions(user 由 token 推导)──
   listAgents: () => http<AgentConfig[]>("/agent-configs"),
-  createAgent: (body: { name: string; model: string; provider: string }) =>
+  createAgent: (body: { name: string }) =>
     http<AgentConfig>("/agent-configs", { method: "POST", body: JSON.stringify(body) }),
   listSessions: () => http<Session[]>("/sessions"),
-  createSession: (body: { agent_config_id: string; title?: string }) =>
-    http<Session>("/sessions", { method: "POST", body: JSON.stringify(body) }),
+  createSession: (body: {
+    agent_config_id: string
+    title?: string
+    model?: string
+    credential_id?: string | null
+  }) => http<Session>("/sessions", { method: "POST", body: JSON.stringify(body) }),
   listMessages: (sessionId: string) => http<Message[]>(`/sessions/${sessionId}/messages`),
   compactSession: (id: string) =>
     http<{ compacted: boolean }>(`/sessions/${id}/compact`, { method: "POST" }),
@@ -91,8 +95,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ message_id: messageId }),
     }),
-  patchSession: (id: string, body: { title: string }) =>
-    http<Session>(`/sessions/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  patchSession: (
+    id: string,
+    body: { title?: string; model?: string; credential_id?: string | null },
+  ) => http<Session>(`/sessions/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteSession: (id: string) => http<void>(`/sessions/${id}`, { method: "DELETE" }),
   deleteAgent: (id: string) => http<void>(`/agent-configs/${id}`, { method: "DELETE" }),
 
@@ -129,12 +135,7 @@ export const api = {
   // ── agent config edit / docs / skills ──
   patchAgent: (
     id: string,
-    body: Partial<
-      Pick<
-        AgentConfig,
-        "name" | "model" | "provider" | "thinking_level" | "enabled_tools" | "key_ref"
-      >
-    >,
+    body: Partial<Pick<AgentConfig, "name" | "enabled_tools" | "permissions">>,
   ) => http<AgentConfig>(`/agent-configs/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   listDocs: (scope: string, agentId?: string) =>
     http<ContextDocument[]>(
@@ -161,8 +162,12 @@ export const api = {
 
   // ── provider credentials(BYO-Key)──
   listCredentials: () => http<ProviderCredential[]>("/credentials"),
-  createCredential: (body: { name: string; base_url: string; api_key: string }) =>
-    http<ProviderCredential>("/credentials", { method: "POST", body: JSON.stringify(body) }),
+  createCredential: (body: {
+    name: string
+    base_url: string
+    api_key: string
+    models: string[]
+  }) => http<ProviderCredential>("/credentials", { method: "POST", body: JSON.stringify(body) }),
   deleteCredential: (id: string) => http<void>(`/credentials/${id}`, { method: "DELETE" }),
 
   // ── 智能体记忆(自整合单块)──
@@ -178,9 +183,6 @@ export const api = {
       method: "DELETE",
     }),
 
-  // ── 模型选单(预设之外的用户自定义模型)──
-  listModels: () => http<UserModel[]>("/models"),
-  addModel: (model: string) =>
-    http<UserModel>("/models", { method: "POST", body: JSON.stringify({ model }) }),
-  deleteModel: (id: string) => http<void>(`/models/${id}`, { method: "DELETE" }),
+  // ── 平台模型清单(session 选 sophnet 时的 model 候选;BYOK 模型走 credential.models)──
+  getPlatformModels: () => http<PlatformModels>("/platform/models"),
 }
