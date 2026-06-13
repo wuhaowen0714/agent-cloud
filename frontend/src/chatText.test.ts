@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { stripWorkspaceImageMarkdown } from "./chatText"
+import { parseUserMessage, stripWorkspaceImageMarkdown } from "./chatText"
 
 describe("stripWorkspaceImageMarkdown", () => {
   it("移除工作区相对路径图(已由工具卡片展示,正文渲染裸路径会破损)", () => {
@@ -35,5 +35,66 @@ describe("stripWorkspaceImageMarkdown", () => {
   it("不误伤普通 markdown 链接", () => {
     const t = "见 [文档](media/docs/readme.md) 说明"
     expect(stripWorkspaceImageMarkdown(t)).toBe(t)
+  })
+})
+
+describe("parseUserMessage", () => {
+  const MARKER =
+    "[Uploaded file(s) in the workspace — read with read_file, or edit images with edit_image]"
+
+  it("摘出附件路径,正文只留用户文本", () => {
+    const { body, attachments } = parseUserMessage(`总结一下这个文档\n\n${MARKER}\nupload/report.pdf`)
+    expect(body).toBe("总结一下这个文档")
+    expect(attachments).toEqual(["upload/report.pdf"])
+  })
+
+  it("多个附件(图片+文件混合)", () => {
+    const { attachments } = parseUserMessage(`看这些\n\n${MARKER}\nupload/a.png\nupload/b.pdf`)
+    expect(attachments).toEqual(["upload/a.png", "upload/b.pdf"])
+  })
+
+  it("仅附件无正文:body 为空", () => {
+    const { body, attachments } = parseUserMessage(`\n\n${MARKER}\nupload/data.xlsx`)
+    expect(body).toBe("")
+    expect(attachments).toEqual(["upload/data.xlsx"])
+  })
+
+  it("含空格的文件名(upload/ 前缀)仍解析", () => {
+    const { attachments } = parseUserMessage(`x\n\n${MARKER}\nupload/my report final.pdf`)
+    expect(attachments).toEqual(["upload/my report final.pdf"])
+  })
+
+  it("兼容早期 Attached image marker", () => {
+    const t =
+      "这是什么\n\n[Attached image(s) in the workspace — use edit_image to edit them]\nupload/cat.png"
+    expect(parseUserMessage(t)).toEqual({ body: "这是什么", attachments: ["upload/cat.png"] })
+  })
+
+  it("无 marker:原样返回,无附件", () => {
+    expect(parseUserMessage("你好")).toEqual({ body: "你好", attachments: [] })
+  })
+
+  // 对抗审查 H1:用户正文恰好含 marker 样式文本,后接真实正文(非路径)→ 不能吞正文
+  it("正文含 marker 样式但后接正文(非路径):不解析,原样保留正文", () => {
+    const t = `The error is:\n${MARKER}\nplease help me fix line 3 and 4`
+    expect(parseUserMessage(t)).toEqual({ body: t, attachments: [] })
+  })
+
+  // M1:fork 回填可能产生多段 marker;末段为真,中间 marker 行不应混进附件
+  it("多段 marker:只收工作区路径行,过滤残留 marker 行", () => {
+    const t = `问题\n\n${MARKER}\nupload/a.png\n\n${MARKER}\nupload/b.png`
+    expect(parseUserMessage(t).attachments).toEqual(["upload/a.png", "upload/b.png"])
+  })
+
+  // M2:CRLF 也要正常解析(否则 marker + 裸路径原样暴露)
+  it("CRLF 换行也能解析", () => {
+    const { body, attachments } = parseUserMessage(`总结\r\n\r\n${MARKER}\r\nupload/x.pdf`)
+    expect(body).toBe("总结")
+    expect(attachments).toEqual(["upload/x.pdf"])
+  })
+
+  it("marker 后混入非路径行:整体不解析,保留正文", () => {
+    const t = `hi\n\n${MARKER}\nupload/ok.png\nrandom note here`
+    expect(parseUserMessage(t)).toEqual({ body: t, attachments: [] })
   })
 })
