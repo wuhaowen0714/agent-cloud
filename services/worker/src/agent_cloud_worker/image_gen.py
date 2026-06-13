@@ -76,6 +76,17 @@ WriteBinaryFn = Callable[[str, bytes], Awaitable[str]]
 
 _TERMINAL_FAIL = ("FAILED", "CANCELED", "UNKNOWN")
 
+# 瞬时网络错误:端点在 Anti-DDoS 清洗中心后(www.sophnet.com → aliyunddos*),偶发丢 SYN /
+# 读超时 / 连接池超时,握手层失败但下次多半成功 → 值得重试。HTTPStatusError(401/配额)【不】
+# 在此列:业务错误应快速失败,不重试。
+_TRANSIENT_NET = (
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+    httpx.ReadTimeout,
+    httpx.PoolTimeout,
+    httpx.RemoteProtocolError,
+)
+
 
 def _headers(api_key: str) -> dict:
     return {
@@ -91,6 +102,9 @@ def make_sophnet_image_generator(
     api_key: str,
     model: str = DEFAULT_IMAGE_MODEL,
     timeout: float = 30.0,
+    connect_timeout: float = 10.0,
+    attempts: int = 3,
+    retry_backoff: float = 1.5,
     poll_interval: float = 2.5,
     poll_max_seconds: float = 180.0,
     transport: httpx.BaseTransport | None = None,
@@ -99,8 +113,10 @@ def make_sophnet_image_generator(
 ) -> ImageGenFn:
     """造一个调 sophnet 图片生成端点的 ImageGenFn:POST 建任务 → 轮询 → 下载图片字节。
 
-    Bearer = 平台专用 key(独立于 LLM key)。transport/sleep/now 仅供测试注入(MockTransport /
-    假 sleep 跳过真实等待 / 假时钟驱动 deadline);生产传 None 用默认网络栈、asyncio.sleep、单调钟。
+    Bearer = 平台专用 key(独立于 LLM key)。建任务 / 下载图这两步对瞬时网络错误重试 ``attempts``
+    次(指数退避 ``retry_backoff``);连接超时单独压到 ``connect_timeout``(默认 10s)让失败快速触发
+    重试而非干等。transport/sleep/now 仅供测试注入(MockTransport / 假 sleep 跳过真实等待 / 假时钟
+    驱动 deadline);生产传 None 用默认网络栈、asyncio.sleep、单调钟。
     """
     _sleep = sleep or asyncio.sleep
     _now = now or time.monotonic
@@ -115,16 +131,37 @@ def make_sophnet_image_generator(
         if size:
             payload["parameters"] = {"size": size}
 
+        # 连接超时单列、短于整体 timeout:Anti-DDoS 丢 SYN 时不干等满 timeout 才重试。
+        timeout_cfg = httpx.Timeout(timeout, connect=connect_timeout)
         async with httpx.AsyncClient(
-            timeout=timeout, transport=transport, follow_redirects=True
+            timeout=timeout_cfg, transport=transport, follow_redirects=True
         ) as client:
-            # 1. 建任务(返回 taskId + 通常 PENDING)
-            resp = await client.post(
-                endpoint,
-                headers=_headers(api_key),
-                content=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            )
-            resp.raise_for_status()
+
+            async def _send(do: Callable[[], Awaitable[httpx.Response]]) -> httpx.Response:
+                """对瞬时网络错误重试 attempts 次(指数退避);HTTPStatusError 等立即抛(不重试)。"""
+                last: Exception | None = None
+                for i in range(attempts):
+                    try:
+                        return await do()
+                    except _TRANSIENT_NET as exc:
+                        last = exc
+                        if i + 1 < attempts:
+                            await _sleep(retry_backoff * (i + 1))
+                if last is not None:
+                    raise last
+                raise RuntimeError("image request made no attempts")  # attempts<1,不该发生
+
+            # 1. 建任务(返回 taskId + 通常 PENDING)。瞬时连接错误重试(连接未建立 → 重试安全)。
+            async def _create() -> httpx.Response:
+                r = await client.post(
+                    endpoint,
+                    headers=_headers(api_key),
+                    content=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                )
+                r.raise_for_status()
+                return r
+
+            resp = await _send(_create)
             created = resp.json()
             if not isinstance(created, dict):
                 raise RuntimeError("image backend returned an unexpected payload")
@@ -143,8 +180,11 @@ def make_sophnet_image_generator(
             final: dict | None = None
             while _now() < deadline:
                 await _sleep(poll_interval)
-                q = await client.get(query_url, headers=_headers(api_key))
-                q.raise_for_status()
+                try:
+                    q = await client.get(query_url, headers=_headers(api_key))
+                    q.raise_for_status()
+                except _TRANSIENT_NET:
+                    continue  # 轮询中途瞬时抖动:本轮跳过,deadline 内下轮再查(不中止任务)
                 qd = q.json()
                 qout = (qd or {}).get("output") or {}
                 status = qout.get("taskStatus")
@@ -167,8 +207,14 @@ def make_sophnet_image_generator(
             )
             if not url:
                 raise RuntimeError("image task succeeded but returned no image url")
-            img = await client.get(url)
-            img.raise_for_status()
+
+            # 3b. 下载原始字节(瞬时连接错误重试:OSS/CDN 偶发抖动)
+            async def _download() -> httpx.Response:
+                r = await client.get(url)
+                r.raise_for_status()
+                return r
+
+            img = await _send(_download)
             return img.content
 
     return generate

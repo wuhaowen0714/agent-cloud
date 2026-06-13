@@ -299,6 +299,117 @@ async def test_image_generator_raises_on_http_error():
         await gen("x")
 
 
+async def test_image_generator_retries_transient_connect_on_post():
+    """POST 建任务首次 ConnectTimeout(Anti-DDoS 偶发丢 SYN),重试后成功 → 仍返回图片。"""
+    state = {"posts": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if request.method == "POST" and url == _ENDPOINT:
+            state["posts"] += 1
+            if state["posts"] == 1:
+                raise httpx.ConnectTimeout("transient", request=request)
+            return httpx.Response(
+                200, json={"output": {"taskId": "img-1", "taskStatus": "PENDING"}}
+            )
+        if request.method == "GET" and url == f"{_ENDPOINT}/img-1":
+            return httpx.Response(
+                200, json={"output": {"taskStatus": "SUCCEEDED", "results": [{"url": _IMG_URL}]}}
+            )
+        if request.method == "GET" and url == _IMG_URL:
+            return httpx.Response(200, content=_PNG)
+        return httpx.Response(404)
+
+    gen = make_sophnet_image_generator(
+        endpoint=_ENDPOINT, api_key="k", transport=httpx.MockTransport(handler), sleep=_nosleep
+    )
+    assert await gen("x") == _PNG
+    assert state["posts"] == 2  # 第一次失败、第二次成功
+
+
+async def test_image_generator_gives_up_after_retries():
+    """POST 持续 ConnectTimeout:重试耗尽后抛出(不无限重试)。"""
+    state = {"posts": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            state["posts"] += 1
+            raise httpx.ConnectTimeout("always", request=request)
+        return httpx.Response(404)
+
+    gen = make_sophnet_image_generator(
+        endpoint=_ENDPOINT,
+        api_key="k",
+        transport=httpx.MockTransport(handler),
+        sleep=_nosleep,
+        attempts=3,
+    )
+    with pytest.raises(httpx.ConnectTimeout):
+        await gen("x")
+    assert state["posts"] == 3  # 恰好 attempts 次
+
+
+async def test_image_generator_retries_transient_on_download():
+    """下载图字节首次 ConnectError,重试后成功。"""
+    state = {"dl": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if request.method == "POST" and url == _ENDPOINT:
+            return httpx.Response(
+                200, json={"output": {"taskId": "img-1", "taskStatus": "PENDING"}}
+            )
+        if request.method == "GET" and url == f"{_ENDPOINT}/img-1":
+            return httpx.Response(
+                200, json={"output": {"taskStatus": "SUCCEEDED", "results": [{"url": _IMG_URL}]}}
+            )
+        if request.method == "GET" and url == _IMG_URL:
+            state["dl"] += 1
+            if state["dl"] == 1:
+                raise httpx.ConnectError("transient", request=request)
+            return httpx.Response(200, content=_PNG)
+        return httpx.Response(404)
+
+    gen = make_sophnet_image_generator(
+        endpoint=_ENDPOINT, api_key="k", transport=httpx.MockTransport(handler), sleep=_nosleep
+    )
+    assert await gen("x") == _PNG
+    assert state["dl"] == 2
+
+
+async def test_image_generator_poll_survives_transient_blip():
+    """轮询中途一次瞬时网络抖动不应中止整个任务,下一轮继续直到 SUCCEEDED。"""
+    state = {"polls": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if request.method == "POST" and url == _ENDPOINT:
+            return httpx.Response(
+                200, json={"output": {"taskId": "img-1", "taskStatus": "PENDING"}}
+            )
+        if request.method == "GET" and url == f"{_ENDPOINT}/img-1":
+            state["polls"] += 1
+            if state["polls"] == 1:
+                raise httpx.ReadTimeout("blip", request=request)  # 第一轮抖动
+            return httpx.Response(
+                200, json={"output": {"taskStatus": "SUCCEEDED", "results": [{"url": _IMG_URL}]}}
+            )
+        if request.method == "GET" and url == _IMG_URL:
+            return httpx.Response(200, content=_PNG)
+        return httpx.Response(404)
+
+    gen = make_sophnet_image_generator(
+        endpoint=_ENDPOINT,
+        api_key="k",
+        transport=httpx.MockTransport(handler),
+        sleep=_nosleep,
+        poll_interval=0.1,
+        poll_max_seconds=30.0,
+    )
+    assert await gen("x") == _PNG
+    assert state["polls"] == 2  # 第一轮抖动被吞、第二轮成功
+
+
 async def test_image_generator_times_out():
     # 任务一直 RUNNING:轮询到 poll_max_seconds 仍未终态 → 报超时。注入假时钟:sleep 推进它、
     # deadline 据它判定(不真等),验证有界退出且不无限循环(deadline 改单调钟后必须靠时钟推进)。
