@@ -21,6 +21,7 @@ from agent_cloud_backend.api import (
     turn,
     user_models,
 )
+from agent_cloud_backend.scheduler.poller import scheduler_loop
 
 logger = logging.getLogger(__name__)
 
@@ -52,14 +53,22 @@ async def lifespan(app):
     settings = get_settings()
     manager = get_sandbox_manager()
     task = asyncio.create_task(_reaper_loop(settings.sandbox_reap_interval_seconds, manager))
+    # 定时任务轮询器(spec 2026-06-13;可经 scheduler_enabled 关闭)。多副本可全开,
+    # select_due_for_update 的 FOR UPDATE SKIP LOCKED 保证同一到期任务不被重复触发。
+    sched_task = (
+        asyncio.create_task(scheduler_loop(settings)) if settings.scheduler_enabled else None
+    )
     try:
         yield
     finally:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        bg_tasks = [t for t in (task, sched_task) if t is not None]
+        for t in bg_tasks:
+            t.cancel()
+        for t in bg_tasks:
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
         # 取消所有在跑的回合 Runner,等其收尾,并兜底释放残留会话锁(否则关停时
         # shield 的释放可能没跑完、或从未启动的 runner 没机会释放 → 锁卡到租约过期)。
         from agent_cloud_backend.turn.hub import get_turn_hub
