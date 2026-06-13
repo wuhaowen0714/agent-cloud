@@ -10,6 +10,7 @@ import { SlashPalette } from "./slash/SlashPalette"
 import { StatusCard } from "./slash/StatusCard"
 import { useSlashCommands } from "./slash/useSlashCommands"
 import { Button, Textarea } from "./ui"
+import { UserAttachments } from "./UserAttachments"
 
 type Notice = { kind: "flash"; flash: string } | { kind: "status" } | { kind: "help" } | null
 interface Entry {
@@ -266,23 +267,12 @@ export function Composer({
         }}
       >
       {attachments.length > 0 && (
-        <div className="mb-2 flex flex-wrap gap-2">
-          {attachments.map((a, i) => (
-            <span
-              key={a.path}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600"
-            >
-              <span aria-hidden>📎</span>
-              <span className="max-w-[12rem] truncate font-mono">{a.name}</span>
-              <button
-                type="button"
-                className="text-slate-400 hover:text-slate-700"
-                onClick={() => setAttachments((p) => p.filter((_, j) => j !== i))}
-              >
-                ✕
-              </button>
-            </span>
-          ))}
+        <div className="mb-2">
+          <UserAttachments
+            paths={attachments.map((a) => a.path)}
+            align="start"
+            onRemove={(i) => setAttachments((p) => p.filter((_, j) => j !== i))}
+          />
         </div>
       )}
       <div ref={wrapRef} className="relative flex items-end gap-2">

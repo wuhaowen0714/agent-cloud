@@ -418,9 +418,10 @@ describe("图片上传(附件)", () => {
     vi.spyOn(api, "uploadFiles").mockResolvedValue([
       { name: "cat.png", path: "upload/cat.png", size: 10, is_dir: false },
     ] as never)
+    vi.spyOn(api, "previewUrl").mockResolvedValue("blob:fake")
     const { onSend } = setup()
     await pick()
-    expect(await screen.findByText("cat.png")).toBeInTheDocument()
+    expect(await screen.findByAltText("cat.png")).toBeInTheDocument()
     expect(api.uploadFiles).toHaveBeenCalledWith("upload", [expect.any(File)])
     type("把背景换成沙滩")
     fireEvent.click(screen.getByText("发送"))
@@ -440,20 +441,22 @@ describe("图片上传(附件)", () => {
     vi.spyOn(api, "uploadFiles").mockResolvedValue([
       { name: "cat.png", path: "upload/cat.png", size: 10, is_dir: false },
     ] as never)
+    vi.spyOn(api, "previewUrl").mockResolvedValue("blob:fake")
     setup()
     await pick()
-    expect(await screen.findByText("cat.png")).toBeInTheDocument()
-    fireEvent.click(screen.getByText("✕"))
-    expect(screen.queryByText("cat.png")).not.toBeInTheDocument()
+    expect(await screen.findByAltText("cat.png")).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText("移除附件"))
+    expect(screen.queryByAltText("cat.png")).not.toBeInTheDocument()
   })
 
   it("仅附件、无文本也能发送(消息只含路径)", async () => {
     vi.spyOn(api, "uploadFiles").mockResolvedValue([
       { name: "cat.png", path: "upload/cat.png", size: 10, is_dir: false },
     ] as never)
+    vi.spyOn(api, "previewUrl").mockResolvedValue("blob:fake")
     const { onSend } = setup()
     await pick()
-    await screen.findByText("cat.png")
+    await screen.findByAltText("cat.png")
     fireEvent.click(screen.getByText("发送")) // 不打字
     const sent = (onSend as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
     expect(sent).toContain("upload/cat.png")
