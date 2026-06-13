@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { api } from "../api/client"
+import { parseUserMessage } from "../chatText"
 import { atTokenAt, filterPaths } from "../fileRef"
 import { useStore } from "../store"
 import { ModelMenu } from "./model/ModelMenu"
@@ -66,9 +67,13 @@ export function Composer({
   }, [sessionId])
 
   // 回滚/fork 触发的回填:store 里有待回填文本 → 写进输入框、聚焦,消费一次即清(避免重复回填)。
+  // 回填用户真正打的字;附件(若有)恢复成 chip,而不是把内部 marker + 裸路径塞进输入框。
   useEffect(() => {
     if (composerDraft != null) {
-      setText(composerDraft)
+      const { body, attachments: paths } = parseUserMessage(composerDraft)
+      setText(body)
+      if (paths.length)
+        setAttachments(paths.map((p) => ({ path: p, name: p.split("/").pop() || p })))
       setComposerDraft(null)
       requestAnimationFrame(() => taRef.current?.focus())
     }

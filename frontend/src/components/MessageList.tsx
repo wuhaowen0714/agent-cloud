@@ -1,6 +1,7 @@
 import { ChevronDown } from "lucide-react"
 import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 import { messagesToTurns } from "../blocks"
+import { parseUserMessage } from "../chatText"
 import { isNearBottom } from "../scroll"
 import { useStore } from "../store"
 import { fmtTime } from "../time"
@@ -102,7 +103,7 @@ export function MessageList({
                 {/* 操作 + 时间同行(hover 显操作,时间常驻),避免额外占位行 */}
                 <div className="flex items-center justify-end gap-2 pr-1">
                   <MessageActions
-                    text={turn.userText}
+                    text={parseUserMessage(turn.userText).body}
                     onRollback={onRollback ? () => onRollback(turn.id) : undefined}
                     onFork={onFork ? () => onFork(turn.id) : undefined}
                   />
