@@ -8,6 +8,7 @@ from agent_cloud_worker.image_gen import (
     GENERATE_IMAGE_SPEC,
     ImageEditExecutor,
     ImageGenExecutor,
+    _slugify,
     edit_image_enabled,
     generate_image_enabled,
     make_sophnet_image_generator,
@@ -95,11 +96,11 @@ async def test_generates_and_saves_to_workspace():
     )
     res = await ex.execute(ToolCall(id="c1", name="generate_image", arguments={"prompt": "a cat"}))
     assert res.is_error is False
-    # 落盘到 media/picture/,文件名带 id,字节原样透传
-    assert saved["path"] == "media/picture/img_abc123.png"
+    # 落盘到 media/picture/,文件名 = prompt 语义 slug + 短 id,字节原样透传
+    assert saved["path"] == "media/picture/a-cat-abc123.png"
     assert saved["data"] == _PNG
     # content 含路径(供前端解析渲染)+ 明确"已展示、勿重复"(防模型在正文再插一个坏 markdown 图)
-    assert "media/picture/img_abc123.png" in res.content
+    assert "media/picture/a-cat-abc123.png" in res.content
     assert "do not embed it again" in res.content
 
 
@@ -514,9 +515,9 @@ async def test_edit_reads_input_and_saves():
     assert len(seen["images"]) == 1
     assert seen["images"][0].startswith("data:image/png;base64,")
     assert seen["prompt"] == "make it blue"
-    assert saved["path"] == "media/picture/edit_e1.png"
+    assert saved["path"] == "media/picture/edited-make-it-blue-e1.png"
     assert saved["data"] == _PNG
-    assert "media/picture/edit_e1.png" in res.content
+    assert "media/picture/edited-make-it-blue-e1.png" in res.content
 
 
 async def test_edit_delegates_non_edit_to_inner():
@@ -663,3 +664,51 @@ async def test_edit_total_size_exceeded_is_error(monkeypatch):
     )
     assert res.is_error is True
     assert "total input image size" in res.content
+
+
+# --- _slugify(图片文件名语义化) ---
+
+
+def test_slugify_english_to_hyphens():
+    assert _slugify("a cat on the beach") == "a-cat-on-the-beach"
+
+
+def test_slugify_keeps_chinese():
+    assert _slugify("一只在冲浪的柴犬") == "一只在冲浪的柴犬"
+
+
+def test_slugify_strips_path_injection():
+    # prompt 是模型内容,绝不能让 ../ 或路径分隔进文件名(sandbox 围栏外的第一道防线)
+    s = _slugify("../../etc/passwd")
+    assert "/" not in s and ".." not in s and "\\" not in s
+    s2 = _slugify('a/b\\c:d*e?f"g<h>i|j')
+    assert not (set(s2) & set('/\\:*?"<>|'))
+
+
+def test_slugify_empty_or_dots_falls_back():
+    assert _slugify("") == "image"
+    assert _slugify("   ") == "image"
+    assert _slugify("...") == "image"
+
+
+def test_slugify_truncates_long():
+    assert len(_slugify("word " * 100)) <= 40
+
+
+def test_slugify_first_line_only_drops_malicious_second_line():
+    assert _slugify("title line\nsecond line") == "title-line"
+    assert _slugify("ok\n../../etc/passwd") == "ok"  # 恶意第二行被整段丢弃
+
+
+def test_slugify_unicode_slash_kept_but_not_ascii_separator():
+    # U+FF0F 全角斜杠保留为字符(Linux 只认字节 0x2F 当分隔符),不构成目录穿越
+    assert "/" not in _slugify("a／b／c")
+
+
+def test_slugify_strips_nul_and_control():
+    assert _slugify("a\x00b\tc") == "a-b-c"
+
+
+def test_slugify_truncate_leaves_no_trailing_hyphen():
+    s = _slugify("x" * 39 + " " + "y" * 10)  # 第 40 位附近切在连字符处
+    assert len(s) <= 40 and not s.endswith("-")
