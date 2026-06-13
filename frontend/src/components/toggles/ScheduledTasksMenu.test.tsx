@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { api } from "../../api/client"
+import { api, HttpError } from "../../api/client"
 import { useStore } from "../../store"
 import type { AgentConfig, ScheduledTask } from "../../types"
 import { ScheduledTasksMenu } from "./ScheduledTasksMenu"
@@ -90,5 +90,17 @@ describe("ScheduledTasksMenu", () => {
     await screen.findByText("每日新闻")
     fireEvent.click(screen.getByRole("button", { name: "删除 每日新闻" }))
     await waitFor(() => expect(del).toHaveBeenCalledWith("t1"))
+  })
+
+  it("创建失败(422)显示错误提示", async () => {
+    vi.spyOn(api, "listScheduledTasks").mockResolvedValue([])
+    vi.spyOn(api, "createScheduledTask").mockRejectedValue(new HttpError(422, "bad cron"))
+    render(wrap(<ScheduledTasksMenu />))
+    await screen.findByText(/还没有定时任务/)
+    fireEvent.change(screen.getByLabelText("任务名"), { target: { value: "x" } })
+    fireEvent.change(screen.getByLabelText("提示词"), { target: { value: "p" } })
+    fireEvent.change(screen.getByLabelText("排期表达式"), { target: { value: "bad" } })
+    fireEvent.click(screen.getByRole("button", { name: "创建" }))
+    expect(await screen.findByText("排期表达式无效,请检查")).toBeInTheDocument()
   })
 })

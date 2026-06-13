@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
-import { api } from "../../api/client"
+import { api, HttpError } from "../../api/client"
 import { useStore } from "../../store"
 import type { ScheduledTask } from "../../types"
 import { Button, Input, Segmented, Switch, Textarea } from "../ui"
@@ -45,6 +45,7 @@ export function ScheduledTasksMenu() {
   const [prompt, setPrompt] = useState("")
   const [kind, setKind] = useState("cron")
   const [expr, setExpr] = useState("")
+  const [createErr, setCreateErr] = useState<string | null>(null)
 
   const create = useMutation({
     mutationFn: () =>
@@ -59,8 +60,13 @@ export function ScheduledTasksMenu() {
       setName("")
       setPrompt("")
       setExpr("")
+      setCreateErr(null)
       invalidate()
     },
+    onError: (e) =>
+      setCreateErr(
+        e instanceof HttpError && e.status === 422 ? "排期表达式无效,请检查" : "创建失败",
+      ),
   })
   const patch = useMutation({
     mutationFn: (v: { id: string; enabled: boolean }) =>
@@ -142,6 +148,7 @@ export function ScheduledTasksMenu() {
           value={expr}
           onChange={(e) => setExpr(e.target.value)}
         />
+        {createErr && <div className="px-1 text-[11px] text-red-600">{createErr}</div>}
         <Button disabled={!canCreate} onClick={() => create.mutate()}>
           创建
         </Button>

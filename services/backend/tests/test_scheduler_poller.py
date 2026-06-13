@@ -113,3 +113,32 @@ async def test_scheduler_loop_survives_poll_error(monkeypatch):
     except asyncio.CancelledError:
         pass
     assert calls["n"] >= 2  # 抛错后仍继续
+
+
+async def test_poll_isolates_poison_task(engine, monkeypatch):
+    """单个任务排期算不出(坏 cron 等)不应拖垮整批:坏任务标 error(保持 enabled、
+    next_run=NULL 不再被选中),好任务照常推进 + 派发。"""
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    ran = _capture_runs(monkeypatch)
+    now = datetime.now(UTC)
+    good = await _seed_task(maker, name="good", next_run_at=now - timedelta(seconds=2))
+    # croniter 对 "bogus" 抛错;模型层不校验,直接塞坏值模拟历史脏数据
+    poison = await _seed_task(
+        maker,
+        name="poison",
+        schedule_kind="cron",
+        schedule_expr="bogus",
+        next_run_at=now - timedelta(seconds=2),
+    )
+
+    await P.poll_once(Settings(_env_file=None))  # 不应抛
+
+    assert good in [r["id"] for r in ran]
+    assert poison not in [r["id"] for r in ran]
+    async with maker() as s:
+        p = await s.get(ScheduledTask, poison)
+        assert p.last_status == "error"
+        assert p.next_run_at is None
+        assert p.enabled is True  # 不静默禁用
+        g = await s.get(ScheduledTask, good)
+        assert g.next_run_at > now  # 好任务照常推进

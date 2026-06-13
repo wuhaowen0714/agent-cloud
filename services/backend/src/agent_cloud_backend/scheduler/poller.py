@@ -36,12 +36,22 @@ async def poll_once(settings: Settings) -> list[dict]:
             run_lease_seconds=settings.scheduler_run_lease_seconds,
         )
         for t in due:
-            grace = schedule.grace_seconds(
-                t.schedule_kind, t.schedule_expr, t.schedule_tz, t.next_run_at
-            )
-            new_next = schedule.next_run_after(
-                t.schedule_kind, t.schedule_expr, t.schedule_tz, prev=t.next_run_at, now=now
-            )
+            try:
+                grace = schedule.grace_seconds(
+                    t.schedule_kind, t.schedule_expr, t.schedule_tz, t.next_run_at
+                )
+                new_next = schedule.next_run_after(
+                    t.schedule_kind, t.schedule_expr, t.schedule_tz, prev=t.next_run_at, now=now
+                )
+            except Exception:
+                # 排期算不出(坏 cron / 失效时区等):标 error、next_run=NULL 使其不再被选中,
+                # 但【保持 enabled】(不静默禁用,面板暴露)——单个坏任务绝不拖垮整批/回滚好任务。
+                logger.exception("scheduled task %s: schedule compute failed; marking error", t.id)
+                t.last_status = "error"
+                t.last_error = "schedule compute failed (invalid expr/tz?)"
+                t.next_run_at = None
+                t.running_since = None
+                continue
             stale = grace > 0 and t.next_run_at < now - timedelta(seconds=grace)
             t.next_run_at = new_next
             if new_next is None:
@@ -49,6 +59,7 @@ async def poll_once(settings: Settings) -> list[dict]:
             if stale:
                 t.last_status = "skipped"  # 陈旧周期任务:快进、本轮不补跑
                 t.last_run_at = now
+                t.running_since = None  # 快进不执行、不持锁:清掉可能的崩溃残留
             else:
                 t.running_since = now
                 to_run.append(
