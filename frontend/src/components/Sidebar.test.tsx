@@ -42,6 +42,8 @@ const sess = (id: string, n: number) => ({
   work_subdir: "workspace",
   last_active_at: day(n),
   last_context_tokens: null,
+  scheduled_task_id: null,
+  unread: false,
 })
 
 const wrap = (ui: ReactNode) => (

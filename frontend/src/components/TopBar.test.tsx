@@ -25,6 +25,8 @@ const S1 = {
   work_subdir: "workspace",
   last_active_at: "2026-06-12T12:00:00Z",
   last_context_tokens: null,
+  scheduled_task_id: null,
+  unread: false,
 }
 
 const wrap = (ui: ReactNode) => (
