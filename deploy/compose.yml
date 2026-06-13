@@ -36,7 +36,8 @@ services:
       # 跨租户隔离(spec B):每沙箱起在专属网络 acsbx-net-<id>,backend 把 worker 接入它。
       # 沙箱因此够不到 db/backend/邻居沙箱;worker 容器名固定如下供 backend connect。
       AGENT_CLOUD_SANDBOX_WORKER_CONTAINER: agent-cloud-worker
-      AGENT_CLOUD_SANDBOX_MEM_LIMIT: 256m # 1.6G 小机,压低单沙箱上限
+      # 单沙箱内存上限:按宿主机内存在 .env 设(ali 1.6G 小机 256m;st-e 62G 大机 2g)
+      AGENT_CLOUD_SANDBOX_MEM_LIMIT: ${AGENT_CLOUD_SANDBOX_MEM_LIMIT:-256m}
       # 工作区:容器内外同一路径(backend makedirs + 沙箱兄弟容器 bind 同一宿主目录)
       AGENT_CLOUD_SANDBOX_BASE_ROOT: /opt/agent-cloud/data/workspaces
       AGENT_CLOUD_SANDBOX_HOST_ROOT: /opt/agent-cloud/data/workspaces
@@ -63,7 +64,8 @@ services:
     build: { context: .., dockerfile: deploy/frontend.Dockerfile }
     image: agent-cloud-web:latest
     ports:
-      - "8080:80" # 唯一公开端口(8000 已被宿主上其它服务占用)
+      # 唯一公开端口,主机侧端口按机器在 .env 设(ali 8080;st-e 18080=网关放通口)
+      - "${AGENT_CLOUD_WEB_PORT:-8080}:80"
     depends_on:
       - backend
     restart: unless-stopped

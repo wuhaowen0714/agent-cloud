@@ -1,0 +1,13 @@
+# ali-ecs 入口(迁移到 st-e 后,ali 上唯一还跑的东西)。
+# 起停:cd /opt/agent-cloud/app/deploy/ali-entry && docker compose up -d / down
+# 与应用栈(deploy/compose.yml,项目名 agent-cloud)互斥使用 8080:先 stop 应用栈再起这个。
+name: agent-cloud-entry
+
+services:
+  entry:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
