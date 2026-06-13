@@ -6,7 +6,8 @@ def test_defaults():
     s = WorkerSettings(_env_file=None)
     assert s.grpc_port == 50052
     assert s.openai_base_url == "https://api.openai.com/v1"
-    assert s.openai_max_retries == 2
+    assert s.openai_timeout_seconds == 45.0  # 卡住更早重试(端点偶发首 token 卡顿)
+    assert s.openai_max_retries == 3
     assert s.request_max_tokens == 32768
     assert s.max_iterations == 20  # 单回合 LLM↔工具往返上限
     assert s.timezone_offset_hours == 8.0  # 默认北京时区(注入"今天日期")
