@@ -22,7 +22,12 @@ def builtin_tool_specs() -> list[ToolSpec]:
         ),
         ToolSpec(
             name="read_file",
-            description="Read a file (relative to the working directory).",
+            description=(
+                "Read a file (relative to the working directory). Plain-text and code "
+                "files are returned as-is; PDF, Word (.docx), PowerPoint (.pptx) and "
+                "Excel (.xlsx) files are automatically extracted to text so you can read "
+                "their contents directly."
+            ),
             input_schema={"type": "object",
                           "properties": {"path": {"type": "string"}},
                           "required": ["path"]},

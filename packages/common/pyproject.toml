@@ -2,7 +2,15 @@
 name = "agent-cloud-common"
 version = "0.0.0"
 requires-python = ">=3.12"
-dependencies = ["grpcio", "protobuf"]
+dependencies = [
+    "grpcio",
+    "protobuf",
+    # 文档抽取(read_file 自动读 pdf/word/ppt/excel):纯 pip、走 https,不引 apt/LibreOffice 系统依赖。
+    "pdfplumber",
+    "python-docx",
+    "python-pptx",
+    "openpyxl",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -12,7 +20,7 @@ build-backend = "hatchling.build"
 packages = ["src/agent_cloud_common", "src/agent_cloud"]
 
 [dependency-groups]
-dev = ["grpcio-tools", "pytest"]
+dev = ["grpcio-tools", "pytest", "fpdf2"]  # fpdf2 仅用于测试里生成 pdf fixture
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

@@ -9,7 +9,7 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 
-from agent_cloud_common import apply_edits
+from agent_cloud_common import apply_edits, extract_text
 
 # 工具输出上限。bash 可能产出任意大的输出,超过 gRPC 默认 4MB 消息上限会导致
 # RESOURCE_EXHAUSTED 崩溃,因此在沙箱侧先截断。
@@ -154,7 +154,7 @@ def _write_file(workdir: Path, args: dict) -> str:
 
 
 def _read_file(workdir: Path, args: dict) -> str:
-    return _truncate(_resolve_within(workdir, args["path"]).read_text())
+    return _truncate(extract_text(_resolve_within(workdir, args["path"])))
 
 
 def _edit(workdir: Path, args: dict) -> str:
