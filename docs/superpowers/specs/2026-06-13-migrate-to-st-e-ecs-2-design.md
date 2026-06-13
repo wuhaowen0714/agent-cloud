@@ -20,26 +20,27 @@
 | 公网放通端口 | 8080(阿里云安全组) | **仅 8359/8459/9022**;80/443/8080 不通 → 需新开 **18080** |
 | 数据量 | pgdata 64M / objstore 424K / workspaces 754M(9 用户)≈ **820M** | — |
 
-**关键约束:** `47.94.140.245` 是阿里云 EIP,**无法迁到非阿里云的 st-e**。保留该确切 URL ⇒ ali-ecs 必须留作入口(反代)。
+**关键约束:** `47.94.140.245` 是阿里云 EIP,**无法迁到非阿里云的 st-e**。保留该入口 ⇒ ali-ecs 必须留一个监听 8080 的东西(302 重定向容器,见 §2)。
 
 ---
 
 ## 2. 最终形态
 
 ```
-老用户 ──HTTP──> 47.94.140.245:8080 (ali-ecs:仅剩 1 个 nginx 反代容器)
-                          │  proxy_pass(转发全部,含 SSE/WS/上传)
-                          ▼
+老用户 ──GET──> 47.94.140.245:8080 (ali-ecs:仅剩 1 个 nginx 重定向容器)
+                          │  302 → http://106.75.235.242:18080$request_uri(几百字节,秒回)
+                          ▼ 浏览器自动跳转,之后所有流量直连 st-e
         网关公网 106.75.235.242:18080 ──转发──> st-e VM:18080
                           │
                           ▼
         st-e web(nginx) :80 ── /api 反代 ──> backend:8000  (+ worker / db / 按需沙箱)
-直连入口(附带,不额外配置即可用): http://106.75.235.242:18080/
+主入口: http://106.75.235.242:18080/(跳转后地址栏即此)
 ```
 
 - **st-e-ecs-2**:完整应用栈 + 全部数据;今后 deploy 都在这台。
-- **ali-ecs**:停掉应用栈(容器与卷保留作回滚),只起一个 `nginx:alpine` 反代,`:8080` → `106.75.235.242:18080`。
-- 双 nginx 透传:外层(ali)必须同样关缓冲 + 转发 `Upgrade`/`Connection` + `client_max_body_size 100m`,否则回合 SSE 流、终端 WS(`/api/terminal`)、文件上传会在外层断。
+- **ali-ecs**:停掉应用栈(容器与卷保留作回滚),只起一个 `nginx:alpine` 做 **302 重定向**(非反代)。老入口/书签永久有效,深链路径经 `$request_uri` 保留。
+- **为什么重定向而非反代(实测定案)**:ali 出向仅 **3.5 Mbps**、st-e 约 **168 Mbps**(2026-06-13 实测,差 ~50 倍)。反代会把经 47.94 的全部流量封顶在 3.5 Mbps 且多用户共享;重定向后流量全走 st-e 大带宽,ali 只出重定向响应。用 302(非 301):浏览器不持久缓存,将来可随时改向/切回反代。
+- 重定向模式下 ali 端无需任何 SSE/WS/缓冲透传配置(没有流量过境)。
 
 ---
 
@@ -51,6 +52,7 @@
 4. `.env` **逐字复制** ali → st-e(CREDENTIAL_KEY/AUTH_SECRET/DB_PASSWORD 必须不变,否则旧密文解不开、旧会话失效、DB 角色密码不匹配),仅追加 st-e 专属的 `AGENT_CLOUD_WEB_PORT` / `AGENT_CLOUD_SANDBOX_MEM_LIMIT`。
 5. pgdata 用 **`pg_dump` 逻辑迁移**(在线一致快照,不锁 PG 版本、不碰卷内角色密码),灌入 st-e 全新初始化的 db。
 6. 代码经 **裸仓库 ssh 推送**(st-e 是否能连 GitHub 不确定,此法无所谓):本机 `git push st main` → `st-e:/opt/agent-cloud/repo.git` → `/opt/agent-cloud/app`。
+7. **ali 入口模式 = 302 重定向**(用户在带宽实测后选定;见 §2)。已知一次性代价:① 跳转后地址栏变为 `106.75.235.242:18080`;② 老用户需**重新登录一次**(token 在 localStorage,按源隔离,9 个用户成本可忽略);③ 迁移前已打开的旧标签页内的 `/api` 调用会因跨源 302 被 CORS 拦截 → 刷新页面即恢复(切换本就有停机窗口,旧标签页当时已断)。
 
 ---
 
@@ -64,12 +66,22 @@
 
 ali 不设这两个变量 → 仍是 8080 / 256m(零变化);st-e 在 .env 设 `18080` / `2g`。
 
-### A2. 新增 `deploy/ali-proxy/`(ali 反代,迁后用)
-- `deploy/ali-proxy/nginx.conf`:`listen 80` + `map $http_upgrade $connection_upgrade` + 单个 `location /` 透传到 `http://106.75.235.242:18080`,带:`proxy_http_version 1.1`、`Upgrade`/`Connection`/`Host`/`X-Real-IP`/`X-Forwarded-For`/`X-Forwarded-Proto`、`proxy_buffering off`、`proxy_cache off`、`proxy_read_timeout 3600s`、`proxy_send_timeout 3600s`、`client_max_body_size 100m`。
-- `deploy/ali-proxy/compose.yml`:`name: agent-cloud-proxy`,服务 `proxy`(`nginx:alpine`,`ports: ["8080:80"]`,挂载 nginx.conf 只读,`restart: unless-stopped`)。
+### A2. 新增 `deploy/ali-entry/`(ali 入口重定向,迁后用)
+- `deploy/ali-entry/nginx.conf`:
+  ```nginx
+  # ali 入口:47.94.140.245:8080 → 302 跳 st-e 主入口(带宽 3.5Mbps vs 168Mbps,流量不过境)
+  server {
+    listen 80;
+    location / {
+      return 302 http://106.75.235.242:18080$request_uri;
+    }
+  }
+  ```
+  文件内附**注释掉的反代变体**(proxy_pass + Upgrade/Connection + `proxy_buffering off` + 长超时 + `client_max_body_size 100m`),想切回反代模式时取消注释、`docker compose restart` 即可。
+- `deploy/ali-entry/compose.yml`:`name: agent-cloud-entry`,服务 `entry`(`nginx:alpine`,`ports: ["8080:80"]`,挂载 nginx.conf 只读,`restart: unless-stopped`)。
 
 ### A3. 文档
-- `deploy/README.md`:加"双机拓扑(st-e 主 + ali 反代)"小节、st-e 部署两条命令(`git push st main` + `ssh st-e-ecs-2 .../deploy.sh`)、ali 反代起停。
+- `deploy/README.md`:加"双机拓扑(st-e 主 + ali 入口重定向)"小节、st-e 部署两条命令(`git push st main` + `ssh st-e-ecs-2 .../deploy.sh`)、ali 重定向容器起停与切回反代的说明。
 - `.env.example`:登记 `AGENT_CLOUD_WEB_PORT`(默认 8080)、`AGENT_CLOUD_SANDBOX_MEM_LIMIT`(默认 256m)。
 
 ---
@@ -81,7 +93,7 @@ ali 不设这两个变量 → 仍是 8080 / 256m(零变化);st-e 在 .env 设 `1
 ### B-pre. 代码就位(Part A 已合并到 main)
 ```bash
 # 本机:把含 Part A 的 main 推到两台裸仓库
-git push ali main                                        # ali 取到 deploy/ali-proxy/(B4-5 用)
+git push ali main                                        # ali 取到 deploy/ali-entry/(B4-5 用)
 git remote add st st-e-ecs-2:/opt/agent-cloud/repo.git || git remote set-url st st-e-ecs-2:/opt/agent-cloud/repo.git
 ```
 > 此处 `git push st` 在 B0 建好 st-e 裸仓库后才能成功,故放 B0 内。
@@ -116,8 +128,8 @@ ssh st-e-ecs-2 'cd /opt/agent-cloud/app && git pull --ff-only'   # 取到新 com
 for img in agent-cloud-app:latest agent-cloud-web:latest agent-cloud-sandbox:latest; do
   ssh ali-ecs "docker save $img" | ssh st-e-ecs-2 "docker load"
 done
-# 基础镜像 st-e 自行 pull(Docker Hub 通;st-e 已有 nginx:latest,postgres 需拉)
-ssh st-e-ecs-2 'docker pull postgres:16-alpine && docker pull nginx:alpine'
+# 基础镜像:st-e 拉 postgres(Docker Hub 可达性以此步实际验证;ali 的 nginx:alpine 由 B4-5 compose up 自动拉)
+ssh st-e-ecs-2 'docker pull postgres:16-alpine'
 # 只起 db(用 .env 的 DB 密码全新初始化;backend 暂不起,避免 alembic 在空库建表与 dump 冲突)
 ssh st-e-ecs-2 'cd /opt/agent-cloud/app && docker compose --env-file .env -f deploy/compose.yml up -d db'
 ssh st-e-ecs-2 'cd /opt/agent-cloud/app && docker compose --env-file .env -f deploy/compose.yml ps'  # 等 db healthy
@@ -155,30 +167,33 @@ ssh st-e-ecs-2 'cd /opt/agent-cloud/app && docker compose --env-file .env -f dep
 ssh st-e-ecs-2 'cd /opt/agent-cloud/app && docker compose --env-file .env -f deploy/compose.yml ps'
 ssh st-e-ecs-2 'curl -fsS localhost:18080/api/health'        # web(18080)→ backend
 
-# 5) ali:停整个应用栈(保留容器+卷作回滚),起反代
+# 5) ali:停整个应用栈(保留容器+卷作回滚),起 302 重定向入口
 ssh ali-ecs 'cd /opt/agent-cloud/app && docker compose --env-file .env -f deploy/compose.yml stop'
-ssh ali-ecs 'cd /opt/agent-cloud/app && git pull --ff-only'   # 取到 deploy/ali-proxy/
-ssh ali-ecs 'cd /opt/agent-cloud/app/deploy/ali-proxy && docker compose up -d'
+ssh ali-ecs 'cd /opt/agent-cloud/app && git pull --ff-only'   # 取到 deploy/ali-entry/
+ssh ali-ecs 'cd /opt/agent-cloud/app/deploy/ali-entry && docker compose up -d'
 ```
 
 ### B5. 验证(停机窗口结束判据)
 ```bash
-curl -fsS http://106.75.235.242:18080/api/health   # 直连(用户已开网关端口)
-curl -fsS http://47.94.140.245:8080/api/health      # 保留入口经 ali 反代
+curl -fsS http://106.75.235.242:18080/api/health    # 直连主入口(用户已开网关端口)
+curl -sSI http://47.94.140.245:8080/foo/bar | grep -i '^location'
+#   期望: Location: http://106.75.235.242:18080/foo/bar(302 + 路径保留)
+curl -fsSL http://47.94.140.245:8080/api/health     # -L 跟随重定向,端到端通
 ```
-浏览器开 `http://47.94.140.245:8080/`:登录 → 列会话(数据已迁)→ 发一条消息走完整回合(反代→st-e→worker→沙箱,验证 SSE 流式)→ 开一次终端(验证 WS 透传)。
+浏览器开 `http://47.94.140.245:8080/`:自动跳到 `106.75.235.242:18080` → **重新登录**(预期内,localStorage 按源)→ 列会话(数据已迁)→ 发一条消息走完整回合(st-e→worker→沙箱,验证 SSE 流式)→ 开一次终端(验证 WS)→ 传/下载一个文件(验证大带宽直连)。
 
 ### B6. 回滚(任一验证失败)
 ```bash
-ssh ali-ecs 'cd /opt/agent-cloud/app/deploy/ali-proxy && docker compose down'    # 撤反代,放回 8080
+ssh ali-ecs 'cd /opt/agent-cloud/app/deploy/ali-entry && docker compose down'    # 撤重定向,放回 8080
 ssh ali-ecs 'cd /opt/agent-cloud/app && docker compose --env-file .env -f deploy/compose.yml start'  # 原栈复活
 ```
-ali 数据自始至终未删 → ~1 分钟回到迁移前。st-e 保持现状待排查。
+ali 数据自始至终未删 → ~1 分钟回到迁移前。st-e 保持现状待排查。(302 非 301,浏览器不持久缓存,回滚后老 URL 行为立即恢复。)
 
 ### B7. 善后(稳定运行数日后)
 - 删本机暂存 `/tmp/ac-migrate`。
-- 确认稳定后再考虑清理 ali 应用栈(保留反代);ali 数据卷在确信无需回滚前**不删**。
-- 今后部署:`git push st main` + `ssh st-e-ecs-2 '/opt/agent-cloud/app/deploy/deploy.sh'`;ali 只跑反代。
+- 确认稳定后再考虑清理 ali 应用栈(保留重定向容器);ali 数据卷在确信无需回滚前**不删**。
+- 今后部署:`git push st main` + `ssh st-e-ecs-2 '/opt/agent-cloud/app/deploy/deploy.sh'`;ali 只跑重定向。
+- 通知老用户新主入口 `http://106.75.235.242:18080/`(访问老地址也会自动跳过去)。
 
 ---
 
@@ -188,8 +203,9 @@ ali 数据自始至终未删 → ~1 分钟回到迁移前。st-e 保持现状待
 |---|---|
 | `.env` 不一致致旧密文/会话失效 | 逐字直传,仅追加两个端口/内存变量;DB 密码随之一致 |
 | db 在 backend 起 alembic 后再灌 dump → 冲突 | B2 只起 db;dump 灌入后(B4-4)才起 backend,alembic 变 no-op |
-| 外层反代断 SSE/WS/上传 | ali 反代显式 `proxy_buffering off` + `Upgrade/Connection` + `client_max_body_size 100m`(对齐 web) |
-| 跨机房明文 HTTP 多一跳 | 用户已决定暂不限制/不加密;与现有 user→ali 明文姿态一致;后续可加隧道 |
+| ali 带宽瓶颈(实测 3.5 Mbps vs st-e 168 Mbps) | 入口改 302 重定向,流量不过境 ali;已与用户确认接受地址栏变化 + 一次性重登 |
+| 老用户被新 IP 地址栏吓到 / 不知要重登 | B7 通知用户;老入口永久有效,自动跳转 |
+| 明文 HTTP 公网暴露(st-e:18080 直连) | 用户已决定暂不限制/不加密;与现有 user→ali 明文姿态一致;后续可加 |
 | st-e 构建网络不确定(npm/pypi 可能被掐) | 不在 st-e 重建,直接 `docker save\|load` 搬 ali 现有镜像;与 prod 逐位一致 |
 | st-e 18080 网关未放通 | B5 直连 curl 验证;未通则联系用户开通后再继续 |
 | 密钥进日志 | `.env` 流式直传不打印;dump 走容器内 socket 无密码;不 echo 任何 secret |
