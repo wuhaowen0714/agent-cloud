@@ -4,9 +4,11 @@ FROM python:3.13-slim
 # 改代码不使其失效缓存。ca-certificates 是 https 根证书,curl/wget/git 的 https 全靠它。
 # 出网未限制是既有语境(python 一直能联网),这些工具只是便利化,不扩大攻击面;
 # egress allowlist 是独立加固项(见 roadmap)。
-# apt 走阿里云镜像:部署目标机(阿里云,境外网络受限——连 GitHub 都被掐)拉官方源
-# deb.debian.org 会卡死。trixie 用 deb822 的 debian.sources(URIs: deb.debian.org → 阿里云)。
-RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources \
+# apt 走阿里云镜像【并强制 https】:部署目标机境外网络受限(连 GitHub 都被掐),拉官方源
+# deb.debian.org 会卡死;且部分机房(如 st-e)封了【出站 80 端口】,http 镜像同样连不上 ——
+# 故 sed 把 `http://deb.debian.org` 整段换成 `https://mirrors.aliyun.com`(443 通)。trixie 用
+# deb822 的 debian.sources;基础镜像 python-slim 自带 ca-certificates,https apt 可直接用。
+RUN sed -i 's|http://deb.debian.org|https://mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources \
     && apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl wget git jq vim \
     && rm -rf /var/lib/apt/lists/*
