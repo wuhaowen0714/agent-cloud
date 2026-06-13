@@ -16,11 +16,12 @@ async def test_register_seeds_default_agent_and_session(client):
     h = await _register(client)
     agents = (await client.get("/agent-configs", headers=h)).json()
     assert [a["name"] for a in agents] == ["main"]
-    assert agents[0]["model"] == "DeepSeek-V4-Pro"
-    assert agents[0]["provider"] == "openai"
+    assert "model" not in agents[0]  # 模型已下放到 session,agent 不再持有
     sessions = (await client.get("/sessions", headers=h)).json()
     assert len(sessions) == 1
     assert sessions[0]["agent_config_id"] == agents[0]["id"]
+    assert sessions[0]["model"] == "DeepSeek-V4-Pro"  # 默认会话用平台默认模型
+    assert sessions[0]["credential_id"] is None  # 默认走平台 sophnet
 
 
 async def _first_session(client, h):

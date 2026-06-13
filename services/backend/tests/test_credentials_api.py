@@ -57,38 +57,42 @@ async def _mk_cred(client, headers, api_key="sk-abcd1234"):
     ).json()["id"]
 
 
-async def test_agent_key_ref_must_be_owned(client):
+async def _main_agent_id(client, headers):
+    return (await client.get("/agent-configs", headers=headers)).json()[0]["id"]
+
+
+async def test_session_credential_must_be_owned(client):
     h = await _auth_headers(client)
-    base = {"name": "a", "model": "m", "provider": "openai"}
-    # 非法 uuid → 422
-    r = await client.post("/agent-configs", json={**base, "key_ref": "not-a-uuid"}, headers=h)
-    assert r.status_code == 422
-    # 他人的 credential id → 404(不泄漏存在性)
+    aid = await _main_agent_id(client, h)
+    # 他人的 credential → 404(不泄漏存在性)
     h2 = await _auth_headers(client)
     foreign = await _mk_cred(client, h2)
-    r2 = await client.post("/agent-configs", json={**base, "key_ref": foreign}, headers=h)
-    assert r2.status_code == 404
+    r = await client.post(
+        "/sessions", json={"agent_config_id": aid, "credential_id": foreign}, headers=h
+    )
+    assert r.status_code == 404
     # 本人的 credential → 201
     own = await _mk_cred(client, h)
-    r3 = await client.post("/agent-configs", json={**base, "key_ref": own}, headers=h)
-    assert r3.status_code == 201 and r3.json()["key_ref"] == own
+    r2 = await client.post(
+        "/sessions", json={"agent_config_id": aid, "credential_id": own}, headers=h
+    )
+    assert r2.status_code == 201 and r2.json()["credential_id"] == own
     # PATCH 同样校验:他人的 → 404
-    aid = r3.json()["id"]
-    r4 = await client.patch(f"/agent-configs/{aid}", json={"key_ref": foreign}, headers=h)
-    assert r4.status_code == 404
+    sid = r2.json()["id"]
+    r3 = await client.patch(f"/sessions/{sid}", json={"credential_id": foreign}, headers=h)
+    assert r3.status_code == 404
 
 
-async def test_deleting_credential_nulls_agent_key_ref(client):
+async def test_deleting_credential_nulls_session_credential(client):
     h = await _auth_headers(client)
     cid = await _mk_cred(client, h)
-    aid = (
+    aid = await _main_agent_id(client, h)
+    sid = (
         await client.post(
-            "/agent-configs",
-            json={"name": "a", "model": "m", "provider": "openai", "key_ref": cid},
-            headers=h,
+            "/sessions", json={"agent_config_id": aid, "credential_id": cid}, headers=h
         )
     ).json()["id"]
     assert (await client.delete(f"/credentials/{cid}", headers=h)).status_code == 204
-    agents = (await client.get("/agent-configs", headers=h)).json()
-    agent = next(x for x in agents if x["id"] == aid)
-    assert agent["key_ref"] is None  # 删除凭据后 agent 的 key_ref 被置空
+    sessions = (await client.get("/sessions", headers=h)).json()
+    s = next(x for x in sessions if x["id"] == sid)
+    assert s["credential_id"] is None  # 删除凭据后 session 的 credential_id 被置空(回退平台)

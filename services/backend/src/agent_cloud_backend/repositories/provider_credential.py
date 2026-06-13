@@ -10,7 +10,13 @@ class ProviderCredentialRepository(BaseRepository[ProviderCredential]):
     model = ProviderCredential
 
     async def create(
-        self, user_id: uuid.UUID, name: str, base_url: str, api_key_encrypted: bytes, masked: str
+        self,
+        user_id: uuid.UUID,
+        name: str,
+        base_url: str,
+        api_key_encrypted: bytes,
+        masked: str,
+        models: list[str],
     ) -> ProviderCredential:
         row = ProviderCredential(
             user_id=user_id,
@@ -18,6 +24,7 @@ class ProviderCredentialRepository(BaseRepository[ProviderCredential]):
             base_url=base_url,
             api_key_encrypted=api_key_encrypted,
             masked=masked,
+            models=models,
         )
         self.session.add(row)
         await self.session.flush()

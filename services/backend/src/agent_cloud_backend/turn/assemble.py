@@ -14,7 +14,7 @@ from agent_cloud_backend.repositories.context_document import ContextDocumentRep
 from agent_cloud_backend.repositories.memory_entry import MemoryEntryRepository
 from agent_cloud_backend.repositories.message import MessageRepository
 from agent_cloud_backend.skills.materialize import skill_location
-from agent_cloud_backend.turn.credentials import resolve_agent_key
+from agent_cloud_backend.turn.credentials import resolve_session_key
 from agent_cloud_backend.turn.messages import orm_to_common, strip_unanswered_user_messages
 
 
@@ -53,19 +53,18 @@ async def build_run_turn_request(
     ]
     history = strip_unanswered_user_messages(history)
 
-    # BYO-Key:按 agent.key_ref 取本人凭据解密;无/不属本人 → ("",""),worker 回退全局。
-    api_key, base_url = await resolve_agent_key(
-        db, agent.key_ref or "", session.user_id, get_settings()
+    # BYO-Key:按 session.credential_id 取本人凭据解密;None/不属本人 → ("",""),worker 回退平台。
+    api_key, base_url = await resolve_session_key(
+        db, session.credential_id, session.user_id, get_settings()
     )
 
     return worker_pb2.RunTurnRequest(
         session_id=str(session.id),
         user_id=str(session.user_id),
         agent=worker_pb2.Agent(
-            model=agent.model,
-            provider=agent.provider,
+            model=session.model,
+            provider=("sophnet" if session.credential_id is None else "custom"),
             enabled_tools=list(agent.enabled_tools),
-            key_ref=agent.key_ref or "",
             api_key=api_key,
             base_url=base_url,
         ),

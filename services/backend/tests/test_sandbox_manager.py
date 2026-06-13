@@ -39,12 +39,16 @@ async def _running_session(engine, user_id: uuid.UUID) -> None:
 
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as s:
-        agent = AgentConfig(user_id=user_id, name="a", model="m", provider="p")
+        agent = AgentConfig(user_id=user_id, name="a")
         s.add(agent)
         await s.flush()
         s.add(
             Session(
-                user_id=user_id, agent_config_id=agent.id, work_subdir="workspace", status="running"
+                user_id=user_id,
+                agent_config_id=agent.id,
+                model="m",
+                work_subdir="workspace",
+                status="running",
             )
         )
         await s.commit()

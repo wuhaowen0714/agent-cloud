@@ -42,10 +42,10 @@ async def _seed(engine, *, title: str | None = None, with_message: bool = True):
         user = await UserRepository(db).create(User(email=f"{uuid.uuid4()}@e.com"))
         await db.flush()
         agent = await AgentConfigRepository(db).create(
-            AgentConfig(user_id=user.id, name="a", model="m", provider="openai")
+            AgentConfig(user_id=user.id, name="a")
         )
         await db.flush()
-        s = await SessionRepository(db).create_for(user.id, agent.id, title)
+        s = await SessionRepository(db).create_for(user.id, agent.id, title, model="m")
         await db.flush()
         if with_message:
             await MessageRepository(db).append(

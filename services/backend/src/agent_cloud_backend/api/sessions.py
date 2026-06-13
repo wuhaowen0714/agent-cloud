@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_cloud_backend.api.deps import get_current_user, get_session
-from agent_cloud_backend.api.ownership import owned_agent, owned_session
+from agent_cloud_backend.api.ownership import owned_agent, owned_credential, owned_session
 from agent_cloud_backend.config import Settings, get_settings
 from agent_cloud_backend.db import get_sessionmaker
 from agent_cloud_backend.models.session import Session
@@ -34,9 +34,15 @@ async def create_session(
     body: SessionCreate,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
 ):
     await owned_agent(body.agent_config_id, user.id, session)  # agent 须属本人,否则 404
-    s = await SessionRepository(session).create_for(user.id, body.agent_config_id, body.title)
+    if body.credential_id is not None:
+        await owned_credential(body.credential_id, user.id, session)  # 凭据须属本人,否则 404
+    model = (body.model or "").strip() or settings.resolve_default_model()
+    s = await SessionRepository(session).create_for(
+        user.id, body.agent_config_id, body.title, model=model, credential_id=body.credential_id
+    )
     await session.commit()
     return s
 
@@ -50,17 +56,28 @@ async def list_sessions(
 
 
 @router.patch("/{session_id}", response_model=SessionRead)
-async def rename_session(
+async def update_session(
     session_id: uuid.UUID,
     body: SessionUpdate,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
+    """改 title / model / credential_id —— 只改提供的字段(model_dump exclude_unset);
+    credential_id 显式传 null = 切回平台 sophnet。"""
     s = await owned_session(session_id, user.id, session)  # 404
-    title = body.title.strip()
-    if not title or len(title) > 200:
-        raise HTTPException(status_code=422, detail="title must be 1-200 chars")
-    s.title = title
+    fields = body.model_dump(exclude_unset=True)
+    if "title" in fields:
+        title = (fields["title"] or "").strip()
+        if not title or len(title) > 200:
+            raise HTTPException(status_code=422, detail="title must be 1-200 chars")
+        s.title = title
+    if "model" in fields and fields["model"]:
+        s.model = fields["model"].strip()
+    if "credential_id" in fields:
+        cred_id = fields["credential_id"]
+        if cred_id is not None:
+            await owned_credential(cred_id, user.id, session)  # 凭据须属本人,否则 404
+        s.credential_id = cred_id
     await session.commit()
     await session.refresh(s)
     return s
@@ -170,6 +187,8 @@ async def fork_session(
     new = Session(
         user_id=s.user_id,
         agent_config_id=s.agent_config_id,
+        model=s.model,
+        credential_id=s.credential_id,
         work_subdir=s.work_subdir,
         title=(f"{s.title}(分支)" if s.title else None),
         summary=s.summary,

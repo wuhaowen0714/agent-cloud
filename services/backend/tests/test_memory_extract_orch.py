@@ -64,10 +64,10 @@ async def _seed(engine, n_rounds: int):
         user = await UserRepository(db).create(User(email=f"{uuid.uuid4()}@e.com"))
         await db.flush()
         agent = await AgentConfigRepository(db).create(
-            AgentConfig(user_id=user.id, name="a", model="m", provider="openai")
+            AgentConfig(user_id=user.id, name="a")
         )
         await db.flush()
-        s = await SessionRepository(db).create_for(user.id, agent.id, None)
+        s = await SessionRepository(db).create_for(user.id, agent.id, None, model="m")
         await db.flush()
         mrepo = MessageRepository(db)
         for i in range(n_rounds):
@@ -255,10 +255,10 @@ async def _seed_session(engine, *, rounds, idle, running=False, watermark=-1):
         user = await UserRepository(db).create(User(email=f"{uuid.uuid4()}@e.com"))
         await db.flush()
         agent = await AgentConfigRepository(db).create(
-            AgentConfig(user_id=user.id, name="a", model="m", provider="openai")
+            AgentConfig(user_id=user.id, name="a")
         )
         await db.flush()
-        s = await SessionRepository(db).create_for(user.id, agent.id, None)
+        s = await SessionRepository(db).create_for(user.id, agent.id, None, model="m")
         await db.flush()
         mrepo = MessageRepository(db)
         for _ in range(rounds):
@@ -438,11 +438,11 @@ async def test_apply_remember_respects_backend_enable_gate(engine, monkeypatch):
         await db.flush()
         agent = await AgentConfigRepository(db).create(
             AgentConfig(
-                user_id=user.id, name="a", model="m", provider="openai", enabled_tools=["bash"]
+                user_id=user.id, name="a", enabled_tools=["bash"]
             )
         )
         await db.flush()
-        s = await SessionRepository(db).create_for(user.id, agent.id, None)
+        s = await SessionRepository(db).create_for(user.id, agent.id, None, model="m")
         await db.flush()
         sid, uid = s.id, user.id
         await db.commit()
