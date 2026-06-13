@@ -416,29 +416,29 @@ describe("图片上传(附件)", () => {
 
   it("上传后发送:消息末尾带工作区路径", async () => {
     vi.spyOn(api, "uploadFiles").mockResolvedValue([
-      { name: "cat.png", path: "media/upload/cat.png", size: 10, is_dir: false },
+      { name: "cat.png", path: "upload/cat.png", size: 10, is_dir: false },
     ] as never)
     const { onSend } = setup()
     await pick()
     expect(await screen.findByText("cat.png")).toBeInTheDocument()
-    expect(api.uploadFiles).toHaveBeenCalledWith("media/upload", [expect.any(File)])
+    expect(api.uploadFiles).toHaveBeenCalledWith("upload", [expect.any(File)])
     type("把背景换成沙滩")
     fireEvent.click(screen.getByText("发送"))
     const sent = (onSend as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
     expect(sent).toContain("把背景换成沙滩")
-    expect(sent).toContain("media/upload/cat.png")
+    expect(sent).toContain("upload/cat.png")
   })
 
   it("上传失败 → flash 提示", async () => {
     vi.spyOn(api, "uploadFiles").mockRejectedValue(new Error("net"))
     setup()
     await pick()
-    expect(await screen.findByText("图片上传失败")).toBeInTheDocument()
+    expect(await screen.findByText("文件上传失败")).toBeInTheDocument()
   })
 
   it("可移除已上传的附件", async () => {
     vi.spyOn(api, "uploadFiles").mockResolvedValue([
-      { name: "cat.png", path: "media/upload/cat.png", size: 10, is_dir: false },
+      { name: "cat.png", path: "upload/cat.png", size: 10, is_dir: false },
     ] as never)
     setup()
     await pick()
@@ -449,13 +449,27 @@ describe("图片上传(附件)", () => {
 
   it("仅附件、无文本也能发送(消息只含路径)", async () => {
     vi.spyOn(api, "uploadFiles").mockResolvedValue([
-      { name: "cat.png", path: "media/upload/cat.png", size: 10, is_dir: false },
+      { name: "cat.png", path: "upload/cat.png", size: 10, is_dir: false },
     ] as never)
     const { onSend } = setup()
     await pick()
     await screen.findByText("cat.png")
     fireEvent.click(screen.getByText("发送")) // 不打字
     const sent = (onSend as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
-    expect(sent).toContain("media/upload/cat.png")
+    expect(sent).toContain("upload/cat.png")
+  })
+
+  it("拖拽任意文件到输入区上传(非图也行,路径在 upload/)", async () => {
+    vi.spyOn(api, "uploadFiles").mockResolvedValue([
+      { name: "notes.txt", path: "upload/notes.txt", size: 5, is_dir: false },
+    ] as never)
+    setup()
+    const file = new File(["hi"], "notes.txt", { type: "text/plain" })
+    const dropZone = screen.getByTestId("composer-dropzone")
+    await act(async () => {
+      fireEvent.drop(dropZone, { dataTransfer: { files: [file] } })
+    })
+    expect(await screen.findByText("notes.txt")).toBeInTheDocument()
+    expect(api.uploadFiles).toHaveBeenCalledWith("upload", [expect.any(File)])
   })
 })

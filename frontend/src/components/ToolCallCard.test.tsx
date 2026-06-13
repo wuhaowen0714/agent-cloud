@@ -138,7 +138,7 @@ describe("ToolCallCard generate_image", () => {
         call={{
           id: "e1",
           name: "edit_image",
-          arguments: { image_paths: ["media/upload/a.png"], prompt: "blue bg" },
+          arguments: { image_paths: ["upload/a.png"], prompt: "blue bg" },
         }}
         result={{
           call_id: "e1",
