@@ -50,7 +50,7 @@ class HeadlessResult:
 
 
 async def execute_turn_headless(
-    session_id: uuid.UUID, user_content: str, *, settings, manager, store
+    session_id: uuid.UUID, user_content: str, *, settings, manager, store, is_scheduled_run=False
 ) -> HeadlessResult:
     """无头执行一回合:加锁→落用户消息→组装→worker(带重试/压缩)→落 new_messages + remember
     副作用→回合后压缩→起名→释放锁。HTTP 非流式端点与定时任务轮询器共用。内部自管 DB session。
@@ -100,6 +100,7 @@ async def execute_turn_headless(
                     exclude_message_id=user_msg_id,
                     enabled_skills=skills,
                     work_subdir=wd,
+                    is_scheduled_run=is_scheduled_run,
                 )
 
         policy = RetryPolicy.from_settings(settings)

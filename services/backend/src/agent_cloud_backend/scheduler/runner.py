@@ -51,6 +51,7 @@ async def run_scheduled_task(snap: dict, settings: Settings) -> None:
             settings=settings,
             manager=get_sandbox_manager(),
             store=get_object_store(),
+            is_scheduled_run=True,
         )
         if result.final_text.strip().startswith("[SILENT]"):
             status = "skipped"
