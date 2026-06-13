@@ -322,7 +322,7 @@ EDIT_IMAGE_SPEC = ToolSpec(
         "Edit existing image(s) with a text instruction (image-to-image). Use this when the "
         "user wants to MODIFY a picture: change the background, style, lighting, add or remove "
         "objects, etc. 'image_paths' are workspace-relative paths of the input image(s) (1-3), "
-        "e.g. a file the user uploaded under media/upload/ or one previously generated under "
+        "e.g. a file the user uploaded under upload/ or one previously generated under "
         "media/picture/. The edited result is saved under media/picture/ and shown to the user "
         "automatically; do NOT embed it again with markdown or paste the path, just describe "
         "the change in words. To create a brand-new image from scratch (no input image) use "
@@ -336,7 +336,7 @@ EDIT_IMAGE_SPEC = ToolSpec(
                 "items": {"type": "string"},
                 "description": (
                     "Workspace-relative path(s) of the input image(s) to edit, 1-3 of them "
-                    "(e.g. 'media/upload/cat.png')."
+                    "(e.g. 'upload/cat.png')."
                 ),
             },
             "prompt": {

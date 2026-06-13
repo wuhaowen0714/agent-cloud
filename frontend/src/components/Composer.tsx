@@ -34,6 +34,7 @@ export function Composer({
   const [notice, setNotice] = useState<Notice>(null)
   const [attachments, setAttachments] = useState<{ path: string; name: string }[]>([])
   const [uploading, setUploading] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -202,15 +203,15 @@ export function Composer({
     return () => document.removeEventListener("pointerdown", onDoc)
   }, [notice])
 
-  // 上传图片到工作区 media/upload/,记录路径;发送时随消息带上(agent 据此用 edit_image 编辑)。
+  // 上传任意文件到工作区 upload/,记录路径;发送时随消息带上(agent 据类型用 read_file/edit_image 处理)。
   const uploadAttachments = async (files: File[]) => {
     if (!files.length || busy) return
     setUploading(true)
     try {
-      const entries = await api.uploadFiles("media/upload", files)
+      const entries = await api.uploadFiles("upload", files)
       setAttachments((prev) => [...prev, ...entries.map((e) => ({ path: e.path, name: e.name }))])
     } catch {
-      setNotice({ kind: "flash", flash: "图片上传失败" })
+      setNotice({ kind: "flash", flash: "文件上传失败" })
     } finally {
       setUploading(false)
     }
@@ -219,10 +220,10 @@ export function Composer({
   const send = () => {
     const t = text.trim()
     if ((!t && attachments.length === 0) || busy) return
-    // 带附件:消息末尾附上工作区路径,agent 看到后用 edit_image 编辑(或 read_file 查看)。
+    // 带附件:消息末尾附上工作区路径,agent 据类型处理(read_file 读文本、edit_image 编辑图片等)。
     const full =
       attachments.length > 0
-        ? `${t}\n\n[Attached image(s) in the workspace — use edit_image to edit them]\n${attachments
+        ? `${t}\n\n[Uploaded file(s) in the workspace — read with read_file, or edit images with edit_image]\n${attachments
             .map((a) => a.path)
             .join("\n")}`
         : t
@@ -238,7 +239,27 @@ export function Composer({
 
   return (
     <div className="border-t border-slate-200 bg-white/80 p-3 backdrop-blur">
-      <div className="mx-auto max-w-5xl">
+      <div
+        data-testid="composer-dropzone"
+        className={`mx-auto max-w-5xl rounded-xl transition ${
+          dragOver ? "ring-2 ring-brand-300 ring-offset-2" : ""
+        }`}
+        onDragOver={(e) => {
+          e.preventDefault()
+          if (!busy) setDragOver(true)
+        }}
+        onDragLeave={(e) => {
+          // dragleave 会在跨越子元素边界时冒泡触发;仅当指针真正离开整个拖放区
+          // (relatedTarget 不在区域内)才撤销高亮,否则拖过内部按钮/输入框时 ring 会闪烁。
+          if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+          setDragOver(false)
+        }}
+        onDrop={(e) => {
+          e.preventDefault()
+          setDragOver(false)
+          void uploadAttachments(Array.from(e.dataTransfer.files ?? []))
+        }}
+      >
       {attachments.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-2">
           {attachments.map((a, i) => (
@@ -246,7 +267,7 @@ export function Composer({
               key={a.path}
               className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600"
             >
-              <span aria-hidden>🖼</span>
+              <span aria-hidden>📎</span>
               <span className="max-w-[12rem] truncate font-mono">{a.name}</span>
               <button
                 type="button"
@@ -338,7 +359,6 @@ export function Composer({
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*"
           multiple
           className="hidden"
           onChange={(e) => {
@@ -350,7 +370,7 @@ export function Composer({
           variant="secondary"
           className="h-11 px-3"
           disabled={busy || uploading}
-          title="上传图片"
+          title="上传文件"
           onClick={() => fileInputRef.current?.click()}
         >
           {uploading ? "…" : "＋"}
