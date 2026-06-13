@@ -6,6 +6,7 @@ from agent_cloud_backend.models.message import Message
 from agent_cloud_backend.models.provider_credential import ProviderCredential
 from agent_cloud_backend.models.refresh_token import RefreshToken
 from agent_cloud_backend.models.sandbox_registry import SandboxRegistry
+from agent_cloud_backend.models.scheduled_task import ScheduledTask
 from agent_cloud_backend.models.session import Session
 from agent_cloud_backend.models.skill import AgentSkillEnable, Skill
 from agent_cloud_backend.models.user import User
@@ -22,6 +23,7 @@ __all__ = [
     "ContextDocument",
     "MemoryEntry",
     "SandboxRegistry",
+    "ScheduledTask",
     "Skill",
     "AgentSkillEnable",
     "UserModel",
