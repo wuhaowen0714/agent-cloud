@@ -108,10 +108,16 @@ export function TerminalWindow() {
       </div>
       {/* xterm 容器 */}
       <div ref={bodyRef} className="min-h-0 flex-1 bg-[#1a1b26] p-1.5" />
-      {/* 断开浮层:真断开可重连;被接管(4001)只提示,重连会再被踢故不给重连 */}
-      {(status === "closed" || status === "evicted") && (
+      {/* 断开浮层:真断开可重连;达上限(4002)/被接管(4001)只提示,重连无意义故不给重连 */}
+      {(status === "closed" || status === "evicted" || status === "limit") && (
         <div className="absolute inset-0 top-8 flex flex-col items-center justify-center gap-2 bg-[#1a1b26]/85 text-sm text-slate-300">
-          <span>{status === "evicted" ? "终端已在另一处打开" : "连接已断开"}</span>
+          <span>
+            {status === "limit"
+              ? "已达终端数量上限,关掉一个窗口的终端再开"
+              : status === "evicted"
+                ? "终端已在另一处打开"
+                : "连接已断开"}
+          </span>
           {status === "closed" && (
             <button
               type="button"
