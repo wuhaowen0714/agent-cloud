@@ -2,11 +2,12 @@ import uuid
 
 from agent_cloud.v1 import sandbox_pb2
 from agent_cloud_backend.api.terminal import (
+    _MAX_TERMINALS_PER_USER,
     _active_terminals,
     _pump_worker_to_ws,
     _pump_ws_to_worker,
+    _register,
     _release,
-    _takeover,
     _token_from_subprotocols,
 )
 
@@ -107,15 +108,30 @@ async def test_pump_calls_on_activity_for_input_and_resize():
     assert hits["n"] == 2
 
 
-def test_takeover_evicts_previous_and_release():
-    # 单终端:新连接顶替旧连接;release 仅摘除自己
+def test_register_caps_at_max_and_release_frees_slot():
+    # 多终端:每用户至多 _MAX_TERMINALS_PER_USER 个;超限拒绝(不动已有);release 腾名额
     _active_terminals.clear()
     uid = uuid.uuid4()
-    old, new = _FakeWS(), _FakeWS()
-    assert _takeover(uid, old) is None
-    assert _takeover(uid, new) is old  # 返回被顶替的旧连接
-    assert _active_terminals[uid] is new
-    _release(uid, old)  # 旧连接 release 不该误删接管者
-    assert _active_terminals[uid] is new
-    _release(uid, new)
-    assert uid not in _active_terminals
+    conns = [_FakeWS() for _ in range(_MAX_TERMINALS_PER_USER)]
+    for ws in conns:
+        assert _register(uid, ws) is True  # 满额前都能登记
+    assert len(_active_terminals[uid]) == _MAX_TERMINALS_PER_USER
+    overflow = _FakeWS()
+    assert _register(uid, overflow) is False  # 超限被拒
+    assert overflow not in _active_terminals[uid]  # 不入表,已有的不受影响
+    _release(uid, conns[0])  # 摘掉一个 → 腾出名额
+    assert conns[0] not in _active_terminals[uid]
+    assert _register(uid, overflow) is True  # 现在能登记了
+    for ws in list(_active_terminals[uid]):
+        _release(uid, ws)
+    assert uid not in _active_terminals  # 全摘除 → 删键
+
+
+def test_release_is_safe_for_unregistered_ws():
+    # release 一个从未登记的 ws 不报错(防御性)
+    _active_terminals.clear()
+    uid = uuid.uuid4()
+    _release(uid, _FakeWS())  # 无键,静默
+    _register(uid, _FakeWS())
+    _release(uid, _FakeWS())  # 有键但非成员,静默(不误删别人)
+    assert len(_active_terminals[uid]) == 1

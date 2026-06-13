@@ -3,7 +3,7 @@ import { Terminal } from "@xterm/xterm"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { getAccess } from "../../api/auth"
 
-export type TermStatus = "connecting" | "open" | "closed" | "evicted"
+export type TermStatus = "connecting" | "open" | "closed" | "evicted" | "limit"
 
 // 终端 WS URL:同源 /api/terminal(vite 代理 ws→backend;生产同源 nginx 透传)。
 function wsURL(): string {
@@ -71,9 +71,10 @@ export function useTerminalSocket(containerRef: React.RefObject<HTMLDivElement |
       }
       ws.onclose = (e) => {
         if (closingRef.current) return // 自己主动关(cleanup/reconnect)→ 静默
-        // 4001 = 被另一处终端接管(后端单终端策略);其余为真断开。接管不提供重连(重连会
-        // 再次被踢),只提示。
-        setStatus(e.code === 4001 ? "evicted" : "closed")
+        // 4002 = 已达每用户终端并发上限(后端 _MAX_TERMINALS_PER_USER);其余为真断开。
+        // 这两种都不给重连(上限重连会再次被拒);只提示。(4001 是旧的单终端顶替码,后端已
+        // 不再发,保留映射无害。)
+        setStatus(e.code === 4002 ? "limit" : e.code === 4001 ? "evicted" : "closed")
       }
       ws.onerror = () => {
         if (!closingRef.current) setStatus("closed")

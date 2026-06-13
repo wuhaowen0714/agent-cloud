@@ -26,11 +26,12 @@ vi.mock("@xterm/xterm/css/xterm.css", () => ({}))
 
 class FakeWS {
   static OPEN = 1
+  static last: FakeWS | null = null // 测试可抓到最近建立的连接,模拟 server 关闭
   readyState = 1
   binaryType = ""
   onopen: (() => void) | null = null
   onmessage: ((e: unknown) => void) | null = null
-  onclose: (() => void) | null = null
+  onclose: ((e?: { code?: number }) => void) | null = null
   onerror: (() => void) | null = null
   sent: unknown[] = []
   url: string
@@ -38,6 +39,7 @@ class FakeWS {
   constructor(url: string, protocols?: string[]) {
     this.url = url
     this.protocols = protocols
+    FakeWS.last = this
   }
   send(d: unknown) {
     this.sent.push(d)
@@ -50,6 +52,7 @@ class FakeWS {
 import { TerminalWindow } from "./TerminalWindow"
 
 beforeEach(() => {
+  FakeWS.last = null
   vi.stubGlobal("WebSocket", FakeWS as unknown as typeof WebSocket)
   vi.stubGlobal(
     "ResizeObserver",
@@ -107,5 +110,21 @@ describe("TerminalWindow(Ghostty 下拉面板)", () => {
     await waitFor(() => expect(panel().className).not.toContain("translate-y-0"))
     fireEvent.keyDown(document, { key: "Escape" }) // 仅展开时监听,不应重新展开
     expect(useStore.getState().terminalOpen).toBe(false)
+  })
+
+  it("达终端并发上限(server close 4002)显示提示且不给重连", async () => {
+    render(<TerminalWindow />)
+    await waitFor(() => expect(FakeWS.last).toBeTruthy()) // WS 延到下一 tick 建立
+    act(() => FakeWS.last?.onclose?.({ code: 4002 }))
+    expect(screen.getByText(/已达终端数量上限/)).toBeInTheDocument()
+    expect(screen.queryByText("点击重连")).toBeNull() // 上限不给重连
+  })
+
+  it("真断开(非 4002/4001)给重连按钮", async () => {
+    render(<TerminalWindow />)
+    await waitFor(() => expect(FakeWS.last).toBeTruthy())
+    act(() => FakeWS.last?.onclose?.({ code: 1006 }))
+    expect(screen.getByText("连接已断开")).toBeInTheDocument()
+    expect(screen.getByText("点击重连")).toBeInTheDocument()
   })
 })

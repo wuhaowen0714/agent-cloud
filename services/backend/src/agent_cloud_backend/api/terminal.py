@@ -23,23 +23,30 @@ router = APIRouter(tags=["terminal"])
 _MAX_MSG = 16 * 1024 * 1024
 _TOUCH_INTERVAL = 10.0  # 续租节流:键盘活动最多每 10s touch 一次,防过频写库
 
-# 单终端:每用户至多一个活跃终端连接(进程内表)。多副本部署下各副本各持一份——
-# 同一用户的多个终端若落到不同副本不会互踢,但 v1 接受(用户通常单副本会话);
-# 真正的资源闸是沙箱 per-user 复用 + 续租回收。
-_active_terminals: dict[uuid.UUID, WebSocket] = {}
+# 多终端:每用户至多 _MAX_TERMINALS_PER_USER 个并发终端(进程内表)。沙箱每条 Terminal
+# 流是独立 PtySession,技术上不限;此软上限护住沙箱 pids_limit(开太多 bash 会撑满),超限
+# 给前端清晰提示(close 4002)而非拖垮沙箱。多副本部署下各副本各持一份(上限按副本计,
+# v1 单副本可接受);真正的资源闸仍是沙箱 per-user 复用 + 续租回收。
+_MAX_TERMINALS_PER_USER = 5
+_active_terminals: dict[uuid.UUID, set[WebSocket]] = {}
 
 
-def _takeover(user_id: uuid.UUID, ws: WebSocket) -> WebSocket | None:
-    """登记新终端为该用户的活跃终端,返回被顶替的旧连接(由调用方关闭)。"""
-    prev = _active_terminals.get(user_id)
-    _active_terminals[user_id] = ws
-    return prev
+def _register(user_id: uuid.UUID, ws: WebSocket) -> bool:
+    """登记新终端。该用户已达上限返回 False(调用方关闭并提示);否则加入返回 True。"""
+    conns = _active_terminals.setdefault(user_id, set())
+    if len(conns) >= _MAX_TERMINALS_PER_USER:
+        return False
+    conns.add(ws)
+    return True
 
 
 def _release(user_id: uuid.UUID, ws: WebSocket) -> None:
-    """连接结束时摘除登记(仅当登记的还是自己,避免误删接管者)。"""
-    if _active_terminals.get(user_id) is ws:
-        del _active_terminals[user_id]
+    """连接结束时摘除登记;该用户终端集合空了就删键。"""
+    conns = _active_terminals.get(user_id)
+    if conns is not None:
+        conns.discard(ws)
+        if not conns:
+            del _active_terminals[user_id]
 
 
 def _token_from_subprotocols(raw: str) -> str | None:
@@ -129,11 +136,12 @@ async def terminal_ws(
         return
     await websocket.accept(subprotocol="bearer")  # 必须回显选中的 subprotocol
 
-    # 单终端:顶替该用户已有的终端连接(旧的关闭,提示已在别处打开)
-    prev = _takeover(user.id, websocket)
-    if prev is not None:
+    # 多终端:每用户至多 _MAX_TERMINALS_PER_USER 个并发终端;超限直接拒绝本连接(不动已有的),
+    # 前端据 close code 4002 提示"已达上限",而非顶替别处的终端。
+    if not _register(user.id, websocket):
         with contextlib.suppress(Exception):
-            await prev.close(code=4001)
+            await websocket.close(code=4002, reason="terminal limit reached")
+        return
 
     # 续租(第二档):用户活动(input/resize)节流 touch last_used_at,防 reaper 中途回收。
     last_touch = 0.0
