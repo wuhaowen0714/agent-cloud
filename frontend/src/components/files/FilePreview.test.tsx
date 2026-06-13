@@ -86,3 +86,43 @@ describe("FilePreview 失败路径", () => {
     expect(dl).toHaveBeenCalledWith(entry.path)
   })
 })
+
+const imgEntry = {
+  name: "img_abc.png",
+  path: "media/picture/img_abc.png",
+  is_dir: false,
+  size: 1024,
+  mtime: 0,
+} as FileEntry
+
+describe("FilePreview 加载反馈(大图)", () => {
+  it("图片未就绪显示加载占位,就绪后显示图(不再静默空白)", async () => {
+    let resolve: (u: string) => void = () => {}
+    vi.spyOn(api, "previewUrl").mockReturnValue(
+      new Promise<string>((r) => {
+        resolve = r
+      }),
+    )
+    render(<FilePreview entry={imgEntry} onClose={() => {}} />)
+    // blob 拉取期间给占位,而不是空白(用户曾以为卡住)
+    expect(screen.getByText("加载中…")).toBeInTheDocument()
+    expect(screen.queryByRole("img")).toBeNull()
+    resolve("blob:fake-img")
+    expect(await screen.findByRole("img")).toHaveAttribute("src", "blob:fake-img")
+  })
+
+  it("下载点击后立即给「下载中…」反馈", async () => {
+    vi.spyOn(api, "previewUrl").mockResolvedValue("blob:img")
+    let resolveDl: (u: string) => void = () => {}
+    vi.spyOn(api, "downloadUrl").mockReturnValue(
+      new Promise<string>((r) => {
+        resolveDl = r
+      }),
+    )
+    render(<FilePreview entry={imgEntry} onClose={() => {}} />)
+    await screen.findByRole("img") // 等预览图就绪
+    fireEvent.click(screen.getByText("下载"))
+    expect(await screen.findByText("下载中…")).toBeInTheDocument()
+    resolveDl("blob:dl") // 收尾,避免悬挂 promise
+  })
+})
