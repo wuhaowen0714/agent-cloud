@@ -52,6 +52,8 @@ function setup(opts?: { disabled?: boolean }) {
         work_subdir: "workspace",
         last_active_at: "2026-06-12T12:00:00Z",
         last_context_tokens: 873,
+        scheduled_task_id: null,
+        unread: false,
       },
     ],
   )

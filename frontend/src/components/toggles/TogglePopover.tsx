@@ -9,11 +9,13 @@ export function TogglePopover({
   title,
   onClose,
   children,
+  width = "w-72",
 }: {
   anchorRef: React.RefObject<HTMLElement | null>
   title: string
   onClose: () => void
   children: React.ReactNode
+  width?: string
 }) {
   const panelRef = useRef<HTMLDivElement>(null)
   // 打开瞬间按锚点定位一次;开着滚动属边缘情况,点外即收
@@ -46,7 +48,7 @@ export function TogglePopover({
       role="dialog"
       aria-label={title}
       style={pos}
-      className="fixed z-30 w-72 rounded-xl border border-slate-200 bg-white p-1.5 shadow-pop"
+      className={`fixed z-30 ${width} rounded-xl border border-slate-200 bg-white p-1.5 shadow-pop`}
     >
       <div className="px-2.5 pb-1 pt-1.5 text-xs font-medium text-slate-400">{title}</div>
       {children}

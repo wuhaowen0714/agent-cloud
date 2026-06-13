@@ -39,6 +39,7 @@ from agent_cloud_worker.provider import (
 )
 from agent_cloud_worker.remember import RememberingExecutor, remember_enabled
 from agent_cloud_worker.sandbox_executor import SandboxToolExecutor
+from agent_cloud_worker.schedule_task import SchedulingExecutor, schedule_task_enabled
 from agent_cloud_worker.title import TITLE_SYSTEM, clean_title
 from agent_cloud_worker.web_search import (
     DEFAULT_SEARCH_ENDPOINT,
@@ -138,6 +139,11 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
             token=request.sandbox_token,
         )
         executor = RememberingExecutor(sandbox_exec, enabled=remember_enabled(enabled_tools))
+        # 定时任务跑出来的回合(is_scheduled_run)不暴露 schedule_task,防 agent 自我繁殖。
+        executor = SchedulingExecutor(
+            executor,
+            enabled=schedule_task_enabled(enabled_tools) and not request.is_scheduled_run,
+        )
         if self._web_search_available():
             searcher = make_sophnet_searcher(
                 endpoint=self._web_search_endpoint,

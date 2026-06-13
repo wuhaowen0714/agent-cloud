@@ -19,6 +19,7 @@ dependencies = [
     "pyjwt>=2.13.0",
     "argon2-cffi>=25.1.0",
     "cryptography>=43",
+    "croniter>=2.0",
 ]
 
 [build-system]

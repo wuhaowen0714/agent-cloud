@@ -24,6 +24,8 @@ class SessionRead(BaseModel):
     created_at: datetime
     last_active_at: datetime
     last_context_tokens: int | None = None
+    scheduled_task_id: uuid.UUID | None = None
+    unread: bool = False
 
 
 class RollbackRequest(BaseModel):

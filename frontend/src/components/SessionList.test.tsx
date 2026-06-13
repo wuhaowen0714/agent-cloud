@@ -94,3 +94,35 @@ describe("SessionList", () => {
     await waitFor(() => expect(useStore.getState().sessionId).toBeNull())
   })
 })
+
+describe("SessionList 定时任务标记", () => {
+  it("定时产物会话显示定时标 + 未读点", async () => {
+    vi.spyOn(api, "listSessions").mockResolvedValue([
+      { ...S1, scheduled_task_id: "t1", unread: true },
+    ] as never)
+    render(wrap(<SessionList />))
+    expect(await screen.findByText("标题一")).toBeInTheDocument()
+    expect(screen.getByLabelText("定时任务产物")).toBeInTheDocument()
+    expect(screen.getByLabelText("未读")).toBeInTheDocument()
+  })
+
+  it("打开未读会话调 markSessionRead", async () => {
+    vi.spyOn(api, "listSessions").mockResolvedValue([
+      { ...S1, scheduled_task_id: "t1", unread: true },
+    ] as never)
+    const mark = vi.spyOn(api, "markSessionRead").mockResolvedValue(undefined)
+    render(wrap(<SessionList />))
+    fireEvent.click(await screen.findByText("标题一"))
+    await waitFor(() => expect(mark).toHaveBeenCalledWith("s1"))
+  })
+
+  it("已读普通会话不显示未读点/定时标", async () => {
+    vi.spyOn(api, "listSessions").mockResolvedValue([
+      { ...S1, unread: false, scheduled_task_id: null },
+    ] as never)
+    render(wrap(<SessionList />))
+    await screen.findByText("标题一")
+    expect(screen.queryByLabelText("未读")).toBeNull()
+    expect(screen.queryByLabelText("定时任务产物")).toBeNull()
+  })
+})

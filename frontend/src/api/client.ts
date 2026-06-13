@@ -5,6 +5,7 @@ import type {
   MemoryBlock,
   Message,
   ProviderCredential,
+  ScheduledTask,
   Session,
   Skill,
   User,
@@ -183,4 +184,30 @@ export const api = {
   addModel: (model: string) =>
     http<UserModel>("/models", { method: "POST", body: JSON.stringify({ model }) }),
   deleteModel: (id: string) => http<void>(`/models/${id}`, { method: "DELETE" }),
+
+  // ── 会话未读 / 定时任务 ──
+  markSessionRead: (id: string) => http<void>(`/sessions/${id}/mark-read`, { method: "POST" }),
+  listScheduledTasks: () => http<ScheduledTask[]>("/scheduled-tasks"),
+  createScheduledTask: (body: {
+    name: string
+    prompt: string
+    agent_config_id: string
+    schedule_kind: string
+    schedule_expr: string
+    schedule_tz?: string
+  }) => http<ScheduledTask>("/scheduled-tasks", { method: "POST", body: JSON.stringify(body) }),
+  patchScheduledTask: (
+    id: string,
+    body: Partial<{
+      name: string
+      prompt: string
+      schedule_kind: string
+      schedule_expr: string
+      schedule_tz: string
+      enabled: boolean
+    }>,
+  ) => http<ScheduledTask>(`/scheduled-tasks/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteScheduledTask: (id: string) => http<void>(`/scheduled-tasks/${id}`, { method: "DELETE" }),
+  runScheduledTask: (id: string) =>
+    http<ScheduledTask>(`/scheduled-tasks/${id}/run-now`, { method: "POST" }),
 }

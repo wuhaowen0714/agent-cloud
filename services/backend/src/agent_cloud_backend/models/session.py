@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from agent_cloud_backend.models.base import Base, TimestampMixin, uuid_pk
@@ -30,3 +30,18 @@ class Session(Base, TimestampMixin):
     memory_through_seq: Mapped[int] = mapped_column(default=-1, nullable=False)
     # 最近一回合 worker 报告的上下文 token 占用(供 /status 显示;未跑过回合则为 NULL)。
     last_context_tokens: Mapped[int | None] = mapped_column(nullable=True)
+    # 定时任务:本会话是某定时任务的一次运行产物(NULL=普通会话)。use_alter 打破与
+    # scheduled_tasks 的互引环(create_all 拓扑排序遇环会报错)。
+    scheduled_task_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey(
+            "scheduled_tasks.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_sessions_scheduled_task_id",
+        ),
+        nullable=True,
+    )
+    # 未读角标:仅定时运行产出的会话置 True;打开会话即清。
+    unread: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
