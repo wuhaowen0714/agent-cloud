@@ -21,9 +21,12 @@ from agent_cloud_common.codec import msg_from_proto, msg_to_proto, turn_event_to
 
 from agent_cloud_worker.context import build_system_prompt
 from agent_cloud_worker.image_gen import (
+    DEFAULT_IMAGE_EDIT_MODEL,
     DEFAULT_IMAGE_ENDPOINT,
     DEFAULT_IMAGE_MODEL,
+    ImageEditExecutor,
     ImageGenExecutor,
+    edit_image_enabled,
     generate_image_enabled,
     make_sophnet_image_generator,
 )
@@ -97,6 +100,7 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
         image_gen_endpoint: str = DEFAULT_IMAGE_ENDPOINT,
         image_gen_api_key: str = "",
         image_gen_model: str = DEFAULT_IMAGE_MODEL,
+        image_edit_model: str = DEFAULT_IMAGE_EDIT_MODEL,
     ) -> None:
         self._provider_factory = provider_factory
         self._network_region = network_region
@@ -108,6 +112,7 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
         self._image_gen_endpoint = image_gen_endpoint
         self._image_gen_api_key = image_gen_api_key
         self._image_gen_model = image_gen_model
+        self._image_edit_model = image_edit_model
 
     def _web_search_available(self) -> bool:
         # 配了搜索 key + 端点才算可用:决定 web_search 是否暴露 + system prompt 搜索段是否指向工具。
@@ -152,6 +157,19 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                 executor,
                 enabled=generate_image_enabled(enabled_tools),
                 generate_fn=generator,
+                write_binary_fn=sandbox_exec.write_binary,
+            )
+            # edit_image:同 key/端点,只换 Edit 模型;读输入图走 sandbox_exec.read_binary。
+            editor = make_sophnet_image_generator(
+                endpoint=self._image_gen_endpoint,
+                api_key=self._image_gen_api_key,
+                model=self._image_edit_model,
+            )
+            executor = ImageEditExecutor(
+                executor,
+                enabled=edit_image_enabled(enabled_tools),
+                generate_fn=editor,
+                read_binary_fn=sandbox_exec.read_binary,
                 write_binary_fn=sandbox_exec.write_binary,
             )
         return executor
@@ -526,6 +544,7 @@ async def create_server(
     image_gen_endpoint: str = DEFAULT_IMAGE_ENDPOINT,
     image_gen_api_key: str = "",
     image_gen_model: str = DEFAULT_IMAGE_MODEL,
+    image_edit_model: str = DEFAULT_IMAGE_EDIT_MODEL,
 ) -> tuple[grpc.aio.Server, int]:
     server = grpc.aio.server(
         options=[
@@ -545,6 +564,7 @@ async def create_server(
             image_gen_endpoint=image_gen_endpoint,
             image_gen_api_key=image_gen_api_key,
             image_gen_model=image_gen_model,
+            image_edit_model=image_edit_model,
         ),
         server,
     )

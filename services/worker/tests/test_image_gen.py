@@ -4,8 +4,11 @@ import httpx
 import pytest
 from agent_cloud_common import ToolCall, ToolResult, ToolSpec
 from agent_cloud_worker.image_gen import (
+    EDIT_IMAGE_SPEC,
     GENERATE_IMAGE_SPEC,
+    ImageEditExecutor,
     ImageGenExecutor,
+    edit_image_enabled,
     generate_image_enabled,
     make_sophnet_image_generator,
 )
@@ -429,3 +432,234 @@ async def test_image_generator_times_out():
     )
     with pytest.raises(RuntimeError, match="did not finish"):
         await gen("x")
+
+
+# --- edit_image / ImageEditExecutor ---
+
+
+async def _fake_read(path: str) -> bytes:
+    return _PNG
+
+
+async def _fake_generate_edit(prompt, size=None, negative_prompt=None, images=None) -> bytes:
+    return _PNG
+
+
+def _edit_ex(
+    inner=None,
+    *,
+    enabled=True,
+    read_fn=_fake_read,
+    gen_fn=_fake_generate_edit,
+    write_fn=_fake_write,
+    id_fn=lambda: "e1",
+):
+    return ImageEditExecutor(
+        inner or _FakeInner(),
+        enabled=enabled,
+        generate_fn=gen_fn,
+        read_binary_fn=read_fn,
+        write_binary_fn=write_fn,
+        id_fn=id_fn,
+    )
+
+
+def test_edit_image_enabled_helper():
+    assert edit_image_enabled([]) is True
+    assert edit_image_enabled(["edit_image"]) is True
+    assert edit_image_enabled(["bash"]) is False
+
+
+def test_edit_spec_requires_paths_and_prompt():
+    assert EDIT_IMAGE_SPEC.name == "edit_image"
+    req = EDIT_IMAGE_SPEC.input_schema["required"]
+    assert "image_paths" in req and "prompt" in req
+
+
+def test_edit_spec_gating():
+    assert "edit_image" in [s.name for s in _edit_ex(enabled=True).specs()]
+    assert "edit_image" not in [s.name for s in _edit_ex(enabled=False).specs()]
+
+
+async def test_edit_reads_input_and_saves():
+    seen: dict = {}
+
+    async def capture_read(path):
+        seen.setdefault("reads", []).append(path)
+        return _PNG
+
+    async def capture_gen(prompt, size=None, negative_prompt=None, images=None):
+        seen["images"] = images
+        seen["prompt"] = prompt
+        return _PNG
+
+    saved: dict = {}
+
+    async def capture_write(path, data):
+        saved["path"] = path
+        saved["data"] = data
+        return path
+
+    ex = _edit_ex(read_fn=capture_read, gen_fn=capture_gen, write_fn=capture_write)
+    res = await ex.execute(
+        ToolCall(
+            id="c",
+            name="edit_image",
+            arguments={"image_paths": ["media/upload/a.png"], "prompt": "make it blue"},
+        )
+    )
+    assert res.is_error is False
+    assert seen["reads"] == ["media/upload/a.png"]
+    # 输入图被读出 base64 data URI 喂给 sophnet input.images
+    assert len(seen["images"]) == 1
+    assert seen["images"][0].startswith("data:image/png;base64,")
+    assert seen["prompt"] == "make it blue"
+    assert saved["path"] == "media/picture/edit_e1.png"
+    assert saved["data"] == _PNG
+    assert "media/picture/edit_e1.png" in res.content
+
+
+async def test_edit_delegates_non_edit_to_inner():
+    inner = _FakeInner()
+    res = await _edit_ex(inner).execute(
+        ToolCall(id="c", name="bash", arguments={"command": "ls"})
+    )
+    assert res.content == "inner-handled"
+    assert len(inner.calls) == 1
+
+
+async def test_edit_disabled_is_error():
+    res = await _edit_ex(enabled=False).execute(
+        ToolCall(id="c", name="edit_image", arguments={"image_paths": ["a.png"], "prompt": "x"})
+    )
+    assert res.is_error is True
+
+
+async def test_edit_empty_prompt_is_error():
+    res = await _edit_ex().execute(
+        ToolCall(id="c", name="edit_image", arguments={"image_paths": ["a.png"], "prompt": " "})
+    )
+    assert res.is_error is True
+    assert "prompt" in res.content
+
+
+async def test_edit_missing_paths_is_error():
+    res = await _edit_ex().execute(
+        ToolCall(id="c", name="edit_image", arguments={"prompt": "x"})
+    )
+    assert res.is_error is True
+    assert "image_paths" in res.content
+
+
+async def test_edit_single_string_path_coerced():
+    # 模型偶尔传单字符串而非数组 → 容错成 1 张
+    seen: dict = {}
+
+    async def capture_read(path):
+        seen["path"] = path
+        return _PNG
+
+    res = await _edit_ex(read_fn=capture_read).execute(
+        ToolCall(
+            id="c",
+            name="edit_image",
+            arguments={"image_paths": "media/upload/a.png", "prompt": "x"},
+        )
+    )
+    assert res.is_error is False
+    assert seen["path"] == "media/upload/a.png"
+
+
+async def test_edit_too_many_images_is_error():
+    res = await _edit_ex().execute(
+        ToolCall(
+            id="c",
+            name="edit_image",
+            arguments={"image_paths": ["a", "b", "c", "d"], "prompt": "x"},
+        )
+    )
+    assert res.is_error is True
+    assert "at most" in res.content
+
+
+async def test_edit_read_failure_is_error():
+    async def boom_read(path):
+        raise RuntimeError("file not found")
+
+    res = await _edit_ex(read_fn=boom_read).execute(
+        ToolCall(
+            id="c", name="edit_image", arguments={"image_paths": ["nope.png"], "prompt": "x"}
+        )
+    )
+    assert res.is_error is True
+    assert "cannot read input image" in res.content
+
+
+async def test_edit_generate_failure_is_error():
+    async def boom_gen(prompt, size=None, negative_prompt=None, images=None):
+        raise httpx.ConnectTimeout("timeout")
+
+    res = await _edit_ex(gen_fn=boom_gen).execute(
+        ToolCall(id="c", name="edit_image", arguments={"image_paths": ["a.png"], "prompt": "x"})
+    )
+    assert res.is_error is True
+    assert "edit_image failed" in res.content
+
+
+async def test_edit_write_failure_is_error():
+    async def boom_write(path, data):
+        raise RuntimeError("disk full")
+
+    res = await _edit_ex(write_fn=boom_write).execute(
+        ToolCall(id="c", name="edit_image", arguments={"image_paths": ["a.png"], "prompt": "x"})
+    )
+    assert res.is_error is True
+    assert "failed to save image" in res.content
+
+
+async def test_image_generator_passes_images_in_payload():
+    # make_sophnet_image_generator 传 images → payload.input.images(图生图/编辑链路)
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if request.method == "POST":
+            captured["body"] = json.loads(request.content.decode())
+            return httpx.Response(200, json={"output": {"taskId": "t", "taskStatus": "PENDING"}})
+        if url == f"{_ENDPOINT}/t":
+            return httpx.Response(
+                200,
+                json={"output": {"taskStatus": "SUCCEEDED", "results": [{"url": _IMG_URL}]}},
+            )
+        return httpx.Response(200, content=_PNG)
+
+    gen = make_sophnet_image_generator(
+        endpoint=_ENDPOINT,
+        api_key="k",
+        model="Qwen-Image-Edit-2509",
+        transport=httpx.MockTransport(handler),
+        sleep=_nosleep,
+    )
+    await gen("edit it", None, None, images=["data:image/png;base64,AAAA"])
+    assert captured["body"]["model"] == "Qwen-Image-Edit-2509"
+    assert captured["body"]["input"]["images"] == ["data:image/png;base64,AAAA"]
+
+
+async def test_edit_total_size_exceeded_is_error(monkeypatch):
+    # M1:多图聚合字节超上限 → is_error(防 base64 膨胀后请求体过大 + worker 内存)。
+    import agent_cloud_worker.image_gen as ig
+
+    monkeypatch.setattr(ig, "_MAX_TOTAL_EDIT_BYTES", 10)
+
+    async def big_read(path):
+        return b"x" * 8  # 每张 8 字节,两张 = 16 > 10
+
+    res = await _edit_ex(read_fn=big_read).execute(
+        ToolCall(
+            id="c",
+            name="edit_image",
+            arguments={"image_paths": ["a.png", "b.png"], "prompt": "x"},
+        )
+    )
+    assert res.is_error is True
+    assert "total input image size" in res.content

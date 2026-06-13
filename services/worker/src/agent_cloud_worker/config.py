@@ -1,7 +1,11 @@
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from agent_cloud_worker.image_gen import DEFAULT_IMAGE_ENDPOINT, DEFAULT_IMAGE_MODEL
+from agent_cloud_worker.image_gen import (
+    DEFAULT_IMAGE_EDIT_MODEL,
+    DEFAULT_IMAGE_ENDPOINT,
+    DEFAULT_IMAGE_MODEL,
+)
 from agent_cloud_worker.web_search import DEFAULT_SEARCH_ENDPOINT
 
 
@@ -54,6 +58,8 @@ class WorkerSettings(BaseSettings):
     image_gen_api_key: str = ""
     image_gen_endpoint: str = DEFAULT_IMAGE_ENDPOINT
     image_gen_model: str = DEFAULT_IMAGE_MODEL
+    # edit_image 工具(图生图/编辑):同 image_gen 的 key/端点,只换 Edit 模型。
+    image_edit_model: str = DEFAULT_IMAGE_EDIT_MODEL
 
 
 def get_worker_settings() -> WorkerSettings:

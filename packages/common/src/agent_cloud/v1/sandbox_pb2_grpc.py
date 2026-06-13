@@ -45,6 +45,11 @@ class SandboxStub:
                 request_serializer=agent__cloud_dot_v1_dot_sandbox__pb2.WriteBinaryRequest.SerializeToString,
                 response_deserializer=agent__cloud_dot_v1_dot_sandbox__pb2.WriteBinaryResponse.FromString,
                 _registered_method=True)
+        self.ReadBinary = channel.unary_unary(
+                '/agent_cloud.v1.Sandbox/ReadBinary',
+                request_serializer=agent__cloud_dot_v1_dot_sandbox__pb2.ReadBinaryRequest.SerializeToString,
+                response_deserializer=agent__cloud_dot_v1_dot_sandbox__pb2.ReadBinaryResponse.FromString,
+                _registered_method=True)
         self.Terminal = channel.stream_stream(
                 '/agent_cloud.v1.Sandbox/Terminal',
                 request_serializer=agent__cloud_dot_v1_dot_sandbox__pb2.TerminalClientMsg.SerializeToString,
@@ -71,6 +76,14 @@ class SandboxServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ReadBinary(self, request, context):
+        """二进制读取(worker→sandbox):worker 原生工具(如图片编辑)把工作区里的图读出来喂给外部 API。
+        走独立 RPC:bytes 字段不经 JSON/base64,与 WriteBinary 对称。
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def Terminal(self, request_iterator, context):
         """交互式终端:双向流。client 发 start(开 PTY)/input(键盘字节)/resize;
         server 回 output(PTY 原始字节,含 ANSI)/exit_code(shell 退出收尾)。
@@ -91,6 +104,11 @@ def add_SandboxServicer_to_server(servicer, server):
                     servicer.WriteBinary,
                     request_deserializer=agent__cloud_dot_v1_dot_sandbox__pb2.WriteBinaryRequest.FromString,
                     response_serializer=agent__cloud_dot_v1_dot_sandbox__pb2.WriteBinaryResponse.SerializeToString,
+            ),
+            'ReadBinary': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReadBinary,
+                    request_deserializer=agent__cloud_dot_v1_dot_sandbox__pb2.ReadBinaryRequest.FromString,
+                    response_serializer=agent__cloud_dot_v1_dot_sandbox__pb2.ReadBinaryResponse.SerializeToString,
             ),
             'Terminal': grpc.stream_stream_rpc_method_handler(
                     servicer.Terminal,
@@ -153,6 +171,33 @@ class Sandbox:
             '/agent_cloud.v1.Sandbox/WriteBinary',
             agent__cloud_dot_v1_dot_sandbox__pb2.WriteBinaryRequest.SerializeToString,
             agent__cloud_dot_v1_dot_sandbox__pb2.WriteBinaryResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReadBinary(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/agent_cloud.v1.Sandbox/ReadBinary',
+            agent__cloud_dot_v1_dot_sandbox__pb2.ReadBinaryRequest.SerializeToString,
+            agent__cloud_dot_v1_dot_sandbox__pb2.ReadBinaryResponse.FromString,
             options,
             channel_credentials,
             insecure,

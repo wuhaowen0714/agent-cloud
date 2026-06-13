@@ -16,6 +16,10 @@ from agent_cloud_common import apply_edits
 _MAX_OUTPUT = 100_000
 _TRUNCATION_MARKER = "\n...[truncated]"
 
+# 二进制读取上限(worker 原生工具如图片编辑读输入图)。防 agent 读巨大文件撑爆 gRPC 消息
+# (上限 MAX_GRPC_MESSAGE_BYTES=32MiB);上传的图一般几 MB,20MiB 留足余量。
+_MAX_READ_BYTES = 20 * 1024 * 1024
+
 # bash 单命令执行上限(秒,env 可配)。超时杀整个进程组并返回错误,防止不退出的命令
 # (起服务、sleep、`cmd &` 后台进程持有管道)永久卡死整个沙箱(线上事故根因)。
 _BASH_TIMEOUT_SECONDS = float(os.environ.get("AGENT_CLOUD_SANDBOX_BASH_TIMEOUT", "300"))
@@ -233,3 +237,32 @@ def run_write_binary(
         # 同 run_tool:不泄露宿主绝对路径。
         return (str(exc).replace(str(base), "").replace(str(base_workdir), ""), True)
     return (path, False)
+
+
+def run_read_binary(base_workdir: Path, work_subdir: str, path: str) -> tuple[bytes, str]:
+    """从工作区读二进制文件(worker 原生工具如图片编辑读输入图)。返回 (content, error);
+    error 非空 = 失败(content 为空)。与 run_write_binary 同款路径围栏。"""
+    base = Path(base_workdir).resolve()
+    if not work_subdir:
+        return (b"", f"invalid work_subdir: {work_subdir}")
+    try:
+        workdir = _resolve_within(base, work_subdir)
+    except ValueError:
+        return (b"", f"invalid work_subdir: {work_subdir}")
+    if not path:
+        return (b"", "path is required")
+    try:
+        target = _resolve_within(workdir, path)
+    except ValueError:
+        return (b"", f"path escapes working directory: {path}")
+    try:
+        if not target.is_file():
+            return (b"", f"not a file: {path}")
+        size = target.stat().st_size
+        if size > _MAX_READ_BYTES:
+            return (b"", f"file too large to read: {size} bytes (max {_MAX_READ_BYTES})")
+        data = target.read_bytes()
+    except Exception as exc:
+        # 同 run_tool:不泄露宿主绝对路径。
+        return (b"", str(exc).replace(str(base), "").replace(str(base_workdir), ""))
+    return (data, "")

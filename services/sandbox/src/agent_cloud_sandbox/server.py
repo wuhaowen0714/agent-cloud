@@ -9,7 +9,12 @@ from agent_cloud.v1 import sandbox_pb2, sandbox_pb2_grpc
 from agent_cloud_common import MAX_GRPC_MESSAGE_BYTES
 
 from agent_cloud_sandbox.pty_session import PtySession
-from agent_cloud_sandbox.tools import _resolve_within, run_tool, run_write_binary
+from agent_cloud_sandbox.tools import (
+    _resolve_within,
+    run_read_binary,
+    run_tool,
+    run_write_binary,
+)
 
 
 class SandboxServicer(sandbox_pb2_grpc.SandboxServicer):
@@ -52,6 +57,23 @@ class SandboxServicer(sandbox_pb2_grpc.SandboxServicer):
         if is_error:
             return sandbox_pb2.WriteBinaryResponse(path="", is_error=True, error=result)
         return sandbox_pb2.WriteBinaryResponse(path=result, is_error=False, error="")
+
+    async def ReadBinary(
+        self, request: sandbox_pb2.ReadBinaryRequest, context: grpc.aio.ServicerContext
+    ) -> sandbox_pb2.ReadBinaryResponse:
+        # ⚠️ 复制 ExecTool 的 token 校验(新增 RPC 必须复制,否则成为未鉴权旁路——可绕过模型
+        # 读取用户工作区任意文件)。
+        if self._token:
+            md = dict(context.invocation_metadata() or ())
+            if not hmac.compare_digest(md.get("x-sandbox-token", ""), self._token):
+                await context.abort(grpc.StatusCode.UNAUTHENTICATED, "invalid sandbox token")
+        # 读盘是阻塞 IO,to_thread 移出事件循环(同 ExecTool/WriteBinary)。
+        content, error = await asyncio.to_thread(
+            run_read_binary, self._base, request.work_subdir, request.path
+        )
+        if error:
+            return sandbox_pb2.ReadBinaryResponse(content=b"", is_error=True, error=error)
+        return sandbox_pb2.ReadBinaryResponse(content=content, is_error=False, error="")
 
     async def Terminal(self, request_iterator, context: grpc.aio.ServicerContext):
         # ⚠️ 复制 ExecTool 的 token 校验(server.py 注释明确要求:新增 RPC 必须复制,

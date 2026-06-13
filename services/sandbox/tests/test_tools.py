@@ -4,6 +4,7 @@ import time
 from agent_cloud_sandbox.tools import (
     _MAX_OUTPUT,
     _TRUNCATION_MARKER,
+    run_read_binary,
     run_tool,
     run_write_binary,
 )
@@ -284,3 +285,56 @@ def test_write_binary_os_error_does_not_leak_base(tmp_path):
     assert err is True
     assert str(tmp_path) not in rel
     assert str(tmp_path.resolve()) not in rel
+
+
+# --- run_read_binary:worker 原生工具(图片编辑)读工作区输入图 ---
+
+
+def test_read_binary_roundtrip(tmp_path):
+    # 先写一张图,再读回 —— 逐字节相同(真二进制透传)
+    run_write_binary(tmp_path, "s1", "media/upload/in.png", _PNG_BYTES)
+    data, err = run_read_binary(tmp_path, "s1", "media/upload/in.png")
+    assert err == ""
+    assert data == _PNG_BYTES
+
+
+def test_read_binary_missing_file(tmp_path):
+    data, err = run_read_binary(tmp_path, "s1", "media/upload/nope.png")
+    assert data == b""
+    assert "not a file" in err
+
+
+def test_read_binary_path_escape_rejected(tmp_path):
+    data, err = run_read_binary(tmp_path, "s1", "../../etc/hosts")
+    assert data == b""
+    assert "escapes working directory" in err
+
+
+def test_read_binary_work_subdir_escape_rejected(tmp_path):
+    data, err = run_read_binary(tmp_path, "../evil", "x.png")
+    assert data == b""
+    assert "invalid work_subdir" in err
+
+
+def test_read_binary_empty_path_rejected(tmp_path):
+    data, err = run_read_binary(tmp_path, "s1", "")
+    assert data == b""
+    assert "path is required" in err
+
+
+def test_read_binary_dir_rejected(tmp_path):
+    # 目录不是文件 → not a file(而不是 read_bytes 抛 IsADirectoryError)
+    run_write_binary(tmp_path, "s1", "d/keep.txt", b"x")
+    data, err = run_read_binary(tmp_path, "s1", "d")
+    assert data == b""
+    assert "not a file" in err
+
+
+def test_read_binary_too_large_rejected(tmp_path, monkeypatch):
+    import agent_cloud_sandbox.tools as t
+
+    monkeypatch.setattr(t, "_MAX_READ_BYTES", 10)
+    run_write_binary(tmp_path, "s1", "big.bin", b"x" * 50)
+    data, err = run_read_binary(tmp_path, "s1", "big.bin")
+    assert data == b""
+    assert "too large" in err
