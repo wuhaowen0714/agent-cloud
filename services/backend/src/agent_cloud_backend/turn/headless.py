@@ -18,8 +18,8 @@ from agent_cloud_backend.skills.materialize import materialize_enabled_skills
 from agent_cloud_backend.turn.assemble import build_run_turn_request
 from agent_cloud_backend.turn.compaction import force_compact, maybe_compact_after_turn
 from agent_cloud_backend.turn.heartbeat import session_heartbeat
-from agent_cloud_backend.turn.memory_extract import apply_remember_calls
 from agent_cloud_backend.turn.messages import common_to_content
+from agent_cloud_backend.turn.post_persist import run_tool_side_effects
 from agent_cloud_backend.turn.retry import RetryAction, RetryPolicy, classify
 from agent_cloud_backend.turn.title import spawn_title_generation
 from agent_cloud_backend.turn.worker_client import run_turn_via_worker
@@ -151,12 +151,8 @@ async def execute_turn_headless(
                 persisted.append(row)
             await SessionRepository(db).set_context_tokens(session_id, response.context_tokens)
             await db.commit()
-        # agent 主动记忆(独立事务、best-effort)。Phase 4 起换成 run_tool_side_effects
-        # (含 schedule_task)。
-        try:
-            await apply_remember_calls(session_id, commons)
-        except Exception:
-            logger.exception("apply_remember_calls failed for session %s", session_id)
+        # agent 主动工具副作用(remember + schedule_task),独立事务、best-effort。
+        await run_tool_side_effects(session_id, commons)
 
         async with session_heartbeat(session_id, settings.session_heartbeat_seconds):
             await maybe_compact_after_turn(
