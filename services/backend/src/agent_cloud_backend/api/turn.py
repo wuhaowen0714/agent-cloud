@@ -5,8 +5,6 @@ import logging
 import uuid
 from pathlib import Path
 
-import grpc
-from agent_cloud_common.codec import msg_from_proto
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,14 +25,15 @@ from agent_cloud_backend.skills.deps import get_object_store
 from agent_cloud_backend.skills.materialize import materialize_enabled_skills
 from agent_cloud_backend.skills.store import ObjectStore
 from agent_cloud_backend.turn.assemble import build_run_turn_request
-from agent_cloud_backend.turn.compaction import force_compact, maybe_compact_after_turn
-from agent_cloud_backend.turn.heartbeat import session_heartbeat
+from agent_cloud_backend.turn.headless import (
+    HeadlessOverflow,
+    HeadlessWorkerError,
+    SessionBusy,
+    execute_turn_headless,
+)
 from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub, get_turn_hub, subscribe
-from agent_cloud_backend.turn.messages import common_to_content
-from agent_cloud_backend.turn.retry import RetryAction, RetryPolicy, classify
+from agent_cloud_backend.turn.retry import classify
 from agent_cloud_backend.turn.runner import run_turn
-from agent_cloud_backend.turn.title import spawn_title_generation
-from agent_cloud_backend.turn.worker_client import run_turn_via_worker
 
 logger = logging.getLogger(__name__)
 
@@ -51,159 +50,30 @@ async def run_turn_endpoint(
     store: ObjectStore = Depends(get_object_store),
     user: User = Depends(get_current_user),
 ):
-    session_repo = SessionRepository(db)
-    msg_repo = MessageRepository(db)
-
-    s = await owned_session(session_id, user.id, db)  # 404 if missing or not owned
-
-    # 1. 加锁(失败=并发,拒绝;不落任何东西)
-    if not await session_repo.try_acquire(session_id):
-        await db.rollback()
-        raise HTTPException(status_code=409, detail="session is busy")
-    await db.commit()
-
+    # 薄包一层:鉴权 + 把回合执行委托给 execute_turn_headless(与定时任务轮询器共用)。
+    # 异常映射保持原语义:并发 409 / 超窗压无可压 413 / 瞬时 503 / 其它 worker 502。
+    await owned_session(session_id, user.id, db)  # 404 if missing or not owned
     try:
-        # 2. 持久化 user 消息
-        user_msg = await msg_repo.append(
-            session_id,
-            Message(
-                session_id=session_id,
-                seq=0,
-                role="user",
-                content={"text": body.content, "tool_calls": [], "tool_results": []},
-            ),
+        result = await execute_turn_headless(
+            session_id, body.content, settings=settings, manager=manager, store=store
         )
-        await db.commit()
-
-        # 3. 组装 + 物化已启用 skill + 调 worker
-        sandbox_conn = await manager.get_endpoint_for_user(s.user_id)
-        sandbox_endpoint = sandbox_conn.endpoint
-        sandbox_token = sandbox_conn.token
-        enabled_skills = await AgentSkillEnableRepository(db).list_enabled_for_agent(
-            s.agent_config_id
-        )
-        materialize_enabled_skills(
-            base_root=Path(settings.sandbox_base_root),
-            user_id=s.user_id,
-            work_subdir=s.work_subdir,
-            skills=enabled_skills,
-            store=store,
-        )
-        # docker 沙箱:容器已把用户 workspace 挂到 /workspace,请求 work_subdir 用 "."
-        # 避免再嵌套一层 workspace(spec §5);inprocess 仍用 session.work_subdir。
-        # 注意:上面 materialize 仍用 s.work_subdir(那是宿主侧 .skills 路径)。
-        req_work_subdir = "." if settings.sandbox_provisioner == "docker" else s.work_subdir
-        request = await build_run_turn_request(
-            db,
-            s,
-            sandbox_endpoint=sandbox_endpoint,
-            sandbox_token=sandbox_token,
-            user_message=body.content,
-            exclude_message_id=user_msg.id,
-            enabled_skills=enabled_skills,
-            work_subdir=req_work_subdir,
-        )
-        # 可恢复失败在回合内透明自动重试(spec: turn-recovery)。整个循环在心跳内续租。
-        policy = RetryPolicy.from_settings(settings)
-        overflow_used = transient_used = total_used = 0
-        current = request
-        async with session_heartbeat(session_id, settings.session_heartbeat_seconds):
-            while True:
-                total_used += 1
-                try:
-                    response = await run_turn_via_worker(settings.worker_endpoint, current)
-                    break
-                except grpc.aio.AioRpcError as exc:
-                    action = policy.decide(
-                        exc.code(),
-                        overflow_used=overflow_used,
-                        transient_used=transient_used,
-                        total_used=total_used,
-                    )
-                    if action == RetryAction.COMPACT_RETRY:
-                        progressed = await force_compact(session_id, settings=settings)
-                        if not progressed:
-                            raise HTTPException(
-                                status_code=413,
-                                detail="context too large to compact; please start a new session",
-                            ) from exc
-                        overflow_used += 1
-                        await db.refresh(s)  # 读到压缩后的新摘要/边界
-                        current = await build_run_turn_request(
-                            db,
-                            s,
-                            sandbox_endpoint=sandbox_endpoint,
-                            sandbox_token=sandbox_token,
-                            user_message=body.content,
-                            exclude_message_id=user_msg.id,
-                            enabled_skills=enabled_skills,
-                            work_subdir=req_work_subdir,
-                        )
-                        continue
-                    if action == RetryAction.BACKOFF_RETRY:
-                        await asyncio.sleep(policy.backoff_seconds(transient_used))
-                        transient_used += 1
-                        continue  # 复用 current(同一请求)
-                    # GIVE_UP:超窗到上限 → 413;瞬时耗尽 → 503;fatal → 502。
-                    kind = classify(exc.code())
-                    if kind == "overflow":
-                        raise HTTPException(
-                            status_code=413,
-                            detail="context too large to compact; please start a new session",
-                        ) from exc
-                    if kind == "transient":
-                        raise HTTPException(
-                            status_code=503, detail="service unavailable, please retry"
-                        ) from exc
-                    raise HTTPException(
-                        status_code=502, detail=f"worker unavailable: {exc.code().name}"
-                    ) from exc
-
-        # 4. 落库新消息
-        persisted = []
-        for proto_msg in response.new_messages:
-            common = msg_from_proto(proto_msg)
-            row = await msg_repo.append(
-                session_id,
-                Message(
-                    session_id=session_id,
-                    seq=0,
-                    role=common.role.value,
-                    content=common_to_content(common),
-                ),
-            )
-            persisted.append(row)
-        await db.commit()
-
-        # 回合后主动压缩(用真实 context_tokens 判阈值,阈值按模型解析)。仍在会话锁内;
-        # 自起一段心跳续租,因大历史 Summarize 可能较慢。best-effort(内部吞异常)。
-        async with session_heartbeat(session_id, settings.session_heartbeat_seconds):
-            await maybe_compact_after_turn(
-                session_id, response.context_tokens, model=request.agent.model, settings=settings
-            )
-
-        # 标题为空 → 成功收尾后异步起名(fire-and-forget;钩子内还有权威复查)
-        if s.title is None:
-            spawn_title_generation(session_id, settings=settings)
-
-        return TurnResponse(
-            messages=persisted,
-            stop_reason=response.stop_reason,
-            usage=TurnUsage(
-                input_tokens=response.input_tokens, output_tokens=response.output_tokens
-            ),
-        )
-    finally:
-        # 5. 释放锁(对中途 DB 出错具有韧性)
-        # 若加锁与最终 commit 之间任何 DB 操作中止了事务,先 rollback 清理,
-        # 再 release,最后 commit。整段加 try/except,避免释放锁的失败掩盖原始异常,
-        # 同时保证锁不会永远卡在 running。成功路径上 rollback 是无害的 no-op。
-        try:
-            await db.rollback()
-            await session_repo.release(session_id)
-            await db.commit()
-        except Exception:
-            logger.exception("failed to release session lock for session %s", session_id)
+    except SessionBusy as exc:
+        raise HTTPException(status_code=409, detail="session is busy") from exc
+    except HeadlessOverflow as exc:
+        raise HTTPException(
+            status_code=413, detail="context too large to compact; please start a new session"
+        ) from exc
+    except HeadlessWorkerError as exc:
+        if classify(exc.code) == "transient":
+            raise HTTPException(
+                status_code=503, detail="service unavailable, please retry"
+            ) from exc
+        raise HTTPException(status_code=502, detail=f"worker unavailable: {exc.code.name}") from exc
+    return TurnResponse(
+        messages=result.new_messages,
+        stop_reason=result.stop_reason,
+        usage=TurnUsage(input_tokens=result.input_tokens, output_tokens=result.output_tokens),
+    )
 
 
 @router.post("/stream")

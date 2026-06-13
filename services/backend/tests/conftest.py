@@ -79,7 +79,17 @@ async def engine(pg_url: str):
     async with eng.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
+    # 让所有走全局 get_sessionmaker() 的代码(runner / headless / 定时任务轮询器 / memory_extract)
+    # 指向测试库——否则它们连默认 localhost:5432(非容器)。原非流式端点用 DI session,抽成
+    # execute_turn_headless 后改用全局 sessionmaker,故所有 API 测试都需要这一指向(流式路径同理)。
+    # 用【独立】MonkeyPatch(而非测试共享的 monkeypatch fixture):部分测试会 monkeypatch.undo()
+    # 撤销自己的 worker 打桩,绝不能连带把这个全局指向撤掉(否则第二次回合回落 localhost)。
+    import agent_cloud_backend.db as db_module
+
+    mp = pytest.MonkeyPatch()
+    mp.setattr(db_module, "_sessionmaker", async_sessionmaker(eng, expire_on_commit=False))
     yield eng
+    mp.undo()
     await eng.dispose()
 
 
@@ -167,6 +177,7 @@ def _quiet_title_generation(request, monkeypatch):
     monkeypatch.setattr(
         "agent_cloud_backend.turn.runner.spawn_title_generation", lambda *a, **k: None
     )
+    # 非流式回合的起名移到 turn.headless(端点改薄后不再直接持有该名)。
     monkeypatch.setattr(
-        "agent_cloud_backend.api.turn.spawn_title_generation", lambda *a, **k: None
+        "agent_cloud_backend.turn.headless.spawn_title_generation", lambda *a, **k: None
     )
