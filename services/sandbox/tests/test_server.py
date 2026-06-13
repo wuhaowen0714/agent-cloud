@@ -147,3 +147,45 @@ async def test_write_binary_accepts_large_image(tmp_path):
         assert (tmp_path / "media" / "picture" / "big.png").read_bytes() == big
     finally:
         await server.stop(None)
+
+
+async def test_read_binary_roundtrip_over_grpc(tmp_path):
+    # 写一张大图再 ReadBinary 读回 —— 穿真 server,逐字节相同。返回侧也可能数 MB,验证 server
+    # 的 send 上限同样开大(图片编辑读输入图的链路)。
+    server, port = await create_server(base_workdir=tmp_path, host="localhost", port=0)
+    try:
+        img = b"\x89PNG\r\n\x1a\n" + b"\xab\xcd" * (3 * 1024 * 1024)  # ~6MiB > 默认 4MiB
+        async with grpc.aio.insecure_channel(
+            f"localhost:{port}",
+            options=[
+                ("grpc.max_send_message_length", MAX_GRPC_MESSAGE_BYTES),
+                ("grpc.max_receive_message_length", MAX_GRPC_MESSAGE_BYTES),
+            ],
+        ) as channel:
+            stub = sandbox_pb2_grpc.SandboxStub(channel)
+            await stub.WriteBinary(
+                sandbox_pb2.WriteBinaryRequest(
+                    path="media/upload/in.png", content=img, work_subdir="."
+                )
+            )
+            resp = await stub.ReadBinary(
+                sandbox_pb2.ReadBinaryRequest(path="media/upload/in.png", work_subdir=".")
+            )
+        assert resp.is_error is False
+        assert resp.content == img
+    finally:
+        await server.stop(None)
+
+
+async def test_read_binary_missing_file_over_grpc(tmp_path):
+    server, port = await create_server(base_workdir=tmp_path, host="localhost", port=0)
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{port}") as channel:
+            stub = sandbox_pb2_grpc.SandboxStub(channel)
+            resp = await stub.ReadBinary(
+                sandbox_pb2.ReadBinaryRequest(path="nope.png", work_subdir=".")
+            )
+        assert resp.is_error is True
+        assert "not a file" in resp.error
+    finally:
+        await server.stop(None)

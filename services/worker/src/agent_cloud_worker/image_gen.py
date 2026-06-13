@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import time
 import uuid
@@ -69,10 +70,13 @@ def generate_image_enabled(enabled_tools: list[str]) -> bool:
     return not enabled_tools or "generate_image" in enabled_tools
 
 
-# (prompt, size|None, negative_prompt|None) -> 下载好的图片字节;失败抛异常,由 executor 收敛。
-ImageGenFn = Callable[[str, str | None, str | None], Awaitable[bytes]]
+# (prompt, size?, negative_prompt?, images?) -> 下载好的图片字节;失败抛异常,由 executor 收敛。
+# images 是图生图/编辑用的输入图(base64 data URI 或 URL),generate_image 不传、edit_image 传。
+ImageGenFn = Callable[..., Awaitable[bytes]]
 # (rel_path, data) -> 实际写入的相对路径;失败抛异常。
 WriteBinaryFn = Callable[[str, bytes], Awaitable[str]]
+# (path) -> 工作区文件字节;失败抛异常(edit_image 读输入图用)。
+ReadBinaryFn = Callable[[str], Awaitable[bytes]]
 
 _TERMINAL_FAIL = ("FAILED", "CANCELED", "UNKNOWN")
 
@@ -106,11 +110,16 @@ def make_sophnet_image_generator(
     _now = now or time.monotonic
 
     async def generate(
-        prompt: str, size: str | None = None, negative_prompt: str | None = None
+        prompt: str,
+        size: str | None = None,
+        negative_prompt: str | None = None,
+        images: list[str] | None = None,
     ) -> bytes:
         input_obj: dict = {"prompt": prompt}
         if negative_prompt:
             input_obj["negative_prompt"] = negative_prompt
+        if images:
+            input_obj["images"] = images  # 图生图/编辑:1-3 张 base64 data URI 或 URL
         payload: dict = {"model": model, "input": input_obj}
         if size:
             payload["parameters"] = {"size": size}
@@ -247,6 +256,204 @@ class ImageGenExecutor:
             call_id=call.id,
             content=(
                 f"Image generated and shown to the user (saved at {written}). It is already "
+                "displayed — do not embed it again or repeat the path in your reply."
+            ),
+            is_error=False,
+        )
+
+
+DEFAULT_IMAGE_EDIT_MODEL = "Qwen-Image-Edit-2509"
+_MAX_EDIT_IMAGES = 3
+# 多图聚合字节上限。单图上限是 sandbox 侧 ReadBinary 的 _MAX_READ_BYTES(20MiB);这里再设聚合上限,
+# 避免 3 张各 20MiB 叠加 → base64(+33%)后 ~80MiB 请求体 + worker 峰值内存压力。真实上传图远小于此。
+_MAX_TOTAL_EDIT_BYTES = 24 * 1024 * 1024
+
+# edit_image 工具(worker 原生:图生图/编辑)。与 generate_image 同源(sophnet 同端点 + 同骨架),
+# 但 model=Qwen-Image-Edit-2509 且 input.images 带输入图;输入图先经 ReadBinary 从工作区读出 base64。
+EDIT_IMAGE_SPEC = ToolSpec(
+    name="edit_image",
+    description=(
+        "Edit existing image(s) with a text instruction (image-to-image). Use this when the "
+        "user wants to MODIFY a picture: change the background, style, lighting, add or remove "
+        "objects, etc. 'image_paths' are workspace-relative paths of the input image(s) (1-3), "
+        "e.g. a file the user uploaded under media/upload/ or one previously generated under "
+        "media/picture/. The edited result is saved under media/picture/ and shown to the user "
+        "automatically; do NOT embed it again with markdown or paste the path, just describe "
+        "the change in words. To create a brand-new image from scratch (no input image) use "
+        "generate_image instead."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "image_paths": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Workspace-relative path(s) of the input image(s) to edit, 1-3 of them "
+                    "(e.g. 'media/upload/cat.png')."
+                ),
+            },
+            "prompt": {
+                "type": "string",
+                "description": (
+                    "The edit instruction, e.g. 'replace the background with a sunny beach' or "
+                    "'make it look like a watercolor painting'."
+                ),
+            },
+            "negative_prompt": {
+                "type": "string",
+                "description": "Optional. What to avoid in the result.",
+            },
+            "size": {
+                "type": "string",
+                "description": "Optional output resolution as WIDTH*HEIGHT.",
+            },
+        },
+        "required": ["image_paths", "prompt"],
+    },
+)
+
+
+def edit_image_enabled(enabled_tools: list[str]) -> bool:
+    """空 enabled_tools = 全部(含 edit_image),与其它工具一致;否则需显式列出。"""
+    return not enabled_tools or "edit_image" in enabled_tools
+
+
+_EDIT_MIME = {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "webp": "image/webp",
+    "gif": "image/gif",
+}
+
+
+def _to_data_uri(path: str, data: bytes) -> str:
+    """把图片字节编码成 data URI(sophnet input.images 接受 URL 或 base64 数据)。"""
+    ext = path.rsplit(".", 1)[-1].lower() if "." in path else "png"
+    mime = _EDIT_MIME.get(ext, "image/png")
+    return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+
+
+class ImageEditExecutor:
+    """装饰 ToolExecutor:加 worker 原生的 ``edit_image`` 工具(图生图/编辑)。
+
+    sophnet 同端点(model=Qwen-Image-Edit-2509 + input.images),但要先把工作区里的输入图经
+    ReadBinary RPC 读出来 base64 喂给 API。结果落进 media/picture/,前端复用工具卡片展示。
+    失败(读图/HTTP/超时/任务失败/落盘)收敛成 is_error 结果。
+    """
+
+    def __init__(
+        self,
+        inner: ToolExecutor,
+        *,
+        enabled: bool,
+        generate_fn: ImageGenFn,
+        read_binary_fn: ReadBinaryFn,
+        write_binary_fn: WriteBinaryFn,
+        id_fn: Callable[[], str] | None = None,
+    ) -> None:
+        self._inner = inner
+        self._enabled = enabled
+        self._generate_fn = generate_fn
+        self._read_binary_fn = read_binary_fn
+        self._write_binary_fn = write_binary_fn
+        self._id_fn = id_fn or (lambda: uuid.uuid4().hex[:12])
+
+    def specs(self) -> list[ToolSpec]:
+        specs = list(self._inner.specs())
+        if self._enabled:
+            specs.append(EDIT_IMAGE_SPEC)
+        return specs
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        if call.name != "edit_image":
+            return await self._inner.execute(call)
+        if not self._enabled:
+            return ToolResult(
+                call_id=call.id, content="tool not enabled: edit_image", is_error=True
+            )
+        args = call.arguments or {}
+        prompt = args.get("prompt")
+        if not isinstance(prompt, str) or not prompt.strip():
+            return ToolResult(
+                call_id=call.id,
+                content="edit_image: 'prompt' (non-empty string) is required",
+                is_error=True,
+            )
+        raw_paths = args.get("image_paths")
+        if isinstance(raw_paths, str):  # 容错:模型偶尔传单个字符串而非数组
+            raw_paths = [raw_paths]
+        paths = (
+            [p.strip() for p in raw_paths if isinstance(p, str) and p.strip()]
+            if isinstance(raw_paths, list)
+            else []
+        )
+        if not paths:
+            return ToolResult(
+                call_id=call.id,
+                content="edit_image: 'image_paths' (1-3 workspace image paths) is required",
+                is_error=True,
+            )
+        if len(paths) > _MAX_EDIT_IMAGES:
+            return ToolResult(
+                call_id=call.id,
+                content=f"edit_image: at most {_MAX_EDIT_IMAGES} input images",
+                is_error=True,
+            )
+
+        images: list[str] = []
+        total = 0
+        for p in paths:
+            try:
+                data = await self._read_binary_fn(p)
+            except Exception as exc:  # noqa: BLE001 — 读图失败转 is_error,提示模型核对路径
+                return ToolResult(
+                    call_id=call.id,
+                    content=(
+                        f"edit_image: cannot read input image '{p}': "
+                        f"{type(exc).__name__}: {exc}"
+                    ),
+                    is_error=True,
+                )
+            total += len(data)
+            if total > _MAX_TOTAL_EDIT_BYTES:
+                return ToolResult(
+                    call_id=call.id,
+                    content=(
+                        "edit_image: total input image size exceeds "
+                        f"{_MAX_TOTAL_EDIT_BYTES // (1024 * 1024)}MiB — use fewer or smaller images"
+                    ),
+                    is_error=True,
+                )
+            images.append(_to_data_uri(p, data))
+
+        size = args.get("size")
+        size = size.strip() if isinstance(size, str) and size.strip() else None
+        negative = args.get("negative_prompt")
+        negative = negative.strip() if isinstance(negative, str) and negative.strip() else None
+
+        try:
+            out = await self._generate_fn(prompt.strip(), size, negative, images=images)
+        except Exception as exc:  # noqa: BLE001 — HTTP/超时/任务失败转 is_error
+            return ToolResult(
+                call_id=call.id,
+                content=f"edit_image failed: {type(exc).__name__}: {exc}",
+                is_error=True,
+            )
+        rel_path = f"{_IMAGE_SUBDIR}/edit_{self._id_fn()}.png"
+        try:
+            written = await self._write_binary_fn(rel_path, out)
+        except Exception as exc:  # noqa: BLE001 — 落盘失败也收敛
+            return ToolResult(
+                call_id=call.id,
+                content=f"edit_image: failed to save image: {type(exc).__name__}: {exc}",
+                is_error=True,
+            )
+        return ToolResult(
+            call_id=call.id,
+            content=(
+                f"Image edited and shown to the user (saved at {written}). It is already "
                 "displayed — do not embed it again or repeat the path in your reply."
             ),
             is_error=False,

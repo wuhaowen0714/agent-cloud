@@ -861,6 +861,7 @@ async def test_run_turn_exposes_generate_image_tool_when_key_configured():
         await worker_server.stop(None)
     tool_names = {t.name for t in provider.last_request.tools}
     assert "generate_image" in tool_names
+    assert "edit_image" in tool_names  # edit_image 与 generate_image 同 key,一起暴露
 
 
 async def test_run_turn_hides_generate_image_tool_when_no_key():
@@ -885,6 +886,7 @@ async def test_run_turn_hides_generate_image_tool_when_no_key():
         await worker_server.stop(None)
     tool_names = {t.name for t in provider.last_request.tools}
     assert "generate_image" not in tool_names
+    assert "edit_image" not in tool_names
 
 
 async def test_run_turn_hides_web_search_tool_when_no_key():

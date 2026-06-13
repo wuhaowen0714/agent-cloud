@@ -9,6 +9,9 @@ service Sandbox {
   // 走独立 RPC 而非 ExecTool/write_file:bytes 字段不经 JSON/base64,落地即原始文件
   // (write_file 是 write_text,塞二进制会损坏 + 让 /files/raw 的 MIME 探测失效)。
   rpc WriteBinary(WriteBinaryRequest) returns (WriteBinaryResponse);
+  // 二进制读取(worker→sandbox):worker 原生工具(如图片编辑)把工作区里的图读出来喂给外部 API。
+  // 走独立 RPC:bytes 字段不经 JSON/base64,与 WriteBinary 对称。
+  rpc ReadBinary(ReadBinaryRequest) returns (ReadBinaryResponse);
   // 交互式终端:双向流。client 发 start(开 PTY)/input(键盘字节)/resize;
   // server 回 output(PTY 原始字节,含 ANSI)/exit_code(shell 退出收尾)。
   rpc Terminal(stream TerminalClientMsg) returns (stream TerminalServerMsg);
@@ -57,6 +60,17 @@ message WriteBinaryRequest {
 
 message WriteBinaryResponse {
   string path = 1;      // 实际写入的相对路径(回显)
+  bool is_error = 2;
+  string error = 3;     // is_error 时的错误消息(已剥宿主绝对路径)
+}
+
+message ReadBinaryRequest {
+  string path = 1;           // 相对工作子目录的源路径(如 media/upload/x.png)
+  string work_subdir = 2;    // 相对沙箱基目录的会话工作子目录
+}
+
+message ReadBinaryResponse {
+  bytes content = 1;    // 读出的原始字节(失败时空)
   bool is_error = 2;
   string error = 3;     // is_error 时的错误消息(已剥宿主绝对路径)
 }

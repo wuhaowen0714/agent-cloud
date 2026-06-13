@@ -130,4 +130,25 @@ describe("ToolCallCard generate_image", () => {
     expect(screen.queryByRole("img")).toBeNull()
     expect(spy).not.toHaveBeenCalled()
   })
+
+  it("edit_image 成功:同样解析 media/picture 路径并渲染图片", async () => {
+    vi.spyOn(api, "previewUrl").mockResolvedValue("blob:edit-img")
+    render(
+      <ToolCallCard
+        call={{
+          id: "e1",
+          name: "edit_image",
+          arguments: { image_paths: ["media/upload/a.png"], prompt: "blue bg" },
+        }}
+        result={{
+          call_id: "e1",
+          content: "Image edited and shown to the user (saved at media/picture/edit_xyz.png).",
+          is_error: false,
+        }}
+      />,
+    )
+    const img = await screen.findByRole("img")
+    expect(img).toHaveAttribute("src", "blob:edit-img")
+    expect(api.previewUrl).toHaveBeenCalledWith("media/picture/edit_xyz.png")
+  })
 })

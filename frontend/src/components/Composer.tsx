@@ -32,8 +32,11 @@ export function Composer({
   const [dismissed, setDismissed] = useState(false) // Esc 关面板,保留文本走直通
   const [atDismissed, setAtDismissed] = useState<number | null>(null) // Esc 时 @ 词的 start;同词内不再弹
   const [notice, setNotice] = useState<Notice>(null)
+  const [attachments, setAttachments] = useState<{ path: string; name: string }[]>([])
+  const [uploading, setUploading] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const ctx = useSlashCommands({
     notify: (msg) => setNotice({ kind: "flash", flash: msg }),
@@ -199,11 +202,33 @@ export function Composer({
     return () => document.removeEventListener("pointerdown", onDoc)
   }, [notice])
 
+  // 上传图片到工作区 media/upload/,记录路径;发送时随消息带上(agent 据此用 edit_image 编辑)。
+  const uploadAttachments = async (files: File[]) => {
+    if (!files.length || busy) return
+    setUploading(true)
+    try {
+      const entries = await api.uploadFiles("media/upload", files)
+      setAttachments((prev) => [...prev, ...entries.map((e) => ({ path: e.path, name: e.name }))])
+    } catch {
+      setNotice({ kind: "flash", flash: "图片上传失败" })
+    } finally {
+      setUploading(false)
+    }
+  }
+
   const send = () => {
     const t = text.trim()
-    if (!t || busy) return
-    onSend(t)
+    if ((!t && attachments.length === 0) || busy) return
+    // 带附件:消息末尾附上工作区路径,agent 看到后用 edit_image 编辑(或 read_file 查看)。
+    const full =
+      attachments.length > 0
+        ? `${t}\n\n[Attached image(s) in the workspace — use edit_image to edit them]\n${attachments
+            .map((a) => a.path)
+            .join("\n")}`
+        : t
+    onSend(full)
     setText("")
+    setAttachments([])
     // setText 不走 onChange:caret/Esc 豁免须随文本一起归零,否则豁免跨消息泄漏——
     // 下一条消息开头的 @(同样 start=0)会被旧豁免压住、浮层永不弹(审查 M1)。
     setCaret(0)
@@ -214,6 +239,26 @@ export function Composer({
   return (
     <div className="border-t border-slate-200 bg-white/80 p-3 backdrop-blur">
       <div className="mx-auto max-w-5xl">
+      {attachments.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {attachments.map((a, i) => (
+            <span
+              key={a.path}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600"
+            >
+              <span aria-hidden>🖼</span>
+              <span className="max-w-[12rem] truncate font-mono">{a.name}</span>
+              <button
+                type="button"
+                className="text-slate-400 hover:text-slate-700"
+                onClick={() => setAttachments((p) => p.filter((_, j) => j !== i))}
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
       <div ref={wrapRef} className="relative flex items-end gap-2">
         {compacting ? (
           <div className="absolute bottom-full left-0 right-0 z-30 mb-2 rounded-xl border border-slate-200 bg-white p-3 shadow-pop">
@@ -290,6 +335,26 @@ export function Composer({
             }
           }}
         />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            void uploadAttachments(Array.from(e.target.files ?? []))
+            e.target.value = ""
+          }}
+        />
+        <Button
+          variant="secondary"
+          className="h-11 px-3"
+          disabled={busy || uploading}
+          title="上传图片"
+          onClick={() => fileInputRef.current?.click()}
+        >
+          {uploading ? "…" : "＋"}
+        </Button>
         {disabled && onStop ? (
           <Button variant="secondary" className="h-11" onClick={onStop}>
             停止

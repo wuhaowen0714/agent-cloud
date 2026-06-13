@@ -13,6 +13,9 @@ function describe(call: ToolCall): { summary: string; details: string | null } {
     return { summary: String(a.path ?? ""), details: content || null }
   }
   if (call.name === "read_file") return { summary: String(a.path ?? ""), details: null }
+  if (call.name === "generate_image" || call.name === "edit_image") {
+    return { summary: String(a.prompt ?? ""), details: null }
+  }
   const keys = Object.keys(a)
   return { summary: keys.length ? JSON.stringify(a) : "", details: keys.length ? JSON.stringify(a, null, 2) : null }
 }
@@ -79,9 +82,9 @@ export function ToolCallCard({
   const [open, setOpen] = useState(false)
   const { summary, details } = describe(call)
   const error = result?.is_error ?? false
-  // generate_image 成功:从结果文本解析落盘路径,卡片内直接渲染图(不随折叠,常显)。
+  // generate_image / edit_image 成功:从结果文本解析落盘路径,卡片内直接渲染图(常显,不随折叠)。
   const imagePath =
-    call.name === "generate_image" && result && !error
+    (call.name === "generate_image" || call.name === "edit_image") && result && !error
       ? (result.content.match(IMG_PATH_RE)?.[1] ?? null)
       : null
   // 失败结果默认展开(错误通常要立刻看);成功保持折叠。仅在 error 由 false→true 时触发一次,

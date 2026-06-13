@@ -110,3 +110,25 @@ class SandboxToolExecutor:
                     continue
                 raise RuntimeError(f"sandbox write_binary failed: {exc.code().name}") from exc
         raise RuntimeError("sandbox write_binary failed: retries exhausted")
+
+    async def read_binary(self, path: str) -> bytes:
+        """从工作区读二进制(worker 原生工具如 edit_image 读输入图),返回字节;失败抛 RuntimeError。
+        走独立的 ReadBinary RPC:bytes 不经 JSON/base64,与 write_binary 对称。"""
+        if self._stub is None:
+            raise RuntimeError("sandbox channel unavailable")
+        req = sandbox_pb2.ReadBinaryRequest(path=path, work_subdir=self._work_subdir)
+        for attempt in range(self._max_attempts):
+            try:
+                resp = await self._stub.ReadBinary(
+                    req, metadata=self._md, timeout=self._exec_timeout
+                )
+                if resp.is_error:
+                    raise RuntimeError(resp.error or "read_binary failed")
+                return resp.content
+            except grpc.aio.AioRpcError as exc:
+                # 冷启动期 UNAVAILABLE 重试(同 write_binary);其它错误收敛成简短消息。
+                if exc.code() == grpc.StatusCode.UNAVAILABLE and attempt < self._max_attempts - 1:
+                    await asyncio.sleep(self._retry_backoff)
+                    continue
+                raise RuntimeError(f"sandbox read_binary failed: {exc.code().name}") from exc
+        raise RuntimeError("sandbox read_binary failed: retries exhausted")
