@@ -20,8 +20,13 @@ async def _user_agent(session) -> tuple[uuid.UUID, uuid.UUID]:
 async def test_scheduled_task_row_roundtrip(session):
     uid, aid = await _user_agent(session)
     t = ScheduledTask(
-        user_id=uid, agent_config_id=aid, name="每日新闻", prompt="总结今天的新闻",
-        schedule_kind="cron", schedule_expr="0 9 * * *", schedule_tz="Asia/Shanghai",
+        user_id=uid,
+        agent_config_id=aid,
+        name="每日新闻",
+        prompt="总结今天的新闻",
+        schedule_kind="cron",
+        schedule_expr="0 9 * * *",
+        schedule_tz="Asia/Shanghai",
         next_run_at=datetime.now(UTC) + timedelta(hours=1),
     )
     session.add(t)

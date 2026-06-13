@@ -11,7 +11,13 @@ class SessionRepository(BaseRepository[Session]):
     model = Session
 
     async def create_for(
-        self, user_id: uuid.UUID, agent_config_id: uuid.UUID, title: str | None
+        self,
+        user_id: uuid.UUID,
+        agent_config_id: uuid.UUID,
+        title: str | None,
+        *,
+        scheduled_task_id: uuid.UUID | None = None,
+        unread: bool = False,
     ) -> Session:
         # 用户级共享工作空间:同一用户的所有 agent/session 共用
         # base_root/<user_id>/workspace/(base 本就按 user_id 划分且跨沙箱重建稳定)。
@@ -22,10 +28,20 @@ class SessionRepository(BaseRepository[Session]):
             agent_config_id=agent_config_id,
             title=title,
             work_subdir="workspace",
+            scheduled_task_id=scheduled_task_id,
+            unread=unread,
         )
         self.session.add(s)
         await self.session.flush()
         return s
+
+    async def set_unread(self, session_id: uuid.UUID, value: bool) -> None:
+        await self.session.execute(
+            update(Session).where(Session.id == session_id).values(unread=value)
+        )
+
+    async def mark_read(self, session_id: uuid.UUID) -> None:
+        await self.set_unread(session_id, False)
 
     async def list_by_user(self, user_id: uuid.UUID) -> list[Session]:
         # 稳定排序:回合/改名都会 UPDATE 行导致堆序漂移;前端「最近一条 = 列表末尾」依赖此序

@@ -49,10 +49,14 @@ def test_next_run_after_once_is_none():
 def test_next_run_after_interval_preserves_phase_and_skips_missed():
     prev = NOW
     # 只过了一点 → 推进一个周期
-    n1 = schedule.next_run_after("interval", "600", "UTC", prev=prev, now=NOW + timedelta(seconds=10))
+    n1 = schedule.next_run_after(
+        "interval", "600", "UTC", prev=prev, now=NOW + timedelta(seconds=10)
+    )
     assert n1 == prev + timedelta(seconds=600)
     # 错过 3 个周期(停机)→ 直接跳到第 4 个相位点,不补积压
-    n2 = schedule.next_run_after("interval", "600", "UTC", prev=prev, now=NOW + timedelta(seconds=1850))
+    n2 = schedule.next_run_after(
+        "interval", "600", "UTC", prev=prev, now=NOW + timedelta(seconds=1850)
+    )
     assert n2 == prev + timedelta(seconds=4 * 600)
 
 
