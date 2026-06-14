@@ -115,6 +115,9 @@ export function ChatView() {
     // 成功收尾才刷历史:出错/取消时用户消息已乐观显示在 live、助手部分未落库,此时刷 messages 只会把
     // 已落库的【同一条用户消息】拉回来,与 live.userText 重复渲染成两条提问(仍由 live 负责显示该回合)。
     if (!errored) await qc.invalidateQueries({ queryKey: ["messages", sid] })
+    // 本回合 agent 可能调了 notify(后端保证在 turn_done 前落库)→ 立即失效通知查询,
+    // 当前会话里就能马上弹 toast,不必等 15s 轮询或手动刷新。
+    if (!errored) await qc.invalidateQueries({ queryKey: ["notifications"] })
     await qc.invalidateQueries({ queryKey: ["sessions"] }) // 刷 last_context_tokens(/status 用),出错也刷
     if (!errored && useStore.getState().sessionId === sid) clearLive()
   }

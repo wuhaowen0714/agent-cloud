@@ -57,3 +57,30 @@ describe("ChatView 停止/出错不重复渲染用户提问", () => {
     expect(screen.getAllByText("你好")).toHaveLength(1)
   })
 })
+
+describe("ChatView 回合成功收尾失效通知查询(notify 立即弹,不等轮询)", () => {
+  it("turn_done 后失效 ['notifications'] —— agent 本回合调了 notify 也无需手动刷新", async () => {
+    vi.spyOn(api, "listMessages").mockResolvedValue([])
+    // streamTurn:发 turn_done(成功),done 立即 resolve(后端已保证 notify 在 turn_done 前落库)。
+    vi.spyOn(stream, "streamTurn").mockImplementation((_sid, _text, onEvent) => {
+      onEvent({
+        type: "turn_done",
+        usage: { input_tokens: 1, output_tokens: 1 },
+        message_ids: ["m1"],
+        stop_reason: "end_turn",
+      })
+      return { done: Promise.resolve(), abort: () => {} }
+    })
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidate = vi.spyOn(qc, "invalidateQueries")
+    const wrap = (ui: ReactNode) => <QueryClientProvider client={qc}>{ui}</QueryClientProvider>
+    render(wrap(<ChatView />))
+
+    await waitFor(() => expect(api.listMessages).toHaveBeenCalled())
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "提醒我喝水" } })
+    fireEvent.click(screen.getByRole("button", { name: "发送" }))
+
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["notifications"] }))
+  })
+})
