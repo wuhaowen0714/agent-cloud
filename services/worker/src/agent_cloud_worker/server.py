@@ -32,6 +32,7 @@ from agent_cloud_worker.image_gen import (
 )
 from agent_cloud_worker.loop import run_turn, run_turn_stream
 from agent_cloud_worker.memory_extract import MemoryParseError, reconcile_memory
+from agent_cloud_worker.notify import NotifyingExecutor, notify_enabled
 from agent_cloud_worker.provider import (
     CompletionBudgetExceeded,
     ContextWindowExceeded,
@@ -144,6 +145,8 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
             executor,
             enabled=schedule_task_enabled(enabled_tools) and not request.is_scheduled_run,
         )
+        # notify 不按 is_scheduled_run 关闭——定时任务到点提醒正是主用例。
+        executor = NotifyingExecutor(executor, enabled=notify_enabled(enabled_tools))
         if self._web_search_available():
             searcher = make_sophnet_searcher(
                 endpoint=self._web_search_endpoint,
