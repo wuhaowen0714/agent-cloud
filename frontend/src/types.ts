@@ -39,3 +39,10 @@ export type CompactResult = "compacted" | "nothing" | "busy" | "error"
 export interface FileEntry { name: string; path: string; is_dir: boolean; size: number; mtime: number }
 export interface Skill { id: string; user_id: string; name: string; description: string; source: string; version: string }
 export interface ContextDocument { id: string; scope: string; type: string; owner_id: string; content: string }
+export interface Notification {
+  id: string
+  title: string
+  body: string
+  origin_session_id: string | null
+  created_at: string
+}

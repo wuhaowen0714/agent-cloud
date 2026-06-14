@@ -4,6 +4,7 @@ import type {
   FileEntry,
   MemoryBlock,
   Message,
+  Notification,
   PlatformModels,
   ProviderCredential,
   ScheduledTask,
@@ -212,4 +213,7 @@ export const api = {
   deleteScheduledTask: (id: string) => http<void>(`/scheduled-tasks/${id}`, { method: "DELETE" }),
   runScheduledTask: (id: string) =>
     http<ScheduledTask>(`/scheduled-tasks/${id}/run-now`, { method: "POST" }),
+  listNotifications: () => http<Notification[]>("/notifications"),
+  markNotificationsDelivered: (ids: string[]) =>
+    http<void>("/notifications/mark-delivered", { method: "POST", body: JSON.stringify({ ids }) }),
 }
