@@ -31,6 +31,7 @@ class DockerProvisioner:
         nano_cpus: int = 1_000_000_000,
         pids_limit: int = 256,
         allow_net: bool = True,
+        timezone: str = "Asia/Shanghai",
         client=None,
     ) -> None:
         if not allow_net:
@@ -50,6 +51,7 @@ class DockerProvisioner:
         self._mem_limit = mem_limit
         self._nano_cpus = nano_cpus
         self._pids_limit = pids_limit
+        self._timezone = timezone
         # 懒连:None 时首次 spawn 才 docker.from_env(),daemon 不可达不致 backend 启动即崩。
         self._client = client
 
@@ -103,7 +105,7 @@ class DockerProvisioner:
             image=self._image,
             detach=True,
             name=name,
-            environment={"AGENT_CLOUD_SANDBOX_TOKEN": token},
+            environment={"AGENT_CLOUD_SANDBOX_TOKEN": token, "TZ": self._timezone},
             volumes={host_ws: {"bind": "/workspace", "mode": "rw"}},
             labels={"managed-by": _LABEL, "user_id": str(user_id)},
             mem_limit=self._mem_limit,
