@@ -82,6 +82,13 @@ class Settings(BaseSettings):
             return self.default_model
         return self.platform_models[0] if self.platform_models else "DeepSeek-V4-Pro"
 
+    # ── 定时任务(spec 2026-06-13-scheduled-tasks)──
+    scheduler_enabled: bool = True  # 进程内轮询器开关(多副本可全开,SKIP LOCKED 防重复触发)
+    scheduler_poll_interval_seconds: int = 30  # 轮询周期(子分钟精度无必要)
+    scheduler_batch_size: int = 10  # 单轮最多取多少到期任务
+    scheduler_run_lease_seconds: int = 900  # running_since 租约:超时即视崩溃残留可重取
+    scheduler_max_concurrent_runs: int = 4  # 单轮并发执行回合上限
+
     def compaction_threshold_for(self, model: str) -> int:
         """该模型的压缩阈值,三级解析:显式覆盖 → 窗口 × ratio → 全局默认。"""
         if model in self.compaction_token_thresholds:

@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query"
-import { Folder, SquareTerminal, Sparkles, Wrench } from "lucide-react"
+import { CalendarClock, Folder, SquareTerminal, Sparkles, Wrench } from "lucide-react"
 import { useRef, useState } from "react"
 import { api } from "../api/client"
 import { useStore } from "../store"
+import { ScheduledTasksMenu } from "./toggles/ScheduledTasksMenu"
 import { SkillsMenu } from "./toggles/SkillsMenu"
 import { ToolsMenu } from "./toggles/ToolsMenu"
 import { TogglePopover } from "./toggles/TogglePopover"
@@ -25,9 +26,10 @@ export function TopBar() {
   const toggleFileDrawer = useStore((s) => s.toggleFileDrawer)
   const toggleTerminal = useStore((s) => s.toggleTerminal)
   // 工具/技能弹层:一次只开一个;无选中 agent 时按钮禁用(开关是 per-agent 的)
-  const [open, setOpen] = useState<"tools" | "skills" | null>(null)
+  const [open, setOpen] = useState<"tools" | "skills" | "tasks" | null>(null)
   const toolsBtn = useRef<HTMLButtonElement>(null)
   const skillsBtn = useRef<HTMLButtonElement>(null)
+  const tasksBtn = useRef<HTMLButtonElement>(null)
 
   const { data: agents = [] } = useQuery({
     queryKey: ["agents", userId],
@@ -76,6 +78,17 @@ export function TopBar() {
         <span className="hidden sm:inline">技能</span>
       </button>
       <button
+        ref={tasksBtn}
+        type="button"
+        title="定时任务"
+        aria-label="定时任务"
+        onClick={() => setOpen(open === "tasks" ? null : "tasks")}
+        className={CHIP_BTN}
+      >
+        <CalendarClock size={14} className="text-slate-400" />
+        <span className="hidden sm:inline">定时</span>
+      </button>
+      <button
         type="button"
         title="终端"
         aria-label="终端"
@@ -104,6 +117,16 @@ export function TopBar() {
       {open === "skills" && agent && (
         <TogglePopover anchorRef={skillsBtn} title="技能" onClose={() => setOpen(null)}>
           <SkillsMenu agentId={agent.id} />
+        </TogglePopover>
+      )}
+      {open === "tasks" && (
+        <TogglePopover
+          anchorRef={tasksBtn}
+          title="定时任务"
+          width="w-96"
+          onClose={() => setOpen(null)}
+        >
+          <ScheduledTasksMenu />
         </TogglePopover>
       )}
     </header>

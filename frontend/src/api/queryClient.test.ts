@@ -6,6 +6,7 @@ import { pollSessionTitle } from "./queryClient"
 const sess = (title: string | null): Session => ({
   id: "s1", user_id: "u1", agent_config_id: "a1", model: "m", credential_id: null, title,
   work_subdir: "workspace", last_active_at: "2026-06-12T12:00:00Z", last_context_tokens: null,
+  scheduled_task_id: null, unread: false,
 })
 
 // 只在精确 key ["sessions","u1"] 下返回数据;读错 key → undefined。这样若实现把读取

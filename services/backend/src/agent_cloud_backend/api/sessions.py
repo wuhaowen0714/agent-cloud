@@ -207,3 +207,15 @@ async def fork_session(
     new.memory_through_seq = min(new.memory_through_seq, max_copied)
     await session.commit()
     return ForkResult(new_session_id=new.id, user_text=user_text)
+
+
+@router.post("/{session_id}/mark-read", status_code=status.HTTP_204_NO_CONTENT)
+async def mark_session_read(
+    session_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    """清未读角标(GET 取消息不应有副作用 → 单独端点)。前端打开定时任务产物会话时调。"""
+    await owned_session(session_id, user.id, session)  # 404
+    await SessionRepository(session).mark_read(session_id)
+    await session.commit()

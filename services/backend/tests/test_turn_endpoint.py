@@ -82,7 +82,8 @@ def fake_worker(monkeypatch):
             stop_reason="end_turn",
         )
 
-    from agent_cloud_backend.api import turn as turn_module
+    # 端点改薄后,worker 调用与消息转换移到 turn.headless;打桩目标随之指向 headless。
+    from agent_cloud_backend.turn import headless as turn_module
 
     monkeypatch.setattr(turn_module, "run_turn_via_worker", _fake)
     return captured
@@ -138,7 +139,8 @@ async def test_midturn_generic_error_releases_lock(client_noraise, fake_worker, 
     client = client_noraise
     sid = await _make_session(client)
 
-    from agent_cloud_backend.api import turn as turn_module
+    # 端点改薄后,worker 调用与消息转换移到 turn.headless;打桩目标随之指向 headless。
+    from agent_cloud_backend.turn import headless as turn_module
 
     def _boom(_message):
         raise RuntimeError("boom while converting message")
@@ -187,7 +189,8 @@ async def test_midturn_aborted_tx_releases_lock(client_noraise, fake_worker, mon
 async def test_concurrent_same_session_turns_one_200_one_409(client, monkeypatch):
     """Two overlapping turns on the same session: the lock serializes them,
     so exactly one gets 200 and the other 409."""
-    from agent_cloud_backend.api import turn as turn_module
+    # 端点改薄后,worker 调用与消息转换移到 turn.headless;打桩目标随之指向 headless。
+    from agent_cloud_backend.turn import headless as turn_module
 
     async def _slow_worker(worker_endpoint, request):
         await asyncio.sleep(0.2)
@@ -210,7 +213,8 @@ async def test_concurrent_same_session_turns_one_200_one_409(client, monkeypatch
 
 async def test_worker_unavailable_exhausts_to_503_releases_lock(client, monkeypatch):
     """瞬时 worker 失败重试耗尽 -> 503(可重试),且锁释放,后续回合成功。"""
-    from agent_cloud_backend.api import turn as turn_module
+    # 端点改薄后,worker 调用与消息转换移到 turn.headless;打桩目标随之指向 headless。
+    from agent_cloud_backend.turn import headless as turn_module
     from agent_cloud_backend.turn import retry as retry_mod
 
     monkeypatch.setattr(retry_mod.RetryPolicy, "backoff_seconds", lambda self, i: 0.0)
@@ -237,7 +241,8 @@ async def test_worker_unavailable_exhausts_to_503_releases_lock(client, monkeypa
 
 async def test_worker_fatal_code_returns_502_releases_lock(client, monkeypatch):
     """非可恢复 gRPC code(fatal,如 INVALID_ARGUMENT)不重试 -> 502,锁释放。"""
-    from agent_cloud_backend.api import turn as turn_module
+    # 端点改薄后,worker 调用与消息转换移到 turn.headless;打桩目标随之指向 headless。
+    from agent_cloud_backend.turn import headless as turn_module
 
     async def _failing_worker(worker_endpoint, request):
         raise grpc.aio.AioRpcError(
@@ -269,7 +274,8 @@ def _install_fake_worker(monkeypatch):
             stop_reason="end_turn",
         )
 
-    from agent_cloud_backend.api import turn as turn_module
+    # 端点改薄后,worker 调用与消息转换移到 turn.headless;打桩目标随之指向 headless。
+    from agent_cloud_backend.turn import headless as turn_module
 
     monkeypatch.setattr(turn_module, "run_turn_via_worker", _fake)
 
@@ -280,7 +286,8 @@ def _install_fake_worker(monkeypatch):
 async def test_turn_overflow_auto_retries_then_200(client, engine, monkeypatch):
     # 超窗一次 → force_compact 有进展 → 自动重试成功 → 200(用户无感)。
     _patch_global_sessionmaker(monkeypatch, engine)
-    from agent_cloud_backend.api import turn as turn_module
+    # 端点改薄后,worker 调用与消息转换移到 turn.headless;打桩目标随之指向 headless。
+    from agent_cloud_backend.turn import headless as turn_module
 
     calls = {"n": 0}
 
@@ -315,7 +322,8 @@ async def test_turn_overflow_auto_retries_then_200(client, engine, monkeypatch):
 async def test_turn_transient_auto_retries_then_200(client, engine, monkeypatch):
     # 瞬时 UNAVAILABLE 一次 → 退避后自动重试成功 → 200。
     _patch_global_sessionmaker(monkeypatch, engine)
-    from agent_cloud_backend.api import turn as turn_module
+    # 端点改薄后,worker 调用与消息转换移到 turn.headless;打桩目标随之指向 headless。
+    from agent_cloud_backend.turn import headless as turn_module
     from agent_cloud_backend.turn import retry as retry_mod
 
     monkeypatch.setattr(retry_mod.RetryPolicy, "backoff_seconds", lambda self, i: 0.0)
@@ -344,7 +352,8 @@ async def test_turn_transient_auto_retries_then_200(client, engine, monkeypatch)
 async def test_turn_transient_exhausted_returns_503(client, engine, monkeypatch):
     # 瞬时错误一直失败 → 退避重试耗尽 → 503(可重试)。
     _patch_global_sessionmaker(monkeypatch, engine)
-    from agent_cloud_backend.api import turn as turn_module
+    # 端点改薄后,worker 调用与消息转换移到 turn.headless;打桩目标随之指向 headless。
+    from agent_cloud_backend.turn import headless as turn_module
     from agent_cloud_backend.turn import retry as retry_mod
 
     monkeypatch.setattr(retry_mod.RetryPolicy, "backoff_seconds", lambda self, i: 0.0)
@@ -365,7 +374,8 @@ async def test_turn_transient_exhausted_returns_503(client, engine, monkeypatch)
 async def test_turn_resource_exhausted_no_progress_returns_413(client, engine, monkeypatch):
     # RESOURCE_EXHAUSTED 但无历史可折叠(仅当前 user 消息)→ force-compact 无进展 → 413 不可重试。
     _patch_global_sessionmaker(monkeypatch, engine)
-    from agent_cloud_backend.api import turn as turn_module
+    # 端点改薄后,worker 调用与消息转换移到 turn.headless;打桩目标随之指向 headless。
+    from agent_cloud_backend.turn import headless as turn_module
 
     async def _exhausted(worker_endpoint, request):
         raise grpc.aio.AioRpcError(
@@ -403,7 +413,8 @@ async def test_turn_post_compaction_when_over_threshold(client, engine, monkeypa
     _patch_global_sessionmaker(monkeypatch, engine)
     monkeypatch.setenv("AGENT_CLOUD_COMPACTION_TOKEN_THRESHOLD", "10")
     monkeypatch.setenv("AGENT_CLOUD_COMPACTION_KEEP_RECENT", "2")
-    from agent_cloud_backend.api import turn as turn_module
+    # 端点改薄后,worker 调用与消息转换移到 turn.headless;打桩目标随之指向 headless。
+    from agent_cloud_backend.turn import headless as turn_module
 
     async def _fake(worker_endpoint, request):
         # user + 3 新消息 = 4 条;keep_recent=2 → 折叠前 2

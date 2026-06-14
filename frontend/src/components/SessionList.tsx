@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { CalendarClock } from "lucide-react"
 import { Fragment, useState } from "react"
 import { api } from "../api/client"
 import { useStore } from "../store"
@@ -87,12 +88,29 @@ export function SessionList() {
             ) : (
               <>
                 <button
-                  className={`min-w-0 flex-1 truncate px-2.5 py-2 text-left text-sm ${
+                  className={`flex min-w-0 flex-1 items-center gap-1.5 px-2.5 py-2 text-left text-sm ${
                     s.id === sessionId ? "font-medium text-brand-800" : "text-slate-600"
                   }`}
-                  onClick={() => setSession(s.id)}
+                  onClick={() => {
+                    setSession(s.id)
+                    // 打开定时任务产出的未读会话即清角标(GET 取消息无副作用,单独端点)。
+                    if (s.unread) void api.markSessionRead(s.id).then(invalidate)
+                  }}
                 >
-                  {label(s)}
+                  {s.scheduled_task_id && (
+                    <CalendarClock
+                      size={13}
+                      aria-label="定时任务产物"
+                      className="shrink-0 text-slate-400"
+                    />
+                  )}
+                  <span className="min-w-0 flex-1 truncate">{label(s)}</span>
+                  {s.unread && (
+                    <span
+                      aria-label="未读"
+                      className="h-2 w-2 shrink-0 rounded-full bg-brand-500"
+                    />
+                  )}
                 </button>
                 <RowMenu
                   ariaLabel={`${label(s)} 更多操作`}

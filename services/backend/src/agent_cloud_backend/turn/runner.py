@@ -17,8 +17,8 @@ from agent_cloud_backend.turn import worker_client
 from agent_cloud_backend.turn.compaction import force_compact, maybe_compact_after_turn
 from agent_cloud_backend.turn.heartbeat import session_heartbeat
 from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub
-from agent_cloud_backend.turn.memory_extract import apply_remember_calls
 from agent_cloud_backend.turn.messages import common_to_content
+from agent_cloud_backend.turn.post_persist import run_tool_side_effects
 from agent_cloud_backend.turn.retry import RetryAction, RetryPolicy, classify
 from agent_cloud_backend.turn.sse import error_sse, turn_event_to_sse
 from agent_cloud_backend.turn.title import spawn_title_generation
@@ -61,11 +61,8 @@ async def _persist(
         # 记录本回合上下文占用(供 /status 显示);与消息同事务落库。
         await SessionRepository(db).set_context_tokens(session_id, context_tokens)
         await db.commit()
-    # agent 主动记忆:独立事务、best-effort(记忆写冲突重试绝不拖垮上面的消息持久化)。
-    try:
-        await apply_remember_calls(session_id, new_messages)
-    except Exception:
-        logger.exception("apply_remember_calls failed for session %s", session_id)
+    # agent 主动工具副作用(remember + schedule_task):独立事务、best-effort,绝不拖垮上面的持久化。
+    await run_tool_side_effects(session_id, new_messages)
     return ids
 
 

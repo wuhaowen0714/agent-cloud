@@ -28,6 +28,7 @@ async def build_run_turn_request(
     enabled_skills: list[Skill] | None = None,
     work_subdir: str | None = None,
     sandbox_token: str = "",
+    is_scheduled_run: bool = False,
 ) -> worker_pb2.RunTurnRequest:
     agent = await AgentConfigRepository(db).get(session.agent_config_id)
     doc_repo = ContextDocumentRepository(db)
@@ -86,4 +87,5 @@ async def build_run_turn_request(
         work_subdir=work_subdir if work_subdir is not None else session.work_subdir,
         history_summary=session.summary,
         sandbox_token=sandbox_token,
+        is_scheduled_run=is_scheduled_run,
     )
