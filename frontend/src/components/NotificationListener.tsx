@@ -111,7 +111,7 @@ export function NotificationListener() {
               onClick={() => openOrigin(n)}
             >
               <div className="truncate text-sm font-medium text-slate-800">{n.title}</div>
-              <div className="mt-0.5 text-xs text-slate-500">{n.body}</div>
+              <div className="mt-0.5 line-clamp-3 text-xs text-slate-500">{n.body}</div>
             </button>
             <button
               type="button"
