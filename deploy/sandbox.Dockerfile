@@ -41,7 +41,8 @@ RUN git config --system safe.directory '*' \
 # 依赖路由:让 pip/npm 等把包装进 /workspace 卷(跨容器重建保留)。详见 spec §8.1。
 # 镜像源走国内(清华 pip / npmmirror):部署目标机境外网络受限,默认 PyPI/npm registry
 # 拉不动——构建期装 grpcio 等会卡,运行期 agent pip/npm install 同理。与 app.Dockerfile 一致。
-# PIP_DEFAULT_TIMEOUT/RETRIES:容忍 mirror 偶发 ReadTimeout(默认 15s 扛不住慢响应)。
+# PIP_DEFAULT_TIMEOUT/RETRIES + npm_config_fetch_*:容忍 mirror 偶发超时(pip 默认 15s、
+# npm 默认只重试 2 次,都扛不住 cdn.npmmirror.com tarball 的慢响应/超时)。
 ENV HOME=/workspace/.home \
     PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
     PIP_DEFAULT_TIMEOUT=120 \
@@ -52,6 +53,9 @@ ENV HOME=/workspace/.home \
     PIP_CACHE_DIR=/workspace/.home/.cache/pip \
     NPM_CONFIG_PREFIX=/workspace/.npm-global \
     npm_config_cache=/workspace/.home/.npm \
+    npm_config_fetch_retries=10 \
+    npm_config_fetch_retry_maxtimeout=120000 \
+    npm_config_fetch_timeout=600000 \
     NODE_PATH=/usr/local/lib/node_modules:/workspace/.npm-global/lib/node_modules \
     XDG_DATA_HOME=/workspace/.home/.local/share \
     XDG_CACHE_HOME=/workspace/.home/.cache \
@@ -63,9 +67,16 @@ ENV HOME=/workspace/.home \
 # 文档 skill 的库依赖:docx-js/pptxgenjs 装进镜像系统(--prefix /usr/local,避开 /workspace
 # 运行时挂载被盖;NODE_PATH 已含该路径 → require('docx') 直接可解析),不让每个用户首跑现装。
 # markitdown[pptx]/pandas 走 pip 进系统(--no-user)。--cache /tmp 避免 npm 写 /workspace。
-RUN npm install -g --prefix /usr/local --cache /tmp/.npm docx pptxgenjs \
-    && rm -rf /tmp/.npm \
-    && pip install --no-cache-dir --no-user "markitdown[pptx]" pandas
+# npm 外层重试 5 次:cdn.npmmirror.com tarball 偶发超时(实测部署时不同 tarball 轮流超时),
+# /tmp/.npm 缓存跨重试保留 → 失败的重拉、已成功的复用,配合 ENV 里 fetch_retries=10 兜住。
+RUN ok=0; \
+    for a in 1 2 3 4 5; do \
+      if npm install -g --prefix /usr/local --cache /tmp/.npm docx pptxgenjs; then ok=1; break; fi; \
+      echo "npm install 第 $a 次超时(npmmirror CDN 抖动),保留缓存重试…"; sleep 5; \
+    done; \
+    [ "$ok" = 1 ] || { echo "npm install 5 次仍失败"; exit 1; }; \
+    rm -rf /tmp/.npm; \
+    pip install --no-cache-dir --no-user "markitdown[pptx]" pandas
 
 # 沙箱服务 + 其依赖(common)。从仓库根构建:docker build -f deploy/sandbox.Dockerfile .
 WORKDIR /app
