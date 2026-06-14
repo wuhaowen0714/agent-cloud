@@ -4,7 +4,7 @@ from agent_cloud_backend.models.agent_config import AgentConfig
 from agent_cloud_backend.models.user import User
 from agent_cloud_backend.repositories.notification import NotificationRepository
 from agent_cloud_backend.repositories.session import SessionRepository
-from agent_cloud_backend.turn.notify_apply import apply_notify_calls
+from agent_cloud_backend.turn.notify_apply import BODY_MAX, TITLE_MAX, apply_notify_calls
 from agent_cloud_common import Message as CMessage
 from agent_cloud_common import Role, ToolCall, ToolResult
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -56,3 +56,14 @@ async def test_enforces_enabled_tools(engine, monkeypatch):
     maker = async_sessionmaker(engine, expire_on_commit=False)
     _, sid = await _seed(maker, enabled_tools=["bash"])
     assert await apply_notify_calls(sid, _calls(GOOD)) == 0
+
+
+async def test_truncates_overlong_title_body(engine, monkeypatch):
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    uid, sid = await _seed(maker)
+    over = {"title": "T" * (TITLE_MAX + 300), "body": "B" * (BODY_MAX + 3000)}
+    assert await apply_notify_calls(sid, _calls(over)) == 1
+    async with maker() as s:
+        rows = await NotificationRepository(s).list_undelivered(uid)
+        assert len(rows[0].title) == TITLE_MAX
+        assert len(rows[0].body) == BODY_MAX

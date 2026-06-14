@@ -10,6 +10,10 @@ from agent_cloud_backend.repositories.agent_config import AgentConfigRepository
 
 logger = logging.getLogger(__name__)
 
+# 防 LLM 生成超长正文撑爆存储/响应(OS 通知本就截断)。title/body 入库前各自封顶。
+TITLE_MAX = 200
+BODY_MAX = 2000
+
 
 def _accepted_notify_calls(new_messages) -> list:
     """worker【已接受】(tool_result 非错误)、按 call_id 去重的 notify 调用。"""
@@ -55,8 +59,8 @@ async def apply_notify_calls(session_id: uuid.UUID, new_messages) -> int:
             db.add(
                 Notification(
                     user_id=s.user_id,
-                    title=title.strip(),
-                    body=body.strip(),
+                    title=title.strip()[:TITLE_MAX],
+                    body=body.strip()[:BODY_MAX],
                     origin_session_id=session_id,
                 )
             )
