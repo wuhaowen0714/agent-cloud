@@ -108,3 +108,29 @@ def test_scheduled_tasks_schema(migration_pg_url: str):
     assert "sessions.scheduled_task_id" in cols
     assert "sessions.unread" in cols
     assert "ix_scheduled_tasks_due" in idx
+
+
+def test_notifications_schema(migration_pg_url: str):
+    sync_url = migration_pg_url.replace("+asyncpg", "")
+    os.environ["AGENT_CLOUD_DATABASE_URL"] = migration_pg_url
+    command.upgrade(Config("alembic.ini"), "head")
+
+    engine = create_engine(sync_url)
+    with engine.connect() as conn:
+        tables = {
+            r[0]
+            for r in conn.execute(
+                text("SELECT tablename FROM pg_tables WHERE schemaname='public'")
+            )
+        }
+        idx = {
+            r[0]
+            for r in conn.execute(
+                text(
+                    "SELECT indexname FROM pg_indexes WHERE schemaname='public' "
+                    "AND tablename='notifications'"
+                )
+            )
+        }
+    assert "notifications" in tables
+    assert "ix_notifications_undelivered" in idx

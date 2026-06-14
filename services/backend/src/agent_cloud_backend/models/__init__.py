@@ -3,6 +3,7 @@ from agent_cloud_backend.models.base import Base
 from agent_cloud_backend.models.context_document import ContextDocument
 from agent_cloud_backend.models.memory_entry import MemoryEntry
 from agent_cloud_backend.models.message import Message
+from agent_cloud_backend.models.notification import Notification
 from agent_cloud_backend.models.provider_credential import ProviderCredential
 from agent_cloud_backend.models.refresh_token import RefreshToken
 from agent_cloud_backend.models.sandbox_registry import SandboxRegistry
@@ -18,6 +19,7 @@ __all__ = [
     "AgentConfig",
     "Session",
     "Message",
+    "Notification",
     "ProviderCredential",
     "RefreshToken",
     "ContextDocument",

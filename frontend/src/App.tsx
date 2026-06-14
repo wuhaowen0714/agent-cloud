@@ -4,6 +4,7 @@ import { api } from "./api/client"
 import { AuthGate } from "./components/AuthGate"
 import { ChatView } from "./components/ChatView"
 import { FileDrawer } from "./components/files/FileDrawer"
+import { NotificationListener } from "./components/NotificationListener"
 import { SettingsDrawer } from "./components/settings/SettingsDrawer"
 import { Sidebar } from "./components/Sidebar"
 import { TerminalWindow } from "./components/terminal/TerminalWindow"
@@ -60,6 +61,7 @@ export default function App() {
       </main>
       <FileDrawer />
       <SettingsDrawer />
+      <NotificationListener />
       {terminalMounted && <TerminalWindow />}
     </div>
   )
