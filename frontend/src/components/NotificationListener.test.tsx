@@ -73,4 +73,15 @@ describe("NotificationListener", () => {
     expect(await screen.findByText("喝药提醒")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "开启" })).toBeNull()
   })
+
+  it("mark-delivered 失败:toast 仍展示,不抛未处理 rejection", async () => {
+    vi.stubGlobal("Notification", undefined)
+    vi.spyOn(api, "listNotifications").mockResolvedValue([notif()])
+    const mark = vi
+      .spyOn(api, "markNotificationsDelivered")
+      .mockRejectedValue(new Error("network"))
+    render(wrap(<NotificationListener />))
+    expect(await screen.findByText("喝药提醒")).toBeInTheDocument()
+    await waitFor(() => expect(mark).toHaveBeenCalledWith(["n1"]))
+  })
 })

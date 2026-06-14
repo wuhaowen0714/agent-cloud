@@ -48,6 +48,10 @@ export function NotificationListener() {
     void api
       .markNotificationsDelivered(fresh.map((n) => n.id))
       .then(() => qc.invalidateQueries({ queryKey: ["notifications", userId] }))
+      .catch(() => {
+        // mark-delivered 失败:用户已看到 toast/OS 通知,这些 id 留在 seen 不在本会话重弹;
+        // 服务端仍为未送达,刷新页面(seen 重置)会重试标记。best-effort,吞掉 rejection。
+      })
   }, [pending, userId, qc])
 
   const dismiss = (id: string) => setToasts((t) => t.filter((x) => x.id !== id))
