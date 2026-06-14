@@ -24,6 +24,7 @@ def build_provisioner(settings: Settings, docker_client=None) -> SandboxProvisio
             nano_cpus=settings.sandbox_nano_cpus,
             pids_limit=settings.sandbox_pids_limit,
             allow_net=settings.sandbox_allow_net,
+            timezone=settings.sandbox_timezone,
             client=docker_client,
         )
     return InProcessProvisioner(base_root=Path(settings.sandbox_base_root))

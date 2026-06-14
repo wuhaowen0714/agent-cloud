@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     sandbox_allow_net: bool = True
     sandbox_idle_ttl_seconds: int = 1800
     sandbox_reap_interval_seconds: int = 120
+    # 沙箱容器系统时区(注入 TZ env;镜像已含 tzdata)。默认北京,与 worker 注入的"今天日期"
+    # (timezone_offset_hours 默认 +8)对齐,避免 agent 在沙箱里 `date` 读到 UTC 误判当前时刻。
+    sandbox_timezone: str = "Asia/Shanghai"
 
     # 文件管理:单文件上传上限(字节)。超出 → 413。
     file_upload_max_bytes: int = 100 * 1024 * 1024

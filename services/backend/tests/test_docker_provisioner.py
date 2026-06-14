@@ -112,6 +112,9 @@ async def test_spawn_publish_mode_mounts_workspace_and_returns_localhost_endpoin
     assert kw["labels"]["managed-by"] == "agent-cloud"
     assert kw["labels"]["user_id"] == str(uid)
     assert kw["ports"] == {"50051/tcp": None}
+    # 沙箱系统时间用北京(date 与 worker 注入的"今天日期"一致;tzdata 已在镜像内)
+    assert kw["environment"]["TZ"] == "Asia/Shanghai"
+    assert kw["environment"]["AGENT_CLOUD_SANDBOX_TOKEN"]  # token 仍注入
     assert kw["memswap_limit"] == kw["mem_limit"]  # 禁 swap(防内存上限被翻倍)
     assert "/tmp" in kw["tmpfs"]  # /tmp 走 tmpfs
     assert kw["name"] == f"acsbx-{sandbox_id}"
