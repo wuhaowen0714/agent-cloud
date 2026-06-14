@@ -32,20 +32,22 @@ def _parse_interval_seconds(expr: str) -> int:
     raise ScheduleError(f"interval 必须是正整数秒或如 30m/2h/1d:{expr!r}")
 
 
-def _parse_once_utc(expr: str) -> datetime:
+def _parse_once_utc(expr: str, tz: str) -> datetime:
     try:
         dt = datetime.fromisoformat(expr.strip())
     except ValueError as e:
         raise ScheduleError(f"once 时间必须是 ISO8601:{expr!r}") from e
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
+        # 朴素时间按 schedule_tz 解释(agent/UI 给的是「本地时间 + schedule_tz」),绝不当 UTC:
+        # 否则北京 16:00 被存成 16:00 UTC = 北京次日 0 点,定时晚 8 小时不触发(线上 P0 根因)。
+        dt = dt.replace(tzinfo=_tz(tz))
     return dt.astimezone(UTC)
 
 
 def validate_and_normalize(kind: str, expr: str, tz: str) -> str:
     """校验并归一化 schedule_expr;非法抛 ScheduleError。返回入库用的规范化 expr。"""
     if kind == "once":
-        return _parse_once_utc(expr).isoformat()
+        return _parse_once_utc(expr, tz).isoformat()
     if kind == "interval":
         secs = _parse_interval_seconds(expr)
         if secs < MIN_INTERVAL_SECONDS:
@@ -62,7 +64,7 @@ def validate_and_normalize(kind: str, expr: str, tz: str) -> str:
 def first_run_at(kind: str, expr: str, tz: str, now: datetime) -> datetime | None:
     """创建/恢复时算首次 next_run(UTC)。once 过去也返回原时刻(由调用方决定是否立即跑)。"""
     if kind == "once":
-        return _parse_once_utc(expr)
+        return _parse_once_utc(expr, tz)
     if kind == "interval":
         return now + timedelta(seconds=int(expr))
     if kind == "cron":

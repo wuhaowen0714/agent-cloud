@@ -12,6 +12,15 @@ def test_validate_once_normalizes_to_utc():
     assert out == "2026-06-14T01:00:00+00:00"  # +08 → UTC
 
 
+def test_once_naive_iso_uses_schedule_tz():
+    # 回归(线上 P0):朴素 ISO(无偏移)按 schedule_tz 解释,而非 UTC。北京 16:00 = UTC 08:00。
+    # agent 给的恰是「本地时间 + schedule_tz」;之前当 UTC → 定时晚 8 小时,用户感知"没触发"。
+    out = schedule.validate_and_normalize("once", "2026-06-14T16:00:00", "Asia/Shanghai")
+    assert out == "2026-06-14T08:00:00+00:00"
+    nxt = schedule.first_run_at("once", "2026-06-14T16:00:00", "Asia/Shanghai", NOW)
+    assert nxt == datetime(2026, 6, 14, 8, 0, tzinfo=UTC)
+
+
 def test_validate_interval_friendly_and_floor():
     assert schedule.validate_and_normalize("interval", "30m", "UTC") == "1800"
     assert schedule.validate_and_normalize("interval", "120", "UTC") == "120"
