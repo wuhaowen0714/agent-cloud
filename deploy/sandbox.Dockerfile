@@ -42,7 +42,9 @@ RUN git config --system safe.directory '*' \
 # 镜像源走国内(清华 pip / npmmirror):部署目标机境外网络受限,默认 PyPI/npm registry
 # 拉不动——构建期装 grpcio 等会卡,运行期 agent pip/npm install 同理。与 app.Dockerfile 一致。
 # PIP_DEFAULT_TIMEOUT/RETRIES + npm_config_fetch_*:容忍 mirror 偶发超时(pip 默认 15s、
-# npm 默认只重试 2 次,都扛不住 cdn.npmmirror.com tarball 的慢响应/超时)。
+# npm 默认只重试 2 次,都扛不住 cdn.npmmirror.com tarball 的慢响应/超时)。npmmirror 是
+# 「连接卡死」型抖动,所以 fetch_timeout 要【短】(60s 快速失败)+ 多重试(retries=10 +
+# RUN 外层 5 次)punch through;别设大——600000 会让每次卡死干等 10 分钟(踩过的坑)。
 ENV HOME=/workspace/.home \
     PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
     PIP_DEFAULT_TIMEOUT=120 \
@@ -55,7 +57,7 @@ ENV HOME=/workspace/.home \
     npm_config_cache=/workspace/.home/.npm \
     npm_config_fetch_retries=10 \
     npm_config_fetch_retry_maxtimeout=120000 \
-    npm_config_fetch_timeout=600000 \
+    npm_config_fetch_timeout=60000 \
     NODE_PATH=/usr/local/lib/node_modules:/workspace/.npm-global/lib/node_modules \
     XDG_DATA_HOME=/workspace/.home/.local/share \
     XDG_CACHE_HOME=/workspace/.home/.cache \
