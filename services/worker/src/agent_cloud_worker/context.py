@@ -58,6 +58,30 @@ def _render_skills(skills: list[SkillRef]) -> list[str]:
             f"<location>{_escape_xml(s.location)}</location></skill>"
         )
     lines.append("</available_skills>")
+    # 适配本沙箱:skill 的指令多按别的环境写,这里纠两处最常踩的偏差——
+    # ① 随附脚本/资源在 skill 目录(.skills/<name>/)下,而 bash 的 CWD 是工作区根,SKILL.md
+    #    里的相对路径(scripts/x.py)必须加前缀,否则每次先失败再 find(实测)。
+    # ② 文档工具链已预装在镜像里,SKILL.md 常叫人 npm/pip install,照做会白装一遍(docx 那份
+    #    要现下 22 包 ~2min;require 走 NODE_PATH 本就命中预装的那份)。
+    lines.append(
+        "Adapting a skill to THIS sandbox (its instructions were written for a different "
+        "environment — apply two corrections):"
+    )
+    lines.append(
+        "- A skill's bundled files live under its own directory (the folder of its "
+        "location, e.g. `.skills/<name>/`). Your shell starts in the working directory, "
+        "NOT inside that folder, so when a SKILL.md cites a bundled file by relative path "
+        "(e.g. `scripts/office/pack.py`), run or read it with the full prefix "
+        "`.skills/<name>/scripts/office/pack.py`. Documents you create stay in the working "
+        "directory."
+    )
+    lines.append(
+        "- The document toolchain is already installed here — do NOT `npm install` or `pip "
+        "install` these even if a SKILL.md says to (you would only re-download a second copy "
+        "and waste minutes); use them directly: Node `docx` and `pptxgenjs` (via "
+        "`require(...)`), Python `docx`/`pptx`/`openpyxl`/`pandas`/`markitdown`/`pdfplumber` "
+        "(via `import`), and CLI `soffice`/`libreoffice`, `pandoc`, `pdftoppm`, `gcc`."
+    )
     return ["\n".join(lines)]
 
 
