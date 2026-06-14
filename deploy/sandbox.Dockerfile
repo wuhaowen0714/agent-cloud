@@ -8,9 +8,21 @@ FROM python:3.13-slim
 # deb.debian.org 会卡死;且部分机房(如 st-e)封了【出站 80 端口】,http 镜像同样连不上 ——
 # 故 sed 把 `http://deb.debian.org` 整段换成 `https://mirrors.aliyun.com`(443 通)。trixie 用
 # deb822 的 debian.sources;基础镜像 python-slim 自带 ca-certificates,https apt 可直接用。
+#
+# 文档类 skill(docx/xlsx/pptx)的系统依赖一并装在此稳定层(改应用代码不失效缓存):
+#   nodejs/npm —— docx-js / pptxgenjs(从零造 docx/pptx);libreoffice-{writer,calc,impress} ——
+#   xlsx 公式重算 / pptx 缩略图 / 转 PDF;pandoc —— docx 文本抽取;poppler-utils(pdftoppm)——
+#   PDF 转图;fonts-liberation + noto-cjk —— LibreOffice 渲染中英文字体;gcc —— 防御性:skill 的
+#   office/soffice.py 在 AF_UNIX 被封时会现编 LD_PRELOAD shim(当前 profile 不触发,但 seccomp/
+#   网络加固 roadmap 一旦封 AF_UNIX,缺 gcc 会让所有 LibreOffice 操作静默崩在编译处)。
+#   注:本层显著增大镜像(LibreOffice ~数百 MB),为「照搬 Anthropic 文档 skill」的代价。
 RUN sed -i 's|http://deb.debian.org|https://mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources \
     && apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl wget git jq vim \
+        nodejs npm \
+        libreoffice-writer libreoffice-calc libreoffice-impress \
+        pandoc poppler-utils gcc \
+        fonts-liberation fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
 # 预设系统级 vim 配置:debian vim 的 /etc/vim/vimrc 会自动 source vimrc.local。
@@ -40,12 +52,20 @@ ENV HOME=/workspace/.home \
     PIP_CACHE_DIR=/workspace/.home/.cache/pip \
     NPM_CONFIG_PREFIX=/workspace/.npm-global \
     npm_config_cache=/workspace/.home/.npm \
+    NODE_PATH=/usr/local/lib/node_modules:/workspace/.npm-global/lib/node_modules \
     XDG_DATA_HOME=/workspace/.home/.local/share \
     XDG_CACHE_HOME=/workspace/.home/.cache \
     PATH=/workspace/.home/.local/bin:/workspace/.npm-global/bin:/usr/local/bin:/usr/bin:/bin \
     AGENT_CLOUD_SANDBOX_BASE=/workspace \
     AGENT_CLOUD_SANDBOX_PORT=50051 \
     PYTHONUNBUFFERED=1
+
+# 文档 skill 的库依赖:docx-js/pptxgenjs 装进镜像系统(--prefix /usr/local,避开 /workspace
+# 运行时挂载被盖;NODE_PATH 已含该路径 → require('docx') 直接可解析),不让每个用户首跑现装。
+# markitdown[pptx]/pandas 走 pip 进系统(--no-user)。--cache /tmp 避免 npm 写 /workspace。
+RUN npm install -g --prefix /usr/local --cache /tmp/.npm docx pptxgenjs \
+    && rm -rf /tmp/.npm \
+    && pip install --no-cache-dir --no-user "markitdown[pptx]" pandas
 
 # 沙箱服务 + 其依赖(common)。从仓库根构建:docker build -f deploy/sandbox.Dockerfile .
 WORKDIR /app

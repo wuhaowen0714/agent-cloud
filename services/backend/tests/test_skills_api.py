@@ -3,6 +3,17 @@ import os
 import uuid
 import zipfile
 
+from agent_cloud_backend.skills.deps import get_skill_registry_root
+
+
+def _builtins() -> set[str]:
+    """注册表里全部内置技能名(有 SKILL.md 的目录)。随 skill_registry/ 自动跟踪——
+    新增内置技能不必再逐条改断言。"""
+    root = get_skill_registry_root()
+    names = {p.name for p in root.iterdir() if p.is_dir() and (p / "SKILL.md").is_file()}
+    assert names, "skill_registry 没有任何内置技能(打包/路径回归?)——防 registry 空集时断言空洞通过"
+    return names
+
 
 async def _auth(client):
     reg = await client.post(
@@ -29,7 +40,7 @@ async def test_install_from_registry_conflicts_with_preinstalled(client):
     r = await client.post("/skills/install", json={"name": "skill-creator"})
     assert r.status_code == 409
     r = await client.get("/skills")
-    assert r.status_code == 200 and [s["name"] for s in r.json()] == ["skill-creator"]
+    assert r.status_code == 200 and {s["name"] for s in r.json()} == _builtins()
 
 
 async def test_install_unknown_registry_skill_404(client):
@@ -82,8 +93,8 @@ async def test_delete_skill(client, monkeypatch):
         )
     ).json()["id"]
     assert (await client.delete(f"/skills/{sid}")).status_code == 204
-    # zippy 已删不再出现;内置 skill-creator 被本次列表的 ensure 补装
-    assert [s["name"] for s in (await client.get("/skills")).json()] == ["skill-creator"]
+    # zippy 已删不再出现;内置技能被本次列表的 ensure 补装
+    assert {s["name"] for s in (await client.get("/skills")).json()} == _builtins()
     assert (await client.delete(f"/skills/{sid}")).status_code == 404
 
 
@@ -207,15 +218,15 @@ async def test_list_skills_auto_installs_builtins(client):
     await _auth(client)
     r = await client.get("/skills")
     assert r.status_code == 200
-    assert [s["name"] for s in r.json()] == ["skill-creator"]
-    assert r.json()[0]["source"] == "registry"
+    assert {s["name"] for s in r.json()} == _builtins()
+    assert all(s["source"] == "registry" for s in r.json())
 
 
 async def test_list_skills_ensure_is_idempotent(client):
     await _auth(client)
     await client.get("/skills")
     r = await client.get("/skills")
-    assert [s["name"] for s in r.json()] == ["skill-creator"]  # 不重复安装
+    assert {s["name"] for s in r.json()} == _builtins()  # 不重复安装
 
 
 async def test_install_after_auto_ensure_conflicts(client):
@@ -228,11 +239,13 @@ async def test_install_after_auto_ensure_conflicts(client):
 async def test_deleted_builtin_comes_back_on_next_list(client):
     # 内置技能没有"真删除":前端不暴露删除入口,后端就算删了,下次列表 ensure 即恢复(新 id)
     await _auth(client)
-    sid = (await client.get("/skills")).json()[0]["id"]
-    assert (await client.delete(f"/skills/{sid}")).status_code == 204
+    before = (await client.get("/skills")).json()
+    target = before[0]  # 删掉其中一个内置技能
+    assert (await client.delete(f"/skills/{target['id']}")).status_code == 204
     relisted = (await client.get("/skills")).json()
-    assert [s["name"] for s in relisted] == ["skill-creator"]
-    assert relisted[0]["id"] != sid
+    assert {s["name"] for s in relisted} == _builtins()  # 全部由 ensure 补回
+    # 被删的那个换了新 id 重新装回
+    assert next(s["id"] for s in relisted if s["name"] == target["name"]) != target["id"]
 
 
 # ---- 内置技能默认启用(注册种子 main / 新建 agent)----
@@ -244,7 +257,7 @@ async def test_register_enables_builtins_on_main_agent(client):
     main = next(a for a in agents if a["name"] == "main")
     r = await client.get(f"/agent-configs/{main['id']}/skills")
     assert r.status_code == 200
-    assert [s["name"] for s in r.json()] == ["skill-creator"]
+    assert {s["name"] for s in r.json()} == _builtins()
 
 
 async def test_new_agent_gets_builtins_enabled(client):
@@ -255,7 +268,7 @@ async def test_new_agent_gets_builtins_enabled(client):
     assert r.status_code == 201, r.text
     agent_id = r.json()["id"]
     enabled = (await client.get(f"/agent-configs/{agent_id}/skills")).json()
-    assert [s["name"] for s in enabled] == ["skill-creator"]
+    assert {s["name"] for s in enabled} == _builtins()
 
 
 async def test_concurrent_skill_lists_all_succeed(client):
@@ -266,13 +279,14 @@ async def test_concurrent_skill_lists_all_succeed(client):
     await _auth(client)
     rs = await asyncio.gather(*[client.get("/skills") for _ in range(8)])
     assert [r.status_code for r in rs] == [200] * 8
-    assert all([s["name"] for s in r.json()] == ["skill-creator"] for r in rs)
+    assert all({s["name"] for s in r.json()} == _builtins() for r in rs)
 
 
 async def test_builtin_can_be_reinstalled_after_delete(client):
     # POST /skills/install 的 201 路径仍有效(端点保留;前端已不再调用)
     await _auth(client)
-    sid = (await client.get("/skills")).json()[0]["id"]
-    assert (await client.delete(f"/skills/{sid}")).status_code == 204
+    skills = (await client.get("/skills")).json()
+    sc_id = next(s["id"] for s in skills if s["name"] == "skill-creator")
+    assert (await client.delete(f"/skills/{sc_id}")).status_code == 204
     r = await client.post("/skills/install", json={"name": "skill-creator"})
     assert r.status_code == 201
