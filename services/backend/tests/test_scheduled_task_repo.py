@@ -14,7 +14,7 @@ async def _seed(session) -> tuple[uuid.UUID, uuid.UUID]:
     u = User(email=f"{uuid.uuid4()}@e.com", password_hash="x")
     session.add(u)
     await session.flush()
-    a = AgentConfig(user_id=u.id, name="a", model="m", provider="p")
+    a = AgentConfig(user_id=u.id, name="a")
     session.add(a)
     await session.flush()
     return u.id, a.id
@@ -125,7 +125,7 @@ async def test_set_result(session):
 async def test_session_create_for_scheduled_fields(session):
     uid, aid = await _seed(session)
     repo = SessionRepository(session)
-    s = await repo.create_for(uid, aid, "title", scheduled_task_id=None, unread=True)
+    s = await repo.create_for(uid, aid, "title", model="m", scheduled_task_id=None, unread=True)
     await session.commit()
     assert s.unread is True
     await repo.mark_read(s.id)

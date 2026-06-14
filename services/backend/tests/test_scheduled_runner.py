@@ -17,12 +17,12 @@ async def _seed(maker, *, with_origin=False) -> dict:
         u = User(email=f"{uuid.uuid4()}@e.com", password_hash="x")
         s.add(u)
         await s.flush()
-        a = AgentConfig(user_id=u.id, name="a", model="m", provider="p")
+        a = AgentConfig(user_id=u.id, name="a")
         s.add(a)
         await s.flush()
         origin = None
         if with_origin:
-            o = await SessionRepository(s).create_for(u.id, a.id, "chat")
+            o = await SessionRepository(s).create_for(u.id, a.id, "chat", model="m")
             origin = o.id
         t = ScheduledTask(
             user_id=u.id,

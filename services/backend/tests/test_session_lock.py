@@ -29,10 +29,10 @@ async def _session(session):
     user = await UserRepository(session).create(User(email="l@example.com"))
     await session.flush()
     agent = await AgentConfigRepository(session).create(
-        AgentConfig(user_id=user.id, name="a", model="m", provider="p")
+        AgentConfig(user_id=user.id, name="a")
     )
     await session.flush()
-    return await SessionRepository(session).create_for(user.id, agent.id, None)
+    return await SessionRepository(session).create_for(user.id, agent.id, None, model="m")
 
 
 async def test_acquire_then_reject_then_release(session):

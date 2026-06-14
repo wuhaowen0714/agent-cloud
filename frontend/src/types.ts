@@ -1,13 +1,13 @@
 export interface User { id: string; email: string }
 export interface AgentConfig {
-  id: string; user_id: string; name: string; model: string; provider: string
-  thinking_level: string | null; enabled_tools: string[]; permissions: Record<string, unknown>
-  key_ref: string | null
+  // 模型/provider/凭据已下放到 session 级;agent 只剩工具/人设/记忆。
+  id: string; user_id: string; name: string
+  enabled_tools: string[]; permissions: Record<string, unknown>
 }
-export interface ProviderCredential { id: string; name: string; base_url: string; masked: string; created_at: string }
+export interface ProviderCredential { id: string; name: string; base_url: string; masked: string; models: string[]; created_at: string }
 export interface MemoryBlock { scope: string; owner_id: string; content: string; version: number }
-export interface UserModel { id: string; model: string; created_at: string }
-export interface Session { id: string; user_id: string; agent_config_id: string; title: string | null; work_subdir: string; last_active_at: string; last_context_tokens: number | null; scheduled_task_id: string | null; unread: boolean }
+export interface PlatformModels { models: string[]; default: string }
+export interface Session { id: string; user_id: string; agent_config_id: string; model: string; credential_id: string | null; title: string | null; work_subdir: string; last_active_at: string; last_context_tokens: number | null; scheduled_task_id: string | null; unread: boolean }
 export interface ScheduledTask {
   id: string; user_id: string; agent_config_id: string; name: string; prompt: string
   schedule_kind: "once" | "interval" | "cron"; schedule_expr: string; schedule_tz: string

@@ -27,7 +27,7 @@ async def _seed(maker, *, enabled_tools=None, scheduled=False):
         s.add(u)
         await s.flush()
         a = AgentConfig(
-            user_id=u.id, name="a", model="m", provider="p", enabled_tools=enabled_tools or []
+            user_id=u.id, name="a", enabled_tools=enabled_tools or []
         )
         s.add(a)
         await s.flush()
@@ -45,7 +45,7 @@ async def _seed(maker, *, enabled_tools=None, scheduled=False):
             s.add(t)
             await s.flush()
             task_id = t.id
-        sess = await SessionRepository(s).create_for(u.id, a.id, "c", scheduled_task_id=task_id)
+        sess = await SessionRepository(s).create_for(u.id, a.id, "c", model="m", scheduled_task_id=task_id)
         await s.commit()
         return u.id, sess.id
 

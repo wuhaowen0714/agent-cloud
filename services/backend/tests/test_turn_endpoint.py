@@ -95,10 +95,11 @@ async def _make_session(client):
         "/auth/register", json={"email": f"{uuid.uuid4()}@e.com", "password": "password123"}
     )
     client.headers["Authorization"] = f"Bearer {reg.json()['access_token']}"
-    aid = (
-        await client.post("/agent-configs", json={"name": "c", "model": "m", "provider": "p"})
+    aid = (await client.post("/agent-configs", json={"name": "c"})).json()["id"]
+    # model="m"(不在 model_context_windows 表 → 压缩阈值用全局默认,便于测试触发)
+    sid = (
+        await client.post("/sessions", json={"agent_config_id": aid, "model": "m"})
     ).json()["id"]
-    sid = (await client.post("/sessions", json={"agent_config_id": aid})).json()["id"]
     return sid
 
 

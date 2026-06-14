@@ -1,7 +1,7 @@
 """scheduled tasks
 
 Revision ID: b1c2d3e4f5a6
-Revises: d5e6f7a8b9c0
+Revises: f1a2b3c4d5e6
 Create Date: 2026-06-13
 """
 
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "b1c2d3e4f5a6"
-down_revision = "d5e6f7a8b9c0"
+down_revision = "f1a2b3c4d5e6"
 branch_labels = None
 depends_on = None
 

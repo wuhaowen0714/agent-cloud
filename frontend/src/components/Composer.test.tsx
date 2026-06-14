@@ -8,25 +8,21 @@ import { Composer } from "./Composer"
 const USER = "u1"
 
 const AGENTS = [
+  { id: "a1", name: "Coder", enabled_tools: [], permissions: {} },
+  { id: "a2", name: "Other", enabled_tools: [], permissions: {} },
+]
+
+const SESSIONS = [
   {
-    id: "a1",
-    name: "Coder",
-    model: "gpt-4o",
-    provider: "openai",
-    thinking_level: null,
-    enabled_tools: [],
-    permissions: {},
-    key_ref: null,
-  },
-  {
-    id: "a2",
-    name: "Other",
-    model: "claude-x",
-    provider: "anthropic",
-    thinking_level: null,
-    enabled_tools: [],
-    permissions: {},
-    key_ref: null,
+    id: "s1",
+    user_id: USER,
+    agent_config_id: "a1",
+    model: "gpt-4o", // 模型在 session 级(图一 chip / /model / status 都读它)
+    credential_id: null,
+    title: "T",
+    work_subdir: "workspace",
+    last_active_at: "2026-06-12T12:00:00Z",
+    last_context_tokens: 873,
   },
 ]
 
@@ -36,27 +32,16 @@ function setup(opts?: { disabled?: boolean }) {
   const qc = new QueryClient()
   useStore.setState({ userId: USER, agentId: "a1", sessionId: "s1" })
   qc.setQueryData(["agents", USER], AGENTS)
-  // Composer 的 useQuery(["agents"]) 挂载即后台 refetch:mock 必须回同一数组,
-  // 否则会把预填缓存覆盖空、chip 消失(flaky)。userModels 同理 mock 防真网络。
+  // 挂载即后台 refetch:mock 回同一数组防覆盖空(chip flaky)。模型选单走 platform + credentials。
   vi.spyOn(api, "listAgents").mockResolvedValue(AGENTS as never)
-  vi.spyOn(api, "listModels").mockResolvedValue([])
+  vi.spyOn(api, "listSessions").mockResolvedValue(SESSIONS as never)
+  vi.spyOn(api, "getPlatformModels").mockResolvedValue({
+    models: ["DeepSeek-V4-Pro", "DeepSeek-V4-Flash", "gpt-4o"],
+    default: "DeepSeek-V4-Pro",
+  })
+  vi.spyOn(api, "listCredentials").mockResolvedValue([])
   vi.spyOn(api, "indexFiles").mockResolvedValue(FILE_INDEX)
-  qc.setQueryData(
-    ["sessions", USER],
-    [
-      {
-        id: "s1",
-        user_id: USER,
-        agent_config_id: "a1",
-        title: "T",
-        work_subdir: "workspace",
-        last_active_at: "2026-06-12T12:00:00Z",
-        last_context_tokens: 873,
-        scheduled_task_id: null,
-        unread: false,
-      },
-    ],
-  )
+  qc.setQueryData(["sessions", USER], SESSIONS)
   qc.setQueryData(["messages", "s1"], [{ id: "m1" }, { id: "m2" }, { id: "m3" }])
   const onSend = vi.fn()
   render(
@@ -136,17 +121,17 @@ describe("斜杠面板", () => {
     expect(await screen.findByText("已压缩当前会话上下文")).toBeInTheDocument()
   })
 
-  it("/model → 参数模式列建议 → 选中调 patchAgent", async () => {
-    const spy = vi.spyOn(api, "patchAgent").mockResolvedValue({} as never)
+  it("/model → 参数模式列建议 → 选中调 patchSession(session 级)", async () => {
+    const spy = vi.spyOn(api, "patchSession").mockResolvedValue({} as never)
     setup()
     type("/model")
     fireEvent.keyDown(box(), { key: "Enter" }) // 进参数模式,text → "/model "
     expect(box()).toHaveValue("/model ")
-    expect(await screen.findByRole("option", { name: /DeepSeek-V4-Flash/ })).toBeInTheDocument() // 预设进入建议
+    expect(await screen.findByRole("option", { name: /DeepSeek-V4-Flash/ })).toBeInTheDocument()
     // 用 option 角色定位面板建议项(底部模型 chip 也含 "gpt-4o" 文本,纯文本定位会歧义)
     const opt = await screen.findByRole("option", { name: /gpt-4o/ })
     fireEvent.mouseDown(opt)
-    expect(spy).toHaveBeenCalledWith("a1", { model: "gpt-4o" })
+    expect(spy).toHaveBeenCalledWith("s1", { model: "gpt-4o" })
   })
 
   it("/new Enter → 调 createSession", () => {
@@ -388,21 +373,23 @@ describe("@ 文件引用", () => {
   })
 })
 
-describe("模型 chip", () => {
-  it("显示当前 agent 模型,选单切换调 patchAgent", async () => {
-    const spy = vi.spyOn(api, "patchAgent").mockResolvedValue({} as never)
+describe("模型 chip(session 级 · provider+model 两栏)", () => {
+  it("点 model 栏切换 → 写当前 session(patchSession)", async () => {
+    const spy = vi.spyOn(api, "patchSession").mockResolvedValue({} as never)
     setup()
-    const chip = screen.getByRole("button", { name: /gpt-4o/ })
-    fireEvent.click(chip)
+    fireEvent.click(screen.getByRole("button", { name: "model" }))
     fireEvent.click(await screen.findByRole("option", { name: /DeepSeek-V4-Flash/ }))
-    expect(spy).toHaveBeenCalledWith("a1", { model: "DeepSeek-V4-Flash" })
+    expect(spy).toHaveBeenCalledWith("s1", {
+      model: "DeepSeek-V4-Flash",
+      credential_id: null,
+    })
   })
 
   it("切换失败 → flash 提示(不静默)", async () => {
-    vi.spyOn(api, "patchAgent").mockRejectedValue(new Error("net"))
+    vi.spyOn(api, "patchSession").mockRejectedValue(new Error("net"))
     setup()
-    fireEvent.click(screen.getByRole("button", { name: /gpt-4o/ }))
-    fireEvent.click(await screen.findByRole("option", { name: /GLM-5\.1/ }))
+    fireEvent.click(screen.getByRole("button", { name: "model" }))
+    fireEvent.click(await screen.findByRole("option", { name: /DeepSeek-V4-Flash/ }))
     expect(await screen.findByText("切换模型失败")).toBeInTheDocument()
   })
 })

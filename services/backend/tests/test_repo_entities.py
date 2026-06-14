@@ -16,7 +16,7 @@ async def _make_user(session) -> User:
 
 async def _make_agent(session, user) -> AgentConfig:
     agent = await AgentConfigRepository(session).create(
-        AgentConfig(user_id=user.id, name="a", model="claude-x", provider="anthropic")
+        AgentConfig(user_id=user.id, name="a")
     )
     await session.flush()
     return agent
@@ -34,7 +34,7 @@ async def test_session_default_work_subdir(session):
     user = await _make_user(session)
     agent = await _make_agent(session, user)
     repo = SessionRepository(session)
-    s = await repo.create_for(user_id=user.id, agent_config_id=agent.id, title="t")
+    s = await repo.create_for(user_id=user.id, agent_config_id=agent.id, title="t", model="m")
     await session.commit()
     assert s.work_subdir == "workspace"
     assert s.status == "idle"
@@ -43,7 +43,7 @@ async def test_session_default_work_subdir(session):
 async def test_message_seq_autoincrements(session):
     user = await _make_user(session)
     agent = await _make_agent(session, user)
-    s = await SessionRepository(session).create_for(user.id, agent.id, None)
+    s = await SessionRepository(session).create_for(user.id, agent.id, None, model="m")
     await session.flush()
     repo = MessageRepository(session)
     m0 = await repo.append(
@@ -63,7 +63,7 @@ async def test_message_seq_ordering_three_rows(session):
     returns them in seq order."""
     user = await _make_user(session)
     agent = await _make_agent(session, user)
-    s = await SessionRepository(session).create_for(user.id, agent.id, None)
+    s = await SessionRepository(session).create_for(user.id, agent.id, None, model="m")
     await session.flush()
     repo = MessageRepository(session)
     appended = []

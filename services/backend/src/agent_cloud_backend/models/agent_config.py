@@ -16,12 +16,9 @@ class AgentConfig(Base, TimestampMixin):
         ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
     )
     name: Mapped[str] = mapped_column(nullable=False)
-    model: Mapped[str] = mapped_column(nullable=False)
-    provider: Mapped[str] = mapped_column(nullable=False)
-    thinking_level: Mapped[str | None] = mapped_column(nullable=True)
+    # 模型/provider/凭据/思考档位已下放到 session 级(2026-06-13);agent 只剩工具/人设/记忆。
     enabled_tools: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
     permissions: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
-    key_ref: Mapped[str | None] = mapped_column(nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )

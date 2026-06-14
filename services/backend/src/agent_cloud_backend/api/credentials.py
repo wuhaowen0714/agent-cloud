@@ -10,7 +10,7 @@ from agent_cloud_backend import crypto
 from agent_cloud_backend.api.deps import get_current_user, get_session
 from agent_cloud_backend.api.ownership import owned_credential
 from agent_cloud_backend.config import Settings, get_settings
-from agent_cloud_backend.models.agent_config import AgentConfig
+from agent_cloud_backend.models.session import Session
 from agent_cloud_backend.models.user import User
 from agent_cloud_backend.repositories.provider_credential import ProviderCredentialRepository
 from agent_cloud_backend.schemas.credential import CredentialCreate, CredentialRead
@@ -32,6 +32,7 @@ async def create_credential(
         base_url=body.base_url,
         api_key_encrypted=crypto.encrypt(body.api_key, key),
         masked=crypto.mask(body.api_key),
+        models=body.models,
     )
     await db.commit()
     return row
@@ -52,11 +53,12 @@ async def delete_credential(
     db: AsyncSession = Depends(get_session),
 ):
     row = await owned_credential(cred_id, user.id, db)
-    # 把指向该凭据的 agent.key_ref 置空,避免删除后回合静默回退全局 Key(用户无感)。
+    # 把指向该凭据的 session.credential_id 置空(FK SET NULL 已兜底,显式清更直观),
+    # 删除后这些会话回退平台 sophnet 全局 Key。
     await db.execute(
-        update(AgentConfig)
-        .where(AgentConfig.user_id == user.id, AgentConfig.key_ref == str(cred_id))
-        .values(key_ref=None)
+        update(Session)
+        .where(Session.user_id == user.id, Session.credential_id == cred_id)
+        .values(credential_id=None)
     )
     await db.delete(row)
     await db.commit()

@@ -37,6 +37,7 @@ async def run_scheduled_task(snap: dict, settings: Settings) -> None:
             snap["user_id"],
             snap["agent_config_id"],
             title,
+            model=settings.resolve_default_model(),
             scheduled_task_id=snap["id"],
             unread=True,
         )

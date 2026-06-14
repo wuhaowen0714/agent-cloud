@@ -70,8 +70,17 @@ class Settings(BaseSettings):
     memory_idle_seconds: int = 1800  # 空闲多久算"可提炼"(默认同沙箱 idle TTL)
     memory_max_versions: int = 20  # 每块保留版本数,超出裁剪
 
-    # 注册播种:新用户自动获得的默认 agent(开箱即用;与前端 DEFAULT_MODEL 同值)。
-    default_agent_model: str = "DeepSeek-V4-Pro"
+    # 平台(sophnet)可选模型清单 + 新建 session 的默认模型(session 选 sophnet 时的 model 候选;
+    # BYOK provider 的模型走用户 credential.models)。env 覆盖走 JSON:
+    # AGENT_CLOUD_PLATFORM_MODELS='["DeepSeek-V4-Pro","GLM-5.1"]'。
+    platform_models: list[str] = ["DeepSeek-V4-Pro", "DeepSeek-V4-Flash", "GLM-5.1"]
+    default_model: str = "DeepSeek-V4-Pro"
+
+    def resolve_default_model(self) -> str:
+        """新建 session 的默认模型;default_model 须 ∈ platform_models,否则取首个(空清单兜底)。"""
+        if self.default_model in self.platform_models:
+            return self.default_model
+        return self.platform_models[0] if self.platform_models else "DeepSeek-V4-Pro"
 
     # ── 定时任务(spec 2026-06-13-scheduled-tasks)──
     scheduler_enabled: bool = True  # 进程内轮询器开关(多副本可全开,SKIP LOCKED 防重复触发)

@@ -72,12 +72,12 @@ describe("AgentRail", () => {
     expect(screen.getByRole("img", { name: "Agent Cloud" })).toBeInTheDocument()
   })
 
-  it("hover 头像弹「名字 · 模型」tooltip(portal 到 body),移出消失", async () => {
+  it("hover 头像弹名字 tooltip(portal 到 body),移出消失", async () => {
     render(wrap(<AgentRail onCreated={() => {}} />))
     fireEvent.mouseEnter(await screen.findByRole("button", { name: "main" }))
-    expect(await screen.findByText("main · DeepSeek-V4-Pro")).toBeInTheDocument()
+    expect(await screen.findByText("main")).toBeInTheDocument() // 头像是首字母,tooltip 才是全名
     fireEvent.mouseLeave(screen.getByRole("button", { name: "main" }))
-    expect(screen.queryByText("main · DeepSeek-V4-Pro")).not.toBeInTheDocument()
+    expect(screen.queryByText("main")).not.toBeInTheDocument()
   })
 
   it("+ 新建:默认名直创,成功选中并回调 onCreated", async () => {
@@ -91,11 +91,7 @@ describe("AgentRail", () => {
     await screen.findByRole("button", { name: "Agent 2" }) // 等名单加载,默认名才算得对
     fireEvent.click(screen.getByRole("button", { name: "新建 Agent" }))
     await waitFor(() =>
-      expect(api.createAgent).toHaveBeenCalledWith({
-        name: "Agent 3",
-        model: "DeepSeek-V4-Pro",
-        provider: "openai",
-      }),
+      expect(api.createAgent).toHaveBeenCalledWith({ name: "Agent 3" }),
     )
     await waitFor(() => expect(useStore.getState().agentId).toBe("a9"))
     expect(onCreated).toHaveBeenCalledWith("a9")

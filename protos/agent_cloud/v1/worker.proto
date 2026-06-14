@@ -51,7 +51,7 @@ message Msg {
 message Agent {
   string model = 1;
   string provider = 2;
-  string thinking_level = 3;
+  reserved 3;  // 原 thinking_level(从未接线 LLM 调用),已删
   repeated string enabled_tools = 4;
   string key_ref = 5;
   string api_key = 6;   // 后端按 key_ref 解密填入;worker 用之造 client。仅 BE→Worker,绝不进 sandbox。

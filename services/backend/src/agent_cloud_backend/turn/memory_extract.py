@@ -15,7 +15,7 @@ from agent_cloud_backend.models.session import Session
 from agent_cloud_backend.repositories.agent_config import AgentConfigRepository
 from agent_cloud_backend.repositories.memory_entry import MemoryConflict, MemoryEntryRepository
 from agent_cloud_backend.repositories.message import MessageRepository
-from agent_cloud_backend.turn.credentials import resolve_agent_key
+from agent_cloud_backend.turn.credentials import resolve_session_key
 from agent_cloud_backend.turn.messages import orm_to_common
 from agent_cloud_backend.turn.worker_client import extract_memory_via_worker
 
@@ -52,19 +52,15 @@ async def extract_session_memory(session_id: uuid.UUID, *, settings: Settings, r
         if reason == "idle" and _rounds(msgs) < settings.memory_min_rounds:
             return False  # 轮次闸:只聊一两句就空闲的不值得花一次 LLM
 
-        agent = await AgentConfigRepository(db).get(s.agent_config_id)
-        if agent is None:
-            return False
-        # BYO-Key:用本人凭据(无/不属本人 → ("","") 回退全局)。key 仅经 worker。
-        api_key, base_url = await resolve_agent_key(db, agent.key_ref or "", s.user_id, settings)
+        # BYO-Key:用本人凭据(None/不属本人 → ("","") 回退平台)。key 仅经 worker。
+        api_key, base_url = await resolve_session_key(db, s.credential_id, s.user_id, settings)
         mem_repo = MemoryEntryRepository(db)
         cur_user = await mem_repo.get_current("user", s.user_id)
         cur_agent = await mem_repo.get_current("agent", s.agent_config_id)
         req = worker_pb2.ExtractMemoryRequest(
             agent=worker_pb2.Agent(
-                model=agent.model,
-                provider=agent.provider,
-                key_ref=agent.key_ref or "",
+                model=s.model,
+                provider=("sophnet" if s.credential_id is None else "custom"),
                 api_key=api_key,
                 base_url=base_url,
             ),

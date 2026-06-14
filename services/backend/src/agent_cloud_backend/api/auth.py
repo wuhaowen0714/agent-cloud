@@ -71,15 +71,10 @@ async def register(
         User(email=body.email, password_hash=security.hash_password(body.password))
     )
     # 新用户开箱即用:默认 agent(main)+ 一条默认会话;与 user 同一事务,同生共死。
-    agent = await AgentConfigRepository(db).create(
-        AgentConfig(
-            user_id=user.id,
-            name="main",
-            model=settings.default_agent_model,
-            provider="openai",
-        )
+    agent = await AgentConfigRepository(db).create(AgentConfig(user_id=user.id, name="main"))
+    await SessionRepository(db).create_for(
+        user.id, agent.id, None, model=settings.resolve_default_model()
     )
-    await SessionRepository(db).create_for(user.id, agent.id, None)
     # 内置技能开箱即用:补装 + 对种子 main 默认启用(与 user 同事务,同生共死)
     skill_repo = SkillRepository(db)
     await ensure_builtin_skills(

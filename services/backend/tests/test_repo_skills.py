@@ -17,7 +17,7 @@ async def _user(session) -> uuid.UUID:
 
 
 async def _agent(session, user_id) -> uuid.UUID:
-    a = AgentConfig(user_id=user_id, name="a", model="m", provider="p")
+    a = AgentConfig(user_id=user_id, name="a")
     session.add(a)
     await session.flush()
     return a.id

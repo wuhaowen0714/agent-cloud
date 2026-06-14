@@ -11,12 +11,8 @@ const agent = (over: Partial<AgentConfig> = {}): AgentConfig => ({
   id: "a1",
   user_id: "u1",
   name: "助手",
-  model: "m",
-  provider: "p",
-  thinking_level: null,
   enabled_tools: [],
   permissions: {},
-  key_ref: null,
   ...over,
 })
 const task = (over: Partial<ScheduledTask> = {}): ScheduledTask => ({

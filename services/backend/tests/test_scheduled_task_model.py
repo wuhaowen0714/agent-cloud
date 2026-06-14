@@ -11,7 +11,7 @@ async def _user_agent(session) -> tuple[uuid.UUID, uuid.UUID]:
     u = User(email=f"{uuid.uuid4()}@e.com", password_hash="x")
     session.add(u)
     await session.flush()
-    a = AgentConfig(user_id=u.id, name="a", model="m", provider="p")
+    a = AgentConfig(user_id=u.id, name="a")
     session.add(a)
     await session.flush()
     return u.id, a.id
@@ -40,7 +40,7 @@ async def test_scheduled_task_row_roundtrip(session):
 
 async def test_session_has_scheduled_fields(session):
     uid, aid = await _user_agent(session)
-    s = Session(user_id=uid, agent_config_id=aid, work_subdir="workspace")
+    s = Session(user_id=uid, agent_config_id=aid, model="m", work_subdir="workspace")
     session.add(s)
     await session.commit()
     assert s.unread is False

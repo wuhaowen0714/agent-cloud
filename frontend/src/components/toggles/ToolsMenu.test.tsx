@@ -9,8 +9,7 @@ import type { AgentConfig } from "../../types"
 import { ToolsMenu } from "./ToolsMenu"
 
 const agent = (enabled: string[]): AgentConfig => ({
-  id: "a1", user_id: "u1", name: "main", model: "m", provider: "p",
-  thinking_level: null, enabled_tools: enabled, permissions: {}, key_ref: null,
+  id: "a1", user_id: "u1", name: "main", enabled_tools: enabled, permissions: {},
 })
 
 const wrap = (ui: ReactNode) => (

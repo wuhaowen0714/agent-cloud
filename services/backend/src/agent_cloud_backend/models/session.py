@@ -17,6 +17,12 @@ class Session(Base, TimestampMixin):
     agent_config_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("agent_configs.id", ondelete="RESTRICT"), index=True, nullable=False
     )
+    # 模型选择下放到 session 级:model=用哪个模型;credential_id=用哪个 BYOK provider 凭据
+    # (NULL=平台 sophnet 全局 key)。删凭据时 FK SET NULL → 该会话回退平台。
+    model: Mapped[str] = mapped_column(nullable=False)
+    credential_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("provider_credentials.id", ondelete="SET NULL"), index=True, nullable=True
+    )
     title: Mapped[str | None] = mapped_column(nullable=True)
     status: Mapped[str] = mapped_column(default="idle", nullable=False)  # idle | running
     work_subdir: Mapped[str] = mapped_column(nullable=False)

@@ -13,8 +13,7 @@ from agent_cloud_backend.config import Settings
 from agent_cloud_backend.db import get_sessionmaker
 from agent_cloud_backend.models.message import Message
 from agent_cloud_backend.models.session import Session
-from agent_cloud_backend.repositories.agent_config import AgentConfigRepository
-from agent_cloud_backend.turn.credentials import resolve_agent_key
+from agent_cloud_backend.turn.credentials import resolve_session_key
 from agent_cloud_backend.turn.worker_client import generate_title_via_worker
 
 logger = logging.getLogger(__name__)
@@ -59,14 +58,12 @@ async def generate_session_title(session_id: uuid.UUID, *, settings: Settings) -
             text = (first.content or {}).get("text", "")
             if not text.strip():
                 return False
-            agent = await AgentConfigRepository(db).get(s.agent_config_id)
-            if agent is None:
-                return False
-            # BYO-Key:用本人凭据(无/不属本人 → ("","") 回退全局)。key 仅经 worker。
-            api_key, base_url = await resolve_agent_key(
-                db, agent.key_ref or "", s.user_id, settings
+            # BYO-Key:用本人凭据(None/不属本人 → ("","") 回退平台)。key 仅经 worker。
+            api_key, base_url = await resolve_session_key(
+                db, s.credential_id, s.user_id, settings
             )
-            model, provider = agent.model, agent.provider
+            model = s.model
+            provider = "sophnet" if s.credential_id is None else "custom"
 
         title = await generate_title_via_worker(
             settings.worker_endpoint,

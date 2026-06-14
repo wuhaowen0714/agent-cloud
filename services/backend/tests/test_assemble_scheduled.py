@@ -10,10 +10,10 @@ async def _seed(session) -> Session:
     u = User(email=f"{uuid.uuid4()}@e.com", password_hash="x")
     session.add(u)
     await session.flush()
-    a = AgentConfig(user_id=u.id, name="a", model="m", provider="p")
+    a = AgentConfig(user_id=u.id, name="a")
     session.add(a)
     await session.flush()
-    s = Session(user_id=u.id, agent_config_id=a.id, work_subdir="workspace")
+    s = Session(user_id=u.id, agent_config_id=a.id, model="m", work_subdir="workspace")
     session.add(s)
     await session.flush()
     return s

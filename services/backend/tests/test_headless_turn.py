@@ -36,10 +36,10 @@ async def _seed_session(maker) -> uuid.UUID:
         u = User(email=f"{uuid.uuid4()}@e.com", password_hash="x")
         s.add(u)
         await s.flush()
-        a = AgentConfig(user_id=u.id, name="a", model="m", provider="p")
+        a = AgentConfig(user_id=u.id, name="a")
         s.add(a)
         await s.flush()
-        sess = await SessionRepository(s).create_for(u.id, a.id, "t")
+        sess = await SessionRepository(s).create_for(u.id, a.id, "t", model="m")
         await s.commit()
         return sess.id
 
@@ -81,10 +81,10 @@ async def test_execute_turn_headless_busy_raises(engine, monkeypatch):
         u = User(email=f"{uuid.uuid4()}@e.com", password_hash="x")
         s.add(u)
         await s.flush()
-        a = AgentConfig(user_id=u.id, name="a", model="m", provider="p")
+        a = AgentConfig(user_id=u.id, name="a")
         s.add(a)
         await s.flush()
-        sess = await SessionRepository(s).create_for(u.id, a.id, "t")
+        sess = await SessionRepository(s).create_for(u.id, a.id, "t", model="m")
         await SessionRepository(s).try_acquire(sess.id)  # 先占锁
         await s.commit()
         sid = sess.id
