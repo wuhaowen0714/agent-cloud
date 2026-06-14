@@ -30,6 +30,28 @@ def test_includes_memory_and_skills():
     assert "<available_skills>" in out
 
 
+def test_skill_section_includes_sandbox_adaptation_guidance():
+    # vendored SKILL.md 按别的环境写,这里纠两处偏差:① 随附脚本相对路径要加 .skills/<name>/
+    # 前缀(否则每次先失败再 find);② 文档工具链已预装,别再 npm/pip install(白装一份浪费几分钟)。
+    out = build_system_prompt(
+        documents=[],
+        memory=[],
+        skills=[
+            SkillRef(name="docx", description="make Word docs", location=".skills/docx/SKILL.md")
+        ],
+    )
+    assert ".skills/<name>/" in out  # 随附文件在 skill 目录下、相对路径要加前缀
+    assert "already installed" in out  # 工具链已预装,别重装
+    assert "pptxgenjs" in out and "pdfplumber" in out  # 列出预装库
+
+
+def test_no_skill_adaptation_guidance_when_no_skills():
+    # 无 skill 时不注入该段(早返回),保持 prompt 干净。
+    out = build_system_prompt(documents=[], memory=[], skills=[])
+    assert ".skills/<name>/" not in out
+    assert "already installed" not in out
+
+
 def test_empty_inputs_still_include_base_environment_prompt():
     # 即使无用户文档/记忆/技能,也要注入基础环境提示词(沙箱工作目录 + 相对路径约定),
     # 否则空 system 会让模型幻觉 /workspace 之类不存在的绝对路径。
