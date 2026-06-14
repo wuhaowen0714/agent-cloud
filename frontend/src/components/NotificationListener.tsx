@@ -28,6 +28,11 @@ export function NotificationListener() {
     queryFn: () => api.listNotifications(),
     enabled: !!userId,
     refetchInterval: 15000,
+    // 提醒主用例 = 用户在别处等。必须在标签页【后台】也轮询(否则切回前根本不拉、HTTPS 下 OS
+    // 通知也无从触发),且【切回标签页】立即拉——后者要 per-query 覆盖 main.tsx 的全局
+    // refetchOnWindowFocus:false(那是为聊天历史设的)。否则新通知得手动刷新页面才出现。
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
   })
 
   useEffect(() => {
