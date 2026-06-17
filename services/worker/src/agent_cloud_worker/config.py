@@ -25,6 +25,15 @@ class WorkerSettings(BaseSettings):
     openai_timeout_seconds: float = 45.0
     openai_max_retries: int = 3
 
+    # LLM 路由保活:sophnet 对 idle 客户端冷启,首请求久不吐字(实测间歇性 ~60s,见上)。后台
+    # 每隔 keepwarm_interval_seconds 给平台端点发个 max_tokens=1 的小请求,把 sophnet 上游路由
+    # 一直焐着热的——焐任一模型即焐热整个账号(实测用一个模型后其它也快)。用户 idle 多久回来,
+    # 首条都不再撞冷启。仅焐平台 key(BYOK 会话各自端点不在此列);失败只记日志、不影响 worker。
+    keepwarm_enabled: bool = True
+    keepwarm_interval_seconds: float = 300.0  # 5 分钟;若 5min 内仍变冷,经 env 调密无需重部署
+    keepwarm_model: str = "DeepSeek-V4-Flash"  # 最便宜的平台模型;焐一个=焐全部
+    keepwarm_timeout_seconds: float = 60.0  # 给冷路由(~60s)留足时间完成这次焐热
+
     # 单次请求输出上限。撞上限(finish_reason=length)有兜底:文本截断会落库提示、
     # 工具参数截断会回合内自修复(见 loop/_TRUNCATED_CALL_RESULT),但上限给足更省事。
     request_max_tokens: int = 32768

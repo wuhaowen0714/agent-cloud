@@ -5,6 +5,7 @@ import logging
 
 from agent_cloud_worker.config import get_worker_settings
 from agent_cloud_worker.factory import build_provider_factory
+from agent_cloud_worker.keepwarm import keepwarm_loop
 from agent_cloud_worker.server import create_server
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,12 @@ async def main() -> None:
         image_edit_model=settings.image_edit_model,
     )
     logger.info("agent-cloud worker listening on %s:%s", settings.grpc_host, port)
-    await server.wait_for_termination()
+    # LLM 路由保活心跳(消除 sophnet idle 冷启的首回合卡顿);失败自包含,不影响 server。
+    keepwarm_task = asyncio.create_task(keepwarm_loop(settings))
+    try:
+        await server.wait_for_termination()
+    finally:
+        keepwarm_task.cancel()
 
 
 if __name__ == "__main__":
