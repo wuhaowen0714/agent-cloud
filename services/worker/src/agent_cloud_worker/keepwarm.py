@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from openai import AsyncOpenAI
 
@@ -42,11 +43,23 @@ async def keepwarm_loop(settings: WorkerSettings) -> None:
     interval = settings.keepwarm_interval_seconds
     logger.info("keepwarm started: every %ss, model=%s", interval, settings.keepwarm_model)
     while True:
-        await asyncio.sleep(interval)
+        # ping 在前、sleep 在后:worker 一启动就先焐一次,别干等一个 interval。
         try:
+            t0 = time.monotonic()
             await _ping(client, settings.keepwarm_model)
-            logger.debug("keepwarm ping ok")
+            elapsed = time.monotonic() - t0
+            # 慢 ping = 这次撞了冷路由(上游冷启 ~60s);连续慢 = interval 太松、路由在两次心跳
+            # 之间凉了,该调小 interval。快 ping = 路由一直热着,正常。
+            if elapsed > 10.0:
+                logger.warning(
+                    "keepwarm ping slow: %.1fs (route had gone cold — shorten "
+                    "keepwarm_interval_seconds)",
+                    elapsed,
+                )
+            else:
+                logger.info("keepwarm ping ok: %.1fs", elapsed)
         except asyncio.CancelledError:
             raise  # 关停时正常取消,向上传播
         except Exception as exc:  # noqa: BLE001 — 心跳失败不该影响 worker,记录即可
             logger.warning("keepwarm ping failed: %s", exc)
+        await asyncio.sleep(interval)
