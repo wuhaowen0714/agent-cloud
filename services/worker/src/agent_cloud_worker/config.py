@@ -30,9 +30,9 @@ class WorkerSettings(BaseSettings):
     # 一直焐着热的——焐任一模型即焐热整个账号(实测用一个模型后其它也快)。用户 idle 多久回来,
     # 首条都不再撞冷启。仅焐平台 key(BYOK 会话各自端点不在此列);失败只记日志、不影响 worker。
     keepwarm_enabled: bool = True
-    keepwarm_interval_seconds: float = 300.0  # 5 分钟;若 5min 内仍变冷,经 env 调密无需重部署
+    keepwarm_interval_seconds: float = 60.0  # 实测 sophnet 5min 内就凉(300s 时每个 ping 都撞冷)
     keepwarm_model: str = "DeepSeek-V4-Flash"  # 最便宜的平台模型;焐一个=焐全部
-    keepwarm_timeout_seconds: float = 60.0  # 给冷路由(~60s)留足时间完成这次焐热
+    keepwarm_timeout_seconds: float = 120.0  # 冷 ping ~60s,要 >60s 才跑得完真正焐热(否则卡边界超时)
 
     # 单次请求输出上限。撞上限(finish_reason=length)有兜底:文本截断会落库提示、
     # 工具参数截断会回合内自修复(见 loop/_TRUNCATED_CALL_RESULT),但上限给足更省事。
