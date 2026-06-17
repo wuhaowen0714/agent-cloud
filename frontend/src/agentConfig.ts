@@ -6,9 +6,9 @@ export const BUILTIN_TOOLS: { name: string; desc: string }[] = [
   { name: "remember", desc: "主动记忆(把耐久事实写入长期记忆)" },
   { name: "schedule_task", desc: "定时任务(让 agent 自助排期周期性运行)" },
   { name: "notify", desc: "提醒用户(系统通知 + 网页弹窗)" },
-  { name: "web_search", desc: "联网搜索(需平台配置搜索后端,未配置则不生效)" },
-  { name: "generate_image", desc: "文生图(需平台配置图片后端,未配置则不生效)" },
-  { name: "edit_image", desc: "图片编辑(图生图,需平台配置图片后端)" },
+  { name: "web_search", desc: "联网搜索(获取实时网页信息)" },
+  { name: "generate_image", desc: "文生图(按文字描述生成图片)" },
+  { name: "edit_image", desc: "图片编辑(按文字描述修改图片)" },
 ]
 const ALL = BUILTIN_TOOLS.map((t) => t.name)
 
