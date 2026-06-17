@@ -72,8 +72,9 @@ def _render_skills(skills: list[SkillRef]) -> list[str]:
         "location, e.g. `.skills/<name>/`). Your shell starts in the working directory, "
         "NOT inside that folder, so when a SKILL.md cites a bundled file by relative path "
         "(e.g. `scripts/office/pack.py`), run or read it with the full prefix "
-        "`.skills/<name>/scripts/office/pack.py`. Documents you create stay in the working "
-        "directory."
+        "`.skills/<name>/scripts/office/pack.py`. The documents you generate (and their "
+        "helper scripts / exported images) go into the `documents/` subdirectory (see Working "
+        "directory), not the root."
     )
     lines.append(
         "- The document toolchain is already installed here — do NOT `npm install` or `pip "
@@ -101,6 +102,10 @@ absolute paths and do not assume any specific location such as `/workspace`, `/h
 - Each bash call runs in a fresh shell that starts in the working directory. A `cd` affects only \
 that single command and does not carry over to the next call, so run files directly (e.g. \
 `python3 script.py`) rather than `cd`-ing first.
+- Keep the root tidy: save deliverable documents you generate (slides/.pptx, Word/.docx, PDF, \
+spreadsheets/.xlsx) into a `documents/` subdirectory (create it if missing), together with the \
+helper files you produce to build them (generator scripts, exported slide/page images). \
+Ordinary working files (notes, code, data) may stay wherever is natural.
 
 Installing software and network:
 - To add libraries or tools, install them with `pip install --user` (Python) or `npm \
