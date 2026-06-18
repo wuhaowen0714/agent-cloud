@@ -45,6 +45,9 @@ class WorkerSettings(BaseSettings):
         "GLM-5.1",
     ]
     keepwarm_timeout_seconds: float = 120.0  # 冷 ping ~60s,要 >60s 才跑得完真正焐热(否则卡边界超时)
+    # 某轮有模型 ping 失败(撞 sophnet 慢窗口)后,下一轮改用这个短间隔尽快重焐(而非等满 interval),
+    # 把路由"凉着"的暴露窗口压短;全成功才回正常 interval。只缩短 sophnet 恢复后的重焐延迟,治标。
+    keepwarm_retry_interval_seconds: float = 5.0
 
     # 单次请求输出上限。撞上限(finish_reason=length)有兜底:文本截断会落库提示、
     # 工具参数截断会回合内自修复(见 loop/_TRUNCATED_CALL_RESULT),但上限给足更省事。

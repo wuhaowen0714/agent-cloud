@@ -1,5 +1,7 @@
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from agent_cloud_worker.config import WorkerSettings
 from agent_cloud_worker.keepwarm import _ping, _warm_all, _warm_one, keepwarm_loop
 
@@ -41,21 +43,28 @@ async def test_warm_all_pings_every_model():
     # 本次修复核心:冷启按模型,_warm_all 必须把 keepwarm_models 里**每个**模型都焐到
     client = MagicMock()
     client.chat.completions.create = AsyncMock()
-    await _warm_all(client, ["DeepSeek-V4-Pro", "DeepSeek-V4-Flash", "GLM-5.1"])
+    failed = await _warm_all(client, ["DeepSeek-V4-Pro", "DeepSeek-V4-Flash", "GLM-5.1"])
+    assert failed == 0  # 全成功 → 失败数 0
     assert client.chat.completions.create.await_count == 3
     called = {c.kwargs["model"] for c in client.chat.completions.create.await_args_list}
     assert called == {"DeepSeek-V4-Pro", "DeepSeek-V4-Flash", "GLM-5.1"}
 
 
-async def test_warm_one_swallows_ping_failure():
-    # 单模型 ping 失败不外抛——否则 gather 会带垮同批其它模型、也会拖垮主循环
+async def test_warm_one_returns_true_on_success():
+    client = MagicMock()
+    client.chat.completions.create = AsyncMock()
+    assert await _warm_one(client, "DeepSeek-V4-Pro") is True
+
+
+async def test_warm_one_swallows_ping_failure_and_returns_false():
+    # 单模型 ping 失败不外抛(否则 gather 带垮同批其它模型),且返回 False 供循环判断
     client = MagicMock()
     client.chat.completions.create = AsyncMock(side_effect=RuntimeError("boom"))
-    await _warm_one(client, "DeepSeek-V4-Pro")  # 不抛异常即通过
+    assert await _warm_one(client, "DeepSeek-V4-Pro") is False
 
 
-async def test_warm_all_isolates_one_failing_model():
-    # 一个模型挂掉,其它模型照常被 ping(失败隔离,_warm_all 不整体失败)
+async def test_warm_all_isolates_one_failing_model_and_counts_it():
+    # 一个模型挂掉,其它模型照常被 ping(失败隔离);_warm_all 返回失败数 1
     client = MagicMock()
 
     async def _create(*, model, **_):
@@ -63,8 +72,33 @@ async def test_warm_all_isolates_one_failing_model():
             raise RuntimeError("cold")
 
     client.chat.completions.create = AsyncMock(side_effect=_create)
-    await _warm_all(client, ["DeepSeek-V4-Pro", "DeepSeek-V4-Flash", "GLM-5.1"])
+    failed = await _warm_all(client, ["DeepSeek-V4-Pro", "DeepSeek-V4-Flash", "GLM-5.1"])
+    assert failed == 1
     assert client.chat.completions.create.await_count == 3
+
+
+async def test_loop_fast_retries_after_failed_round(monkeypatch):
+    # 失败轮(_warm_all 返回 >0)后用 retry_interval 尽快重焐;成功轮(返回 0)后用正常 interval
+    from agent_cloud_worker import keepwarm as kw
+
+    sleeps: list[float] = []
+    results = iter([2, 0])  # 第1轮 2 个失败 → retry;第2轮全成功 → interval
+
+    async def fake_warm_all(client, models):
+        return next(results)
+
+    async def fake_sleep(secs):
+        sleeps.append(secs)
+        if len(sleeps) >= 2:
+            raise asyncio.CancelledError  # 跑完两轮就停
+
+    monkeypatch.setattr(kw, "_warm_all", fake_warm_all)
+    monkeypatch.setattr(kw.asyncio, "sleep", fake_sleep)
+    with pytest.raises(asyncio.CancelledError):
+        await keepwarm_loop(
+            _settings(keepwarm_interval_seconds=60.0, keepwarm_retry_interval_seconds=5.0)
+        )
+    assert sleeps == [5.0, 60.0]  # 失败轮→5s retry,成功轮→60s interval
 
 
 def test_keepwarm_models_parses_json_array():
