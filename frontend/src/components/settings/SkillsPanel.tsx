@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "../../api/client"
+import { skillDescription } from "../../skillText"
 import { useStore } from "../../store"
 import { SettingGroup, SettingRow } from "../ui"
 
@@ -27,7 +28,7 @@ export function SkillsPanel() {
           <div className="px-3.5 py-4 text-center text-xs text-slate-400">还没有安装技能</div>
         ) : (
           pool.map((sk) => (
-            <SettingRow key={sk.id} label={sk.name} hint={sk.description}>
+            <SettingRow key={sk.id} label={sk.name} hint={skillDescription(sk)}>
               {sk.source === "registry" ? (
                 <span className="shrink-0 text-xs text-slate-300">内置</span>
               ) : (
