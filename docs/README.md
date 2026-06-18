@@ -24,5 +24,15 @@
 | 06-10 | [ui-redesign-sidebar-settings](superpowers/specs/2026-06-10-ui-redesign-sidebar-settings-design.md) | UI 重设计:Notion 风侧栏 + 设置左导航 + lucide 图标系统 |
 | 06-10 | [model-switcher](superpowers/specs/2026-06-10-model-switcher-design.md) | 模型切换器:composer chip、预设 ∪ 在用 ∪ 自定义(后端持久化) |
 | 06-10 | [agent-lifecycle](superpowers/specs/2026-06-10-agent-lifecycle-design.md) | 生命周期:注册播种默认 agent / 会话、一键新建、行内改名 / 删除 |
+| 06-10 | [file-ref](superpowers/specs/2026-06-10-file-ref-design.md) | composer `@` 文件引用浮层(仿 Codex),选中插入相对路径 |
+| 06-10 | [folder-upload](superpowers/specs/2026-06-10-folder-upload-design.md) | 整文件夹上传,保留目录结构 |
+| 06-11 | [memory-layers](superpowers/specs/2026-06-11-memory-layers-design.md) | 记忆分层:user(跨 agent 共享)/ agent(专属)两块 |
+| 06-11 | [sandbox-isolation](superpowers/specs/2026-06-11-sandbox-isolation-design.md) | 沙箱隔离硬化:每沙箱专属网络 + token,堵跨租户直连 |
+| 06-11 | [terminal](superpowers/specs/2026-06-11-terminal-design.md) | 工作区内置终端(pty 会话) |
+| 06-12 | [sidebar-rail](superpowers/specs/2026-06-12-sidebar-rail-design.md) | 左侧 agent 竖向 rail 导航 |
+| 06-13 | [scheduled-tasks](superpowers/specs/2026-06-13-scheduled-tasks-design.md) | 定时任务:once / interval / cron,产物会话标记未读 |
+| 06-13 | [session-model-selection](superpowers/specs/2026-06-13-session-model-selection-design.md) | 模型 / Provider / 凭据下放到**会话级** |
+
+> 上表为主要里程碑;06-10 之后另有 chat-timestamps / length-handling / preview-render / tool-call-progress / tool-skill-toggles / topbar / message-actions / sandbox-tools / scroll-follow / session-title / migrate-to-st-e-ecs-2 / notify-tool 等规格,完整清单见 [`specs/` 目录](superpowers/specs/)。
 
 > 规格是"批准时的设计";个别细节会在实现与对抗审查中修订(修订一般会回写规格,以规格文末状态为准)。
