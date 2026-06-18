@@ -28,6 +28,14 @@ describe("parseInput", () => {
   it("无参命令 + 空格 → none(不进参数模式)", () => {
     expect(parseInput("/status ")).toEqual({ mode: "none" })
   })
+  it("/skills 带参:进参数模式(选技能)", () => {
+    const p = parseInput("/skills 文档")
+    expect(p.mode).toBe("arg")
+    if (p.mode === "arg") {
+      expect(p.command.name).toBe("skills")
+      expect(p.arg).toBe("文档")
+    }
+  })
   it("普通文本 → none", () => {
     expect(parseInput("hello")).toEqual({ mode: "none" })
   })
@@ -50,5 +58,54 @@ describe("model.suggestions", () => {
     const ctx = { modelSuggestions: () => ["gpt-4o", "gpt-4o-mini", "claude"] } as never
     expect(model.suggestions!(ctx, "gpt")).toEqual(["gpt-4o", "gpt-4o-mini"])
     expect(model.suggestions!(ctx, " cl ")).toEqual(["claude"])
+  })
+})
+
+describe("skills 命令", () => {
+  const skills = COMMANDS.find((c) => c.name === "skills")!
+
+  it("是带参命令(needsArg)", () => {
+    expect(skills.needsArg).toBe(true)
+  })
+
+  it("suggestions:按 arg 子串过滤(不分大小写)", () => {
+    const ctx = { skillSuggestions: () => ["PDF Reader", "docx", "图片生成"] } as never
+    expect(skills.suggestions!(ctx, "pdf")).toEqual(["PDF Reader"])
+    expect(skills.suggestions!(ctx, "图片")).toEqual(["图片生成"])
+    expect(skills.suggestions!(ctx, "")).toEqual(["PDF Reader", "docx", "图片生成"])
+  })
+
+  it("runWithArg:启用成功 → 提示已启用", async () => {
+    const calls: string[] = []
+    const ctx = {
+      enableSkill: async () => "enabled" as const,
+      notify: (m: string) => calls.push(m),
+    } as never
+    await skills.runWithArg!(ctx, "docx")
+    expect(calls[0]).toContain("已启用技能")
+    expect(calls[0]).toContain("docx")
+  })
+
+  it("runWithArg:未找到 → 提示", async () => {
+    const calls: string[] = []
+    const ctx = {
+      enableSkill: async () => "notfound" as const,
+      notify: (m: string) => calls.push(m),
+    } as never
+    await skills.runWithArg!(ctx, "xxx")
+    expect(calls[0]).toContain("没有找到")
+  })
+
+  it("runWithArg:空 arg 不调用 enableSkill", async () => {
+    let called = false
+    const ctx = {
+      enableSkill: async () => {
+        called = true
+        return "enabled" as const
+      },
+      notify: () => {},
+    } as never
+    await skills.runWithArg!(ctx, "  ")
+    expect(called).toBe(false)
   })
 })

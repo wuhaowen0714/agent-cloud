@@ -34,6 +34,9 @@ export interface SlashContext {
   notify: (msg: string) => void // 一行 flash
   showStatus: () => void
   showHelp: () => void
+  skillSuggestions: () => string[] // 技能池名字(供 /skills 选用)
+  // 启用某技能到当前 agent;返回状态供调用方提示。
+  enableSkill: (name: string) => Promise<"enabled" | "already" | "notfound" | "noagent">
 }
 
 export interface SlashCommand {
@@ -84,7 +87,28 @@ export const COMMANDS: SlashCommand[] = [
   { name: "help", title: "帮助", hint: "列出全部命令", run: (c) => c.showHelp() },
   { name: "settings", title: "设置", hint: "打开 Agent 设置", run: (c) => c.openSettings("agent") },
   { name: "memory", title: "记忆", hint: "打开记忆设置", run: (c) => c.openSettings("memory") },
-  { name: "skills", title: "技能", hint: "打开技能设置", run: (c) => c.openSettings("skills") },
+  {
+    name: "skills",
+    title: "技能",
+    hint: "启用某个技能到当前 agent",
+    needsArg: true,
+    suggestions: (c, arg) =>
+      c.skillSuggestions().filter((s) => s.toLowerCase().includes(arg.trim().toLowerCase())),
+    runWithArg: async (c, arg) => {
+      const name = arg.trim()
+      if (!name) return
+      const r = await c.enableSkill(name)
+      c.notify(
+        r === "enabled"
+          ? `已启用技能:${name}`
+          : r === "already"
+            ? `技能已在启用中:${name}`
+            : r === "noagent"
+              ? "请先选择一个 agent"
+              : `没有找到技能:${name}`,
+      )
+    },
+  },
   { name: "keys", title: "Provider Keys", hint: "打开 Key 设置", run: (c) => c.openSettings("keys") },
 ]
 

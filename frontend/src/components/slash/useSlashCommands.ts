@@ -1,4 +1,4 @@
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { api, HttpError } from "../../api/client"
 import { findProvider } from "../../models"
@@ -23,6 +23,11 @@ export function useSlashCommands(ui: {
   const finishCompaction = useStore((s) => s.finishCompaction)
   const openSettings = useStore((s) => s.openSettings)
   const { providers } = useProviderOptions() // /model 建议与图一选单共用 provider 选项源
+  // 技能池:与 SkillsMenu / 设置页共用 ["skills", userId] 缓存,供 /skills 选用。
+  const { data: skillPool = [] } = useQuery({
+    queryKey: ["skills", userId],
+    queryFn: () => api.listSkills(),
+  })
 
   const sessions = (): Session[] => qc.getQueryData<Session[]>(["sessions", userId]) ?? []
 
@@ -70,6 +75,17 @@ export function useSlashCommands(ui: {
         messageCount: msgs.length,
         contextTokens: sess?.last_context_tokens ?? null,
       }
+    },
+    skillSuggestions: () => skillPool.map((s) => s.name),
+    enableSkill: async (name) => {
+      if (!agentId) return "noagent"
+      const sk = skillPool.find((s) => s.name === name)
+      if (!sk) return "notfound"
+      const current = await api.getAgentSkills(agentId)
+      if (current.some((s) => s.id === sk.id)) return "already"
+      await api.setAgentSkills(agentId, [...current.map((s) => s.id), sk.id])
+      await qc.invalidateQueries({ queryKey: ["agentSkills", agentId] })
+      return "enabled"
     },
     openSettings,
     notify: ui.notify,
