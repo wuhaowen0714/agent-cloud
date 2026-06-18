@@ -68,6 +68,16 @@ describe("SkillsMenu", () => {
     render(wrap(<SkillsMenu agentId="a1" />))
     expect(await screen.findByText("技能池为空")).toBeInTheDocument()
   })
+
+  it("内置技能展示中文描述(后端英文 description 不直接示人)", async () => {
+    vi.mocked(api.listSkills).mockResolvedValue([
+      skill({ id: "s1", name: "docx", description: "Use this skill whenever the user wants…" }),
+    ])
+    vi.spyOn(api, "getAgentSkills").mockResolvedValue([])
+    render(wrap(<SkillsMenu agentId="a1" />))
+    expect(await screen.findByText("创建、读取、编辑 Word 文档(.docx)")).toBeInTheDocument()
+    expect(screen.queryByText("Use this skill whenever the user wants…")).toBeNull()
+  })
 })
 
 describe("SkillsMenu 加载 gate(审查 M2)", () => {

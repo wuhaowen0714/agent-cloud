@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "../../api/client"
 import { useStore } from "../../store"
+import { skillDescription } from "../../skillText"
 import type { Skill } from "../../types"
 import { Switch } from "../ui"
 
@@ -57,7 +58,7 @@ export function SkillsMenu({ agentId }: { agentId: string }) {
         <div key={sk.id} className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-slate-50">
           <div className="min-w-0 flex-1">
             <div className="text-xs font-medium text-slate-700">{sk.name}</div>
-            <div className="truncate text-[11px] text-slate-400">{sk.description}</div>
+            <div className="truncate text-[11px] text-slate-400">{skillDescription(sk)}</div>
           </div>
           <Switch checked={ids.has(sk.id)} onChange={() => toggle(sk.id)} label={sk.name} />
         </div>
