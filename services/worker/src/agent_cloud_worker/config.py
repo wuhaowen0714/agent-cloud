@@ -1,5 +1,8 @@
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+import json
+from typing import Annotated
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from agent_cloud_worker.image_gen import (
     DEFAULT_IMAGE_EDIT_MODEL,
@@ -26,12 +29,21 @@ class WorkerSettings(BaseSettings):
     openai_max_retries: int = 3
 
     # LLM 路由保活:sophnet 对 idle 客户端冷启,首请求久不吐字(实测间歇性 ~60s,见上)。后台
-    # 每隔 keepwarm_interval_seconds 给平台端点发个 max_tokens=1 的小请求,把 sophnet 上游路由
-    # 一直焐着热的——焐任一模型即焐热整个账号(实测用一个模型后其它也快)。用户 idle 多久回来,
-    # 首条都不再撞冷启。仅焐平台 key(BYOK 会话各自端点不在此列);失败只记日志、不影响 worker。
+    # 每隔 keepwarm_interval_seconds 给每个平台模型发个 max_tokens=1 的小请求,把 sophnet 上游
+    # 路由一直焐着热的。⚠️ 冷启是**按模型**的:2026-06-18 线上抓到——keepwarm 只焐 Flash 时其
+    # 心跳全程 1-4s(热),但用户切 DeepSeek-V4-Pro 的首条仍冷到卡满 45s 超时再重试(~47s)。所以
+    # 必须焐**全部** platform_models、不能只焐一个。仅平台 key(BYOK 会话各自端点不在此列);单个
+    # 模型 ping 失败只记日志、不影响 worker 主流程与同批其它模型。
     keepwarm_enabled: bool = True
     keepwarm_interval_seconds: float = 60.0  # 实测 sophnet 5min 内就凉(300s 时每个 ping 都撞冷)
-    keepwarm_model: str = "DeepSeek-V4-Flash"  # 最便宜的平台模型;焐一个=焐全部
+    # 焐全部平台模型,须与 backend platform_models 对齐;平台模型变更时改这里或经 env 覆盖。env 覆盖
+    # 接受 JSON 数组 '["A","B"]'、逗号分隔 'A,B' 或单个裸词 'A'(见下方 validator,容错运维直觉、
+    # 不让坏格式 crash 整个 worker)。NoDecode 关掉 pydantic 源层 JSON 解码,改由 validator 自己解析。
+    keepwarm_models: Annotated[list[str], NoDecode] = [
+        "DeepSeek-V4-Pro",
+        "DeepSeek-V4-Flash",
+        "GLM-5.1",
+    ]
     keepwarm_timeout_seconds: float = 120.0  # 冷 ping ~60s,要 >60s 才跑得完真正焐热(否则卡边界超时)
 
     # 单次请求输出上限。撞上限(finish_reason=length)有兜底:文本截断会落库提示、
@@ -73,6 +85,22 @@ class WorkerSettings(BaseSettings):
     image_gen_model: str = DEFAULT_IMAGE_MODEL
     # edit_image 工具(图生图/编辑):同 image_gen 的 key/端点,只换 Edit 模型。
     image_edit_model: str = DEFAULT_IMAGE_EDIT_MODEL
+
+    @field_validator("keepwarm_models", mode="before")
+    @classmethod
+    def _parse_keepwarm_models(cls, v: object) -> object:
+        """env 覆盖容错:接受 JSON 数组、逗号分隔、单个裸词、空串;坏格式不再 crash worker。
+
+        默认值(直接传 list)与 init 传 list 原样放行;只对 env 来的 str 做解析。
+        """
+        if not isinstance(v, str):
+            return v
+        s = v.strip()
+        if not s:
+            return []
+        if s.startswith("["):
+            return json.loads(s)  # JSON 数组;格式真错才抛,属显式误用
+        return [m.strip() for m in s.split(",") if m.strip()]
 
 
 def get_worker_settings() -> WorkerSettings:
