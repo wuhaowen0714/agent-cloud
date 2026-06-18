@@ -72,6 +72,14 @@ def test_base_prompt_states_sandbox_capabilities():
     assert "internet" in out.lower()
 
 
+def test_base_prompt_directs_per_deliverable_subdirectory():
+    # 每个交付文档单独建子文件夹(documents/<任务名>/),成品 + 中间产物都进去,避免多个
+    # 文档的产物在 documents/ 根平铺成一团(用户反馈)。
+    out = build_system_prompt(documents=[], memory=[], skills=[])
+    assert "documents/" in out
+    assert "one folder per deliverable" in out.lower()
+
+
 def test_history_summary_injected_into_system():
     # 压缩后,此前历史折叠成的摘要应拼进 system(spec §6),让模型保留早期上下文。
     out = build_system_prompt(
