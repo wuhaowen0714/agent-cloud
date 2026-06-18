@@ -1,6 +1,6 @@
 # Agent Cloud
 
-> 无状态、多租户的 **Agent Cloud**:用户创建可配置的 AI agent(模型 / Provider / 工具 / 技能 / 记忆),与之多轮对话;每个会话跑在**隔离沙箱**里,拥有持久工作区。后端是唯一访问数据库的服务,LLM 调用集中在 worker(密钥按请求注入,绝不进沙箱 / 前端 / 日志),沙箱按最小信任设计。
+> 无状态、多租户的 **Agent Cloud**:用户创建可配置的 AI agent(工具 / 技能 / 记忆 / 人设),与之多轮对话,**每个会话可独立选择模型与 Provider**;每个会话跑在**隔离沙箱**里,拥有持久工作区。后端是唯一访问数据库的服务,LLM 调用集中在 worker(密钥按请求注入,绝不进沙箱 / 前端 / 日志),沙箱按最小信任设计。
 
 <p>
   <a href="https://github.com/wuhaowen0714/agent-cloud/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/wuhaowen0714/agent-cloud/actions/workflows/ci.yml/badge.svg"></a>
@@ -36,7 +36,7 @@
 
 Agent Cloud 是一个把"可配置 AI agent + 隔离代码执行"做成多租户服务的平台。它适合用来:
 
-- 给每个用户提供若干**自定义 agent**(不同模型、不同人设/指令、不同工具与技能);
+- 给每个用户提供若干**自定义 agent**(不同人设/指令、不同工具与技能),并**按会话独立选择模型 / Provider**;
 - 让 agent 在**隔离沙箱**里真正执行命令、读写文件、编辑代码,工作区跨会话持久;
 - 以**流式**(SSE)方式实时看到 agent 的思考、正文与工具调用;
 - 用户**自带 LLM 密钥**(BYO-Key),密钥加密入库、按请求注入、绝不下发到前端或沙箱。
@@ -46,17 +46,18 @@ Agent Cloud 是一个把"可配置 AI agent + 隔离代码执行"做成多租户
 ## 核心特性
 
 - 🔐 **鉴权与多租户**:邮箱/密码注册登录;access JWT(内存) + httpOnly refresh cookie 静默续期;跨租户访问一律 404(不泄露存在性)。
-- 🤖 **可配置 agent**:每个 agent 自带模型、Provider、思考档位、启用的工具、指令(`AGENTS` 文档)、绑定的凭据与技能。
-- 🔑 **BYO-Key(自带密钥)**:每用户的 Provider 凭据用 **AES-256-GCM** 加密存储;回合时按请求把明文密钥注入 worker,**永不**进入沙箱、前端或日志。
+- 🤖 **可配置 agent**:每个 agent 自带启用的工具、指令(`AGENTS` 文档)、技能与独立记忆;**模型 / Provider / 凭据按会话(session)选择**(见下「会话级模型」)。
+- 🔑 **BYO-Key(自带密钥)**:每用户的 Provider 凭据(`base_url` + `api_key` + 自带模型清单)用 **AES-256-GCM** 加密存储;回合时按请求把明文密钥注入 worker,**永不**进入沙箱、前端或日志。
 - 💬 **流式对话**:基于 SSE 的回合事件(思考 / 正文 / 工具调用 / 工具结果);**断线可续看**(resume);瞬时错误**透明自动重试**;超窗自动**压缩历史**。
-- 🛠️ **工具**:沙箱内执行的 `bash`、`read_file`、`write_file`、`edit`(精确字符串替换,多段、保留 CRLF);外加 worker 原生的 `remember`(主动写长期记忆,**不进沙箱**)。
+- 🛠️ **工具**:沙箱内执行的 `bash`、`read_file`(纯文本 / 代码原样返回,**PDF / Word / PPT / Excel 自动提取为文本**)、`write_file`、`edit`(精确字符串替换,多段、保留 CRLF);worker 原生的 `remember`(写长期记忆)、`web_search`(配搜索 key 才暴露)、`generate_image` / `edit_image`(生成 / 编辑图片,落工作区 `media/picture/`)——这几个不进沙箱。
 - 🧠 **智能体记忆**:每作用域一块的**自整合单块**记忆(user 跨 agent 共享 / agent 专属,判别:换一个 agent 是否仍成立);**空闲 + 压缩前**自动提炼——LLM 读**两块**对账重写(增 / 改 / 淘汰 / **错层归位**),乐观并发版本化;agent 可调 `remember`(scope 必填)主动记;设置内可查看 / 编辑 / 清空。
 - ⌨️ **斜杠命令**:输入 `/` 唤起命令面板(纯客户端动作,不发给 LLM)——`/compact` 手动压缩、`/status`(agent / 会话 / 消息数 / **上下文 tokens**)、`/new`、`/model`、`/help` 与设置导航。
 - 📎 **`@` 文件引用**:composer 输入 `@` 弹出工作区文件浮层(仿 Codex),边打边过滤(含中文),选中插入 `@相对路径`——agent 看到路径自行 `read_file`,不注入文件内容(token 友好)。
-- 🎛️ **模型切换**:composer 左下模型 chip 即点即切(持久到当前 agent);选项 = 预设(DeepSeek-V4-Pro / DeepSeek-V4-Flash / GLM-5.1)∪ 各 agent 在用 ∪ **用户自定义**(后端持久化、跨设备);创建 agent 免填模型。
+- 🎛️ **会话级模型**:每个会话独立选模型——composer 左下两栏(**Provider + Model**)即点即切并持久到该会话。Provider = 平台 `sophnet`(默认,用平台密钥)∪ 用户的 **BYOK 凭据**;模型候选 = 平台清单(后端 config)∪ 该凭据自带的模型清单。`/model` 斜杠命令同源。
 - 🚀 **开箱即用**:注册自动播种默认 agent(`main`)+ 默认会话,登录即可开聊;一键新建 agent(`Agent N`,新建即行内改名);agent / 会话支持行内**重命名**与**二次确认删除**(删 agent 连带其会话,进行中的回合受保护)。
+- ⏰ **定时任务**:为 agent 配置**一次性 / 间隔 / cron** 三种定时(带时区),到点自动起一个会话跑预设提示词;产物会话在侧栏**单独成组并标记未读**,点开即清。
 - 🧩 **技能(Skills)**:从 registry **安装**到用户对象库 → 在 agent 上**启用** → 每回合**物化**进沙箱并注入提示词;内置 `skill-creator`,支持**从工作区一键安装**自制技能。
-- 📁 **文件管理**:每用户持久工作区,经 `/files` 浏览 / 预览(md/html 渲染 + 源码切换)/ 上传(支持**整文件夹**,保留目录结构)/ 下载 / 删除 / 重命名 / 建目录(路径越狱防护)。
+- 📁 **文件管理**:每用户持久工作区,经 `/files` 浏览 / 预览(md/html 渲染 + 源码切换)/ 上传(**任意类型文件**,支持**整文件夹**保留目录结构)/ 下载 / 删除 / 重命名 / 建目录(路径越狱防护)。
 - 📦 **沙箱隔离**:`inprocess`(默认 / CI,**无隔离**)与 `docker`(真隔离:内存 / CPU / PIDs 限额、空闲回收、持久 `/workspace` 卷)两种 provisioner。
 - 🎨 **精致前端**:React 19 + Tailwind(浅色 + teal,Notion 风侧栏与设置),lucide 线性图标,自绘 Segmented / Switch / 选单浮层 / 命令面板,Markdown 渲染,固定视口布局(只有消息区滚动)。
 
@@ -194,7 +195,8 @@ bash scripts/dev_up.sh
 | `AGENT_CLOUD_MODEL_CONTEXT_WINDOWS` | backend | DeepSeek-V4-Pro/Flash `1M`、GLM-5.1 `200k` | 模型上下文窗口(JSON);阈值 = 窗口 × 触发比例。⚠️ env 覆盖是**整体替换**,需带上全部模型 |
 | `AGENT_CLOUD_COMPACTION_TRIGGER_RATIO` | backend | `0.75` | 上下文占用达窗口此比例触发自动压缩(建议留出输出空间:窗口 × 比例 + 输出上限 ≤ 窗口) |
 | `AGENT_CLOUD_COMPACTION_TOKEN_THRESHOLDS` | backend | `{}` | 按模型**显式覆盖**阈值(JSON,优先级最高),如 `'{"m": 50000}'` |
-| `AGENT_CLOUD_DEFAULT_AGENT_MODEL` | backend | `DeepSeek-V4-Pro` | 注册播种的默认 agent 模型(与前端预设同值) |
+| `AGENT_CLOUD_PLATFORM_MODELS` | backend | `["DeepSeek-V4-Pro","DeepSeek-V4-Flash","GLM-5.1"]` | 平台(sophnet)可选模型清单——会话选平台 Provider 时的 model 候选(JSON 覆盖,**整体替换**) |
+| `AGENT_CLOUD_DEFAULT_MODEL` | backend | `DeepSeek-V4-Pro` | 新建会话的默认模型(须 ∈ `platform_models`,否则取清单首个) |
 | `AGENT_CLOUD_MEMORY_SOFT_CHARS` | backend | `2000` | 记忆块软上限(引导 LLM,后端不硬截断) |
 | `AGENT_CLOUD_MEMORY_MIN_ROUNDS` | backend | `10` | 空闲提炼闸:自上次提炼新增对话轮次 ≥ 此值才提 |
 | `AGENT_CLOUD_MEMORY_IDLE_SECONDS` | backend | `1800` | 会话空闲多久视为"可提炼" |
@@ -241,16 +243,17 @@ bash scripts/gen_protos.sh     # 改了 protos/*.proto 后重新生成 gRPC stub
 
 - **回合(turn)**:后端为每个会话维护带租约的锁,回合进行中周期续租;客户端断开后服务端回合仍在跑,重连可 `resume` 续看(补播 + 实时)。超出上下文窗口会把旧历史**压缩成摘要**后重试;瞬时错误按退避**自动重试**。
 - **技能(skills)**:`registry`(`skill_registry/<name>/SKILL.md`)→ **安装**到用户对象库(`users/<uid>/skills/<name>`)+ 写 DB → 在某个 agent 上**启用** → **每回合**把启用集合物化进沙箱 `.skills/<name>/` 并把 `<available_skills>` 注入提示词。"安装"≠"在沙箱里";只有**启用且运行**才物化。内置 `skill-creator` 可脚手架一个 `SKILL.md`,并支持**从工作区**把自制技能一键安装。
-- **BYO-Key**:用户在"Provider Keys"里添加凭据 → 加密入库(只回掩码)→ 在 agent 设置里选用某凭据(`key_ref`)→ 回合时后端解出明文,经请求传给 worker 的 provider 工厂;**密钥不落前端、不进沙箱、不入日志**。
+- **会话级模型**:模型 / Provider / 凭据是**会话(session)级**而非 agent 级——同一个 agent 的不同会话可用不同模型。新建会话默认用平台 `sophnet` + `AGENT_CLOUD_DEFAULT_MODEL`;选某 BYOK 凭据后,模型候选切到该凭据自带清单。
+- **BYO-Key**:用户在"Provider Keys"里添加凭据(`base_url` + `api_key` + 模型清单)→ 加密入库(只回掩码)→ **在会话里选用某 Provider 凭据**(连带它的模型)→ 回合时后端解出明文,经请求传给 worker 的 provider 工厂;**密钥不落前端、不进沙箱、不入日志**。
 - **沙箱 provisioner**:`inprocess` 把沙箱跑在后端进程内(快、**无隔离**,用于默认/CI);`docker` 为每个会话起受限容器(内存/CPU/PIDs 限额、网络可控),工作区挂持久卷,空闲超时回收。依赖(如 `pip install`)会落在 `/workspace` 卷里持久化。
 - **记忆**:每作用域(user / agent)一块,组装回合时注入**当前块**。两个写入路径:① **自动提炼**——会话空闲(且新增 ≥ N 轮)或压缩折叠前,backend 让 worker 的 LLM 读旧块与新对话**对账重写**(增/改/淘汰,软字数上限),`UNIQUE(scope,owner,version)` 提供乐观并发,解析失败绝不推进水位(不丢事实);② **`remember` 工具**——agent 主动调,worker 本地合成确认,backend 落库时独立校验并按 scope 写块。
-- **斜杠命令**:composer 内输入 `/` 弹出命令面板,命令是**纯客户端动作**(不发给 LLM)。`/compact` 调用受**会话锁**保护的手动压缩端点(回合进行中 409,压缩期间心跳续租);`/status` 显示 agent / 会话 / 消息数与最近一回合的**上下文 tokens**(回合结束随消息同事务落库);`/model` 与模型 chip 共用同一选项源(预设 ∪ 在用 ∪ 自定义)。
+- **斜杠命令**:composer 内输入 `/` 弹出命令面板,命令是**纯客户端动作**(不发给 LLM)。`/compact` 调用受**会话锁**保护的手动压缩端点(回合进行中 409,压缩期间心跳续租);`/status` 显示 agent / 会话 / 消息数与最近一回合的**上下文 tokens**(回合结束随消息同事务落库);`/model` 与模型 chip 共用同一选项源(**会话级 Provider + Model**:平台 `sophnet` ∪ BYOK 凭据)。
 
 更多设计细节见 [docs/README.md](docs/README.md)(设计文档索引);`docs/architecture.html` 为早期设计快照,现状以本 README 为准。
 
 ## 路线图
 
-见 `docs/roadmap.html`。已落地:数据层与后端骨架、流式 agent 核心、worker、沙箱(含 docker 隔离)、鉴权与多租户、BYO-Key、文件管理、技能系统、`edit` 工具、**智能体记忆(自动提炼 + `remember`)**、**斜杠命令**、**模型切换器**、**注册即用的 agent / 会话生命周期**、前端聊天与设置 UI(Notion 风重设计)。后续候选:工具调用修复、`grep`/`find` 工具、Web 工具、MCP 接入、限流 / 配额、用量面板与可观测等。
+见 `docs/roadmap.html`。已落地:数据层与后端骨架、流式 agent 核心、worker、沙箱(含 docker 隔离)、鉴权与多租户、BYO-Key、文件管理(任意文件 / 文件夹上传)、技能系统、`edit` 工具、**文档读取**(`read_file` 解析 PDF/Word/PPT/Excel)、**图片生成 / 编辑**、**`web_search` 工具**、**`@` 文件引用**、**智能体记忆(自动提炼 + `remember`)**、**斜杠命令**、**会话级模型选择**、**定时任务**、**注册即用的 agent / 会话生命周期**、前端聊天与设置 UI(Notion 风重设计)。后续候选:工具调用修复、`grep`/`find` 工具、MCP 接入、限流 / 配额、用量面板与可观测等。
 
 ## 许可证
 
