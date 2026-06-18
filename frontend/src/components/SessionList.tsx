@@ -1,10 +1,15 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { CalendarClock } from "lucide-react"
+import { CalendarClock, ChevronDown, ChevronRight } from "lucide-react"
 import { Fragment, useState } from "react"
 import { api } from "../api/client"
 import { useStore } from "../store"
 import { timeGroupLabel } from "../time"
+import type { Session } from "../types"
 import { RowMenu } from "./RowMenu"
+
+const SCHEDULED_GROUP = "定时任务"
+// 默认折叠的分组(今天 + 定时任务保持展开)。
+const DEFAULT_COLLAPSED = ["昨天", "前 7 天", "前 30 天", "更早"]
 
 export function SessionList() {
   const userId = useStore((s) => s.userId)
@@ -13,6 +18,14 @@ export function SessionList() {
   const setSession = useStore((s) => s.setSession)
   const qc = useQueryClient()
   const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(DEFAULT_COLLAPSED))
+  const toggleGroup = (lbl: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(lbl)) next.delete(lbl)
+      else next.add(lbl)
+      return next
+    })
 
   const { data: sessions = [] } = useQuery({
     queryKey: ["sessions", userId],
@@ -20,20 +33,23 @@ export function SessionList() {
     enabled: !!userId,
   })
 
-  // 只显示当前 agent 的会话(会话本身带 agent_config_id);未选 agent 则为空。
-  // 按最近活跃降序 + 时间分组(归属由 rail/面板头部表达,区头已删)。
+  // 只显示当前 agent 的会话。定时任务产物(scheduled_task_id 非空)单独成组(置顶,便于看
+  // 未读),其余按最近活跃降序 + 时间分组。
   const mine = agentId ? sessions.filter((s) => s.agent_config_id === agentId) : []
-  const sorted = [...mine].sort(
-    (a, b) => +new Date(b.last_active_at) - +new Date(a.last_active_at),
-  )
-  const groups: { label: string; items: typeof sorted }[] = []
-  for (const s of sorted) {
+  const byActive = (a: Session, b: Session) =>
+    +new Date(b.last_active_at) - +new Date(a.last_active_at)
+  const scheduled = mine.filter((s) => s.scheduled_task_id).sort(byActive)
+  const regular = mine.filter((s) => !s.scheduled_task_id).sort(byActive)
+  const groups: { label: string; items: Session[] }[] = []
+  if (scheduled.length) groups.push({ label: SCHEDULED_GROUP, items: scheduled })
+  for (const s of regular) {
     const glabel = timeGroupLabel(s.last_active_at)
     const last = groups[groups.length - 1]
     if (last?.label === glabel) last.items.push(s)
     else groups.push({ label: glabel, items: [s] })
   }
-  const label = (s: (typeof mine)[number]) => s.title ?? `会话 ${s.id.slice(0, 6)}`
+
+  const label = (s: Session) => s.title ?? `会话 ${s.id.slice(0, 6)}`
   const invalidate = () => qc.invalidateQueries({ queryKey: ["sessions", userId] })
 
   const commitRename = async (id: string, value: string, original: string) => {
@@ -57,80 +73,97 @@ export function SessionList() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <ul className="min-h-0 flex-1 space-y-0.5 overflow-auto">
-        {groups.map((g) => (
-          <Fragment key={g.label}>
-            <li className="px-1 pb-1 pt-3 text-[11px] font-medium tracking-wide text-slate-400 first:pt-0.5">
-              {g.label}
-            </li>
-            {g.items.map((s) => (
-          <li
-            key={s.id}
-            className={`group flex items-center gap-1 rounded-lg pr-1 transition ${
-              s.id === sessionId ? "bg-brand-50" : "hover:bg-slate-100"
-            }`}
-          >
-            {renamingId === s.id ? (
-              <input
-                autoFocus
-                defaultValue={label(s)}
-                maxLength={200}
-                aria-label={`重命名 ${label(s)}`}
-                onFocus={(e) => e.target.select()}
-                onKeyDown={(e) => {
-                  // isComposing:IME 选字的回车不算确认
-                  if (e.key === "Enter" && !e.nativeEvent.isComposing)
-                    void commitRename(s.id, e.currentTarget.value, label(s))
-                  else if (e.key === "Escape") setRenamingId(null)
-                }}
-                onBlur={() => setRenamingId(null)}
-                className="mx-1 my-0.5 w-full rounded-lg border border-brand-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-brand-100"
-              />
-            ) : (
-              <>
+        {groups.map((g) => {
+          const isCollapsed = collapsed.has(g.label)
+          const unread = g.items.filter((s) => s.unread).length
+          return (
+            <Fragment key={g.label}>
+              <li className="first:pt-0.5">
                 <button
-                  className={`flex min-w-0 flex-1 items-center gap-1.5 px-2.5 py-2 text-left text-sm ${
-                    s.id === sessionId ? "font-medium text-brand-800" : "text-slate-600"
-                  }`}
-                  onClick={() => {
-                    setSession(s.id)
-                    // 打开定时任务产出的未读会话即清角标(GET 取消息无副作用,单独端点)。
-                    if (s.unread) void api.markSessionRead(s.id).then(invalidate)
-                  }}
+                  type="button"
+                  onClick={() => toggleGroup(g.label)}
+                  aria-expanded={!isCollapsed}
+                  className="flex w-full items-center gap-1 px-1 pb-1 pt-3 text-[11px] font-medium tracking-wide text-slate-400 transition hover:text-slate-600"
                 >
-                  {s.scheduled_task_id && (
-                    <CalendarClock
-                      size={13}
-                      aria-label="定时任务产物"
-                      className="shrink-0 text-slate-400"
-                    />
-                  )}
-                  <span className="min-w-0 flex-1 truncate">{label(s)}</span>
-                  {s.unread && (
-                    <span
-                      aria-label="未读"
-                      className="h-2 w-2 shrink-0 rounded-full bg-brand-500"
-                    />
+                  {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                  <span>{g.label}</span>
+                  {isCollapsed && <span className="text-slate-300">{g.items.length}</span>}
+                  {isCollapsed && unread > 0 && (
+                    <span aria-label="有未读" className="h-1.5 w-1.5 rounded-full bg-brand-500" />
                   )}
                 </button>
-                <RowMenu
-                  ariaLabel={`${label(s)} 更多操作`}
-                  visible={s.id === sessionId}
-                  items={[
-                    { label: "重命名", onSelect: () => setRenamingId(s.id) },
-                    {
-                      label: "删除",
-                      danger: true,
-                      confirmLabel: "确认删除?",
-                      onSelect: () => removeSession(s.id),
-                    },
-                  ]}
-                />
-              </>
-            )}
-          </li>
-            ))}
-          </Fragment>
-        ))}
+              </li>
+              {!isCollapsed &&
+                g.items.map((s) => (
+                  <li
+                    key={s.id}
+                    className={`group flex items-center gap-1 rounded-lg pr-1 transition ${
+                      s.id === sessionId ? "bg-brand-50" : "hover:bg-slate-100"
+                    }`}
+                  >
+                    {renamingId === s.id ? (
+                      <input
+                        autoFocus
+                        defaultValue={label(s)}
+                        maxLength={200}
+                        aria-label={`重命名 ${label(s)}`}
+                        onFocus={(e) => e.target.select()}
+                        onKeyDown={(e) => {
+                          // isComposing:IME 选字的回车不算确认
+                          if (e.key === "Enter" && !e.nativeEvent.isComposing)
+                            void commitRename(s.id, e.currentTarget.value, label(s))
+                          else if (e.key === "Escape") setRenamingId(null)
+                        }}
+                        onBlur={() => setRenamingId(null)}
+                        className="mx-1 my-0.5 w-full rounded-lg border border-brand-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-brand-100"
+                      />
+                    ) : (
+                      <>
+                        <button
+                          className={`flex min-w-0 flex-1 items-center gap-1.5 px-2.5 py-2 text-left text-sm ${
+                            s.id === sessionId ? "font-medium text-brand-800" : "text-slate-600"
+                          }`}
+                          onClick={() => {
+                            setSession(s.id)
+                            // 打开定时任务产出的未读会话即清角标(GET 取消息无副作用,单独端点)。
+                            if (s.unread) void api.markSessionRead(s.id).then(invalidate)
+                          }}
+                        >
+                          {s.scheduled_task_id && (
+                            <CalendarClock
+                              size={13}
+                              aria-label="定时任务产物"
+                              className="shrink-0 text-slate-400"
+                            />
+                          )}
+                          <span className="min-w-0 flex-1 truncate">{label(s)}</span>
+                          {s.unread && (
+                            <span
+                              aria-label="未读"
+                              className="h-2 w-2 shrink-0 rounded-full bg-brand-500"
+                            />
+                          )}
+                        </button>
+                        <RowMenu
+                          ariaLabel={`${label(s)} 更多操作`}
+                          visible={s.id === sessionId}
+                          items={[
+                            { label: "重命名", onSelect: () => setRenamingId(s.id) },
+                            {
+                              label: "删除",
+                              danger: true,
+                              confirmLabel: "确认删除?",
+                              onSelect: () => removeSession(s.id),
+                            },
+                          ]}
+                        />
+                      </>
+                    )}
+                  </li>
+                ))}
+            </Fragment>
+          )
+        })}
         {agentId && mine.length === 0 && (
           <li className="px-2 py-6 text-center text-xs text-slate-400">还没有对话</li>
         )}

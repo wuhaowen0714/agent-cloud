@@ -52,23 +52,28 @@ afterEach(() => {
 })
 
 describe("SessionList", () => {
-  it("按 last_active_at 降序 + 时间分组标签;区头已删", async () => {
+  it("今天默认展开 + 顺序;昨天/更早默认折叠,点击展开", async () => {
     vi.spyOn(api, "listSessions").mockResolvedValue([
       { ...S1, id: "old", title: "旧会话", last_active_at: day(40) },
       { ...S1, id: "yesterday", title: "昨日会话", last_active_at: day(1) },
       { ...S1, id: "now", title: "刚刚会话", last_active_at: day(0) },
     ] as never)
     render(wrap(<SessionList />))
+    // 今天默认展开:刚刚会话可见,且在「今天」标题之后、「昨天」标题之前
     await screen.findByText("刚刚会话")
     const items = screen.getAllByRole("listitem").map((li) => li.textContent ?? "")
     const idx = (t: string) => items.findIndex((x) => x.includes(t))
     expect(idx("今天")).toBeGreaterThanOrEqual(0)
     expect(idx("今天")).toBeLessThan(idx("刚刚会话"))
     expect(idx("刚刚会话")).toBeLessThan(idx("昨天"))
-    expect(idx("昨天")).toBeLessThan(idx("昨日会话"))
-    expect(idx("昨日会话")).toBeLessThan(idx("更早"))
-    expect(idx("更早")).toBeLessThan(idx("旧会话"))
-    expect(screen.queryByText(/的对话/)).not.toBeInTheDocument() // 区头已删
+    // 昨天/更早默认折叠:组标题在,但其会话不渲染
+    expect(screen.getByText("昨天")).toBeInTheDocument()
+    expect(screen.getByText("更早")).toBeInTheDocument()
+    expect(screen.queryByText("昨日会话")).toBeNull()
+    expect(screen.queryByText("旧会话")).toBeNull()
+    // 点击「昨天」展开 → 昨日会话出现
+    fireEvent.click(screen.getByText("昨天"))
+    expect(await screen.findByText("昨日会话")).toBeInTheDocument()
   })
 
   it("重命名:菜单 → input → Enter 调 patchSession", async () => {
@@ -124,5 +129,25 @@ describe("SessionList 定时任务标记", () => {
     await screen.findByText("标题一")
     expect(screen.queryByLabelText("未读")).toBeNull()
     expect(screen.queryByLabelText("定时任务产物")).toBeNull()
+  })
+
+  it("定时任务单独成组(置顶)且默认展开,即使其时间较早", async () => {
+    vi.spyOn(api, "listSessions").mockResolvedValue([
+      { ...S1, id: "now", title: "普通会话", last_active_at: day(0) },
+      {
+        ...S1,
+        id: "sch",
+        title: "喝水提醒",
+        scheduled_task_id: "t1",
+        unread: true,
+        last_active_at: day(10),
+      },
+    ] as never)
+    render(wrap(<SessionList />))
+    expect(await screen.findByText("喝水提醒")).toBeInTheDocument() // 定时组默认展开
+    const items = screen.getAllByRole("listitem").map((li) => li.textContent ?? "")
+    const idx = (t: string) => items.findIndex((x) => x.includes(t))
+    expect(idx("定时任务")).toBeLessThan(idx("今天")) // 定时组置顶,在普通会话(今天)之前
+    expect(idx("定时任务")).toBeLessThan(idx("喝水提醒"))
   })
 })
