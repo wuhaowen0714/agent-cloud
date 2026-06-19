@@ -37,6 +37,7 @@ export interface SlashContext {
   skillSuggestions: () => string[] // 技能池名字(供 /skills 选用)
   // 启用某技能到当前 agent;返回状态供调用方提示。
   enableSkill: (name: string) => Promise<"enabled" | "already" | "notfound" | "noagent">
+  setDraft: (text: string) => void // 往输入框注入文本(Composer 消费,光标落末尾供补充)
 }
 
 export interface SlashCommand {
@@ -90,23 +91,21 @@ export const COMMANDS: SlashCommand[] = [
   {
     name: "skills",
     title: "技能",
-    hint: "启用某个技能到当前 agent",
+    hint: "选用技能:启用并在输入框写好「请使用 X 技能」,补充需求后发送",
     needsArg: true,
     suggestions: (c, arg) =>
       c.skillSuggestions().filter((s) => s.toLowerCase().includes(arg.trim().toLowerCase())),
     runWithArg: async (c, arg) => {
       const name = arg.trim()
       if (!name) return
+      // 先启用(否则 agent 的 system prompt 里没这个技能、不知道怎么用),再往输入框注入
+      // 引导提示——用户补充具体需求后发送,agent 据此调用该技能。
       const r = await c.enableSkill(name)
-      c.notify(
-        r === "enabled"
-          ? `已启用技能:${name}`
-          : r === "already"
-            ? `技能已在启用中:${name}`
-            : r === "noagent"
-              ? "请先选择一个 agent"
-              : `没有找到技能:${name}`,
-      )
+      if (r === "enabled" || r === "already") {
+        c.setDraft(`请使用「${name}」技能:\n`)
+      } else {
+        c.notify(r === "noagent" ? "请先选择一个 agent" : `没有找到技能:${name}`)
+      }
     },
   },
   { name: "keys", title: "Provider Keys", hint: "打开 Key 设置", run: (c) => c.openSettings("keys") },
