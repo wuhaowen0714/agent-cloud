@@ -10,6 +10,7 @@ import { SlashPalette } from "./slash/SlashPalette"
 import { StatusCard } from "./slash/StatusCard"
 import { useSlashCommands } from "./slash/useSlashCommands"
 import { Button, Textarea } from "./ui"
+import { SkillChips } from "./SkillChips"
 import { UserAttachments } from "./UserAttachments"
 
 type Notice = { kind: "flash"; flash: string } | { kind: "status" } | { kind: "help" } | null
@@ -35,6 +36,7 @@ export function Composer({
   const [atDismissed, setAtDismissed] = useState<number | null>(null) // Esc 时 @ 词的 start;同词内不再弹
   const [notice, setNotice] = useState<Notice>(null)
   const [attachments, setAttachments] = useState<{ path: string; name: string }[]>([])
+  const [selectedSkills, setSelectedSkills] = useState<string[]>([])
   const [uploading, setUploading] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -54,6 +56,8 @@ export function Composer({
   const clearCompaction = useStore((s) => s.clearCompaction)
   const composerDraft = useStore((s) => s.composerDraft)
   const setComposerDraft = useStore((s) => s.setComposerDraft)
+  const pendingSkill = useStore((s) => s.pendingSkill)
+  const setPendingSkill = useStore((s) => s.setPendingSkill)
   const compaction = sessionId ? compactions[sessionId] : undefined
   const compacting = compaction?.phase === "running"
   // 压缩进行中等同回合占用:禁用输入,发不出消息 → 不会撞同会话 409。
@@ -70,14 +74,24 @@ export function Composer({
   // 回填用户真正打的字;附件(若有)恢复成 chip,而不是把内部 marker + 裸路径塞进输入框。
   useEffect(() => {
     if (composerDraft != null) {
-      const { body, attachments: paths } = parseUserMessage(composerDraft)
+      const { body, attachments: paths, skills } = parseUserMessage(composerDraft)
       setText(body)
       if (paths.length)
         setAttachments(paths.map((p) => ({ path: p, name: p.split("/").pop() || p })))
+      if (skills.length) setSelectedSkills([...new Set(skills)])
       setComposerDraft(null)
       requestAnimationFrame(() => taRef.current?.focus())
     }
   }, [composerDraft, setComposerDraft])
+
+  // /skills 选中的技能 → 加成 chip(去重),输入框保持干净;消费一次即清信号。
+  useEffect(() => {
+    if (pendingSkill != null) {
+      setSelectedSkills((prev) => (prev.includes(pendingSkill) ? prev : [...prev, pendingSkill]))
+      setPendingSkill(null)
+      requestAnimationFrame(() => taRef.current?.focus())
+    }
+  }, [pendingSkill, setPendingSkill])
 
   // 当前会话的压缩转为「结果」→ 弹一行 flash(复用通知槽,4s 自动消失),并清掉 store 里的
   // 结果态。若压缩完成时用户不在该会话,这里不触发;切回该会话时再弹(故结果留在 store 直到被看到)。
@@ -229,18 +243,30 @@ export function Composer({
   }
 
   const send = () => {
+    if (busy) return
     const t = text.trim()
-    if ((!t && attachments.length === 0) || busy) return
-    // 带附件:消息末尾附上工作区路径,agent 据类型处理(read_file 读文本、edit_image 编辑图片等)。
-    const full =
-      attachments.length > 0
-        ? `${t}\n\n[Uploaded file(s) in the workspace — read with read_file, or edit images with edit_image]\n${attachments
-            .map((a) => a.path)
-            .join("\n")}`
-        : t
+    // 仅选了技能、没正文也没附件:技能只说明"用哪个工具"、本身不含需求,提示补充后再发(与 hint 一致)。
+    if (!t && attachments.length === 0) {
+      if (selectedSkills.length > 0) setNotice({ kind: "flash", flash: "补充需求后再发送" })
+      return
+    }
+    // 拼装:用户正文 + 选中技能(每技能独占一行,让 agent 调用)+ 附件路径,各段空行分隔。消息
+    // 气泡渲染时 parseUserMessage 会把技能/附件这两段解析回 chip,不以裸文本示人。
+    const parts: string[] = []
+    if (t) parts.push(t)
+    if (selectedSkills.length > 0)
+      parts.push(selectedSkills.map((s) => `[请使用技能:${s}]`).join("\n"))
+    if (attachments.length > 0)
+      parts.push(
+        `[Uploaded file(s) in the workspace — read with read_file, or edit images with edit_image]\n${attachments
+          .map((a) => a.path)
+          .join("\n")}`,
+      )
+    const full = parts.join("\n\n")
     onSend(full)
     setText("")
     setAttachments([])
+    setSelectedSkills([])
     // setText 不走 onChange:caret/Esc 豁免须随文本一起归零,否则豁免跨消息泄漏——
     // 下一条消息开头的 @(同样 start=0)会被旧豁免压住、浮层永不弹(审查 M1)。
     setCaret(0)
@@ -271,6 +297,15 @@ export function Composer({
           void uploadAttachments(Array.from(e.dataTransfer.files ?? []))
         }}
       >
+      {selectedSkills.length > 0 && (
+        <div className="mb-2">
+          <SkillChips
+            names={selectedSkills}
+            align="start"
+            onRemove={(i) => setSelectedSkills((p) => p.filter((_, j) => j !== i))}
+          />
+        </div>
+      )}
       {attachments.length > 0 && (
         <div className="mb-2">
           <UserAttachments

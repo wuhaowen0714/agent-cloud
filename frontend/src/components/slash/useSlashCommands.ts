@@ -22,7 +22,7 @@ export function useSlashCommands(ui: {
   const startCompaction = useStore((s) => s.startCompaction)
   const finishCompaction = useStore((s) => s.finishCompaction)
   const openSettings = useStore((s) => s.openSettings)
-  const setComposerDraft = useStore((s) => s.setComposerDraft)
+  const setPendingSkill = useStore((s) => s.setPendingSkill)
   const { providers } = useProviderOptions() // /model 建议与图一选单共用 provider 选项源
   // 技能池:与 SkillsMenu / 设置页共用 ["skills", userId] 缓存,供 /skills 选用。
   const { data: skillPool = [] } = useQuery({
@@ -88,7 +88,7 @@ export function useSlashCommands(ui: {
       await qc.invalidateQueries({ queryKey: ["agentSkills", agentId] })
       return "enabled"
     },
-    setDraft: setComposerDraft,
+    selectSkill: setPendingSkill,
     openSettings,
     notify: ui.notify,
     showStatus: ui.showStatus,

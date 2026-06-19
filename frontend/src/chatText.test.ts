@@ -64,20 +64,53 @@ describe("parseUserMessage", () => {
     expect(attachments).toEqual(["upload/my report final.pdf"])
   })
 
+  it("技能 marker:摘出技能名,正文留用户文本", () => {
+    const { body, skills } = parseUserMessage("帮我整理\n\n[请使用技能:文档整理]")
+    expect(body).toBe("帮我整理")
+    expect(skills).toEqual(["文档整理"])
+  })
+
+  it("多个技能(每技能一行)+ 附件混合", () => {
+    const r = parseUserMessage(
+      `做个表\n\n[请使用技能:xlsx]\n[请使用技能:图表]\n\n${MARKER}\nupload/data.csv`,
+    )
+    expect(r.body).toBe("做个表")
+    expect(r.skills).toEqual(["xlsx", "图表"])
+    expect(r.attachments).toEqual(["upload/data.csv"])
+  })
+
+  // 对抗审查 High:用户正文句中内联打 [请使用技能:x] 不能被吞成 chip + 从正文删除(整行锚定)。
+  it("正文句中内联 [请使用技能:x] 不被吞", () => {
+    const t = "这个功能怎么用?我打 [请使用技能:foo] 会怎样"
+    expect(parseUserMessage(t)).toEqual({ body: t, attachments: [], skills: [] })
+  })
+
+  // 对抗审查 M1:技能名含逗号/顿号也不切碎(每技能独占一行,不靠分隔符 split)。
+  it("技能名含逗号也不切碎", () => {
+    const { skills } = parseUserMessage("x\n\n[请使用技能:数据,分析]")
+    expect(skills).toEqual(["数据,分析"])
+  })
+
+  it("仅技能无正文:body 空", () => {
+    const { body, skills } = parseUserMessage("[请使用技能:brainstorm]")
+    expect(body).toBe("")
+    expect(skills).toEqual(["brainstorm"])
+  })
+
   it("兼容早期 Attached image marker", () => {
     const t =
       "这是什么\n\n[Attached image(s) in the workspace — use edit_image to edit them]\nupload/cat.png"
-    expect(parseUserMessage(t)).toEqual({ body: "这是什么", attachments: ["upload/cat.png"] })
+    expect(parseUserMessage(t)).toEqual({ body: "这是什么", attachments: ["upload/cat.png"], skills: [] })
   })
 
   it("无 marker:原样返回,无附件", () => {
-    expect(parseUserMessage("你好")).toEqual({ body: "你好", attachments: [] })
+    expect(parseUserMessage("你好")).toEqual({ body: "你好", attachments: [], skills: [] })
   })
 
   // 对抗审查 H1:用户正文恰好含 marker 样式文本,后接真实正文(非路径)→ 不能吞正文
   it("正文含 marker 样式但后接正文(非路径):不解析,原样保留正文", () => {
     const t = `The error is:\n${MARKER}\nplease help me fix line 3 and 4`
-    expect(parseUserMessage(t)).toEqual({ body: t, attachments: [] })
+    expect(parseUserMessage(t)).toEqual({ body: t, attachments: [], skills: [] })
   })
 
   // M1:fork 回填可能产生多段 marker;末段为真,中间 marker 行不应混进附件
@@ -95,6 +128,6 @@ describe("parseUserMessage", () => {
 
   it("marker 后混入非路径行:整体不解析,保留正文", () => {
     const t = `hi\n\n${MARKER}\nupload/ok.png\nrandom note here`
-    expect(parseUserMessage(t)).toEqual({ body: t, attachments: [] })
+    expect(parseUserMessage(t)).toEqual({ body: t, attachments: [], skills: [] })
   })
 })

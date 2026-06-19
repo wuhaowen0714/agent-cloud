@@ -63,6 +63,7 @@ afterEach(() => {
     live: null,
     compactions: {},
     composerDraft: null,
+    pendingSkill: null,
     settingsOpen: false,
   })
   vi.restoreAllMocks()
@@ -463,5 +464,50 @@ describe("图片上传(附件)", () => {
     })
     expect(await screen.findByText("notes.txt")).toBeInTheDocument()
     expect(api.uploadFiles).toHaveBeenCalledWith("upload", [expect.any(File)])
+  })
+})
+
+describe("技能选用(chip)", () => {
+  it("setPendingSkill(/skills 选中)→ 显示 skill chip", async () => {
+    setup()
+    act(() => {
+      useStore.getState().setPendingSkill("文档整理")
+    })
+    expect(await screen.findByText("文档整理")).toBeInTheDocument()
+  })
+
+  it("发送:技能随消息带上 [请使用技能:X],并清空 chip", async () => {
+    const { onSend } = setup()
+    act(() => {
+      useStore.getState().setPendingSkill("文档整理")
+    })
+    await screen.findByText("文档整理")
+    type("帮我整理这些")
+    fireEvent.click(screen.getByText("发送"))
+    const sent = (onSend as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+    expect(sent).toContain("帮我整理这些")
+    expect(sent).toContain("[请使用技能:文档整理]")
+    expect(screen.queryByText("文档整理")).not.toBeInTheDocument()
+  })
+
+  it("可移除 skill chip", async () => {
+    setup()
+    act(() => {
+      useStore.getState().setPendingSkill("brainstorm")
+    })
+    await screen.findByText("brainstorm")
+    fireEvent.click(screen.getByLabelText("移除技能"))
+    expect(screen.queryByText("brainstorm")).not.toBeInTheDocument()
+  })
+
+  it("仅技能、无正文无附件:提示补充需求,不发送(对抗审查 M2)", async () => {
+    const { onSend } = setup()
+    act(() => {
+      useStore.getState().setPendingSkill("brainstorm")
+    })
+    await screen.findByText("brainstorm")
+    fireEvent.click(screen.getByText("发送"))
+    expect(onSend).not.toHaveBeenCalled()
+    expect(await screen.findByText("补充需求后再发送")).toBeInTheDocument()
   })
 })
