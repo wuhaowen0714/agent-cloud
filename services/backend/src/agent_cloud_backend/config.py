@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     # 平台(sophnet)可选模型清单 + 新建 session 的默认模型(session 选 sophnet 时的 model 候选;
     # BYOK provider 的模型走用户 credential.models)。env 覆盖走 JSON:
     # AGENT_CLOUD_PLATFORM_MODELS='["DeepSeek-V4-Pro","GLM-5.1"]'。
-    platform_models: list[str] = ["DeepSeek-V4-Pro", "DeepSeek-V4-Flash", "GLM-5.1"]
+    platform_models: list[str] = ["DeepSeek-V4-Pro", "DeepSeek-V4-Flash", "GLM-5.1", "Kimi-K2.6"]
     default_model: str = "DeepSeek-V4-Pro"
     # 支持图片输入(vision/多模态)的平台模型清单。上传图片问答需 vision 模型;非 vision 模型
     # 收到图片由前端拦截提示切换(spec: image-understanding)。仿 model_context_windows 模式,
