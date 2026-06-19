@@ -27,6 +27,7 @@ def orm_to_common(message: OrmMessage) -> CommonMessage:
     return CommonMessage(
         role=Role(message.role),
         text=content.get("text", ""),
+        images=content.get("images") or [],
         tool_calls=[ToolCall(**c) for c in content.get("tool_calls", [])],
         tool_results=[ToolResult(**r) for r in content.get("tool_results", [])],
     )
@@ -35,6 +36,7 @@ def orm_to_common(message: OrmMessage) -> CommonMessage:
 def common_to_content(message: CommonMessage) -> dict:
     return {
         "text": message.text,
+        "images": list(message.images),
         "tool_calls": [
             {"id": c.id, "name": c.name, "arguments": c.arguments} for c in message.tool_calls
         ],
@@ -43,3 +45,16 @@ def common_to_content(message: CommonMessage) -> dict:
             for r in message.tool_results
         ],
     }
+
+
+def active_images(history: list, current_images: list[str]) -> list[str]:
+    """本回合发给模型的图片:本轮新上传优先;否则回退到 history 里最近一条带 images 的 user
+    消息(延续追问)。history 已按压缩边界过滤,被折叠的旧图天然不回灌(spec: 活跃图片生命周期)。"""
+    if current_images:
+        return list(current_images)
+    for m in reversed(history):
+        if m.role == "user":
+            imgs = (m.content or {}).get("images") or []
+            if imgs:
+                return list(imgs)
+    return []
