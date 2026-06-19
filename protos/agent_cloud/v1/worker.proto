@@ -89,6 +89,9 @@ message RunTurnRequest {
   string history_summary = 11;  // 此前历史的摘要,worker 拼进 system
   string sandbox_token = 12;    // 沙箱 gRPC 鉴权 token(backend 注入;空=不校验)
   bool is_scheduled_run = 13;   // true=本回合由定时任务触发;worker 据此不暴露 schedule_task(防自排期)
+  // 本回合要发给模型的图片(工作区相对路径)。backend 每轮算"活跃图片"填入(本轮新上传 or
+  // 最近活跃图);worker 调 LLM 前经沙箱读成 data_uri 注入 content。详见 spec: image-understanding。
+  repeated string turn_images = 14;
 }
 
 message RunTurnResponse {
