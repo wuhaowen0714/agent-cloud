@@ -75,27 +75,26 @@ describe("skills 命令", () => {
     expect(skills.suggestions!(ctx, "")).toEqual(["PDF Reader", "docx", "图片生成"])
   })
 
-  it("runWithArg:启用成功 → 往输入框注入引导提示词(让 agent 使用该技能)", async () => {
-    const drafts: string[] = []
+  it("runWithArg:启用成功 → 把技能选进 Composer(显示成 chip)", async () => {
+    const picked: string[] = []
     const ctx = {
       enableSkill: async () => "enabled" as const,
-      setDraft: (t: string) => drafts.push(t),
+      selectSkill: (n: string) => picked.push(n),
       notify: () => {},
     } as never
     await skills.runWithArg!(ctx, "docx")
-    expect(drafts[0]).toContain("docx")
-    expect(drafts[0]).toContain("技能")
+    expect(picked).toEqual(["docx"])
   })
 
-  it("runWithArg:已启用也注入提示词(幂等)", async () => {
-    const drafts: string[] = []
+  it("runWithArg:已启用也选进 Composer(幂等)", async () => {
+    const picked: string[] = []
     const ctx = {
       enableSkill: async () => "already" as const,
-      setDraft: (t: string) => drafts.push(t),
+      selectSkill: (n: string) => picked.push(n),
       notify: () => {},
     } as never
     await skills.runWithArg!(ctx, "pptx")
-    expect(drafts[0]).toContain("pptx")
+    expect(picked).toEqual(["pptx"])
   })
 
   it("runWithArg:未找到 → 提示", async () => {

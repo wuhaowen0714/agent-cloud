@@ -29,6 +29,7 @@ interface AppState {
   live: LiveTurn | null
   compactions: Record<string, CompactState> // 按 sessionId;切会话不清(见 CompactState 注释)
   composerDraft: string | null // 待回填到输入框的文本(回滚/fork 触发);Composer 消费一次即清
+  pendingSkill: string | null // /skills 选中的技能名,待 Composer 加成 chip(一次性信号,消费即清)
   fileDrawerOpen: boolean
   terminalOpen: boolean
   settingsOpen: boolean
@@ -44,6 +45,7 @@ interface AppState {
   finishCompaction: (sessionId: string, result: CompactResult) => void
   clearCompaction: (sessionId: string) => void
   setComposerDraft: (text: string | null) => void
+  setPendingSkill: (name: string | null) => void
   toggleFileDrawer: () => void
   toggleTerminal: () => void
   openSettings: (tab?: SettingsTab) => void
@@ -62,6 +64,7 @@ export const useStore = create<AppState>((set, get) => ({
   live: null,
   compactions: {},
   composerDraft: null,
+  pendingSkill: null,
   fileDrawerOpen: false,
   terminalOpen: false,
   settingsOpen: false,
@@ -123,6 +126,7 @@ export const useStore = create<AppState>((set, get) => ({
         : {},
     ),
   setComposerDraft: (text) => set({ composerDraft: text }),
+  setPendingSkill: (name) => set({ pendingSkill: name }),
   clearCompaction: (sessionId) =>
     set((s) => {
       const { [sessionId]: _, ...rest } = s.compactions

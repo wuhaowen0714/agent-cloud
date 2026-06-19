@@ -30,21 +30,42 @@ export function stripWorkspaceImageMarkdown(text: string): string {
 const MARKER_RE = /\[(?:Uploaded file|Attached image)\(s\) in the workspace[^\]\n]*\]\n/
 const MARKER_LINE = /^\[(?:Uploaded file|Attached image)\(s\) in the workspace[^\]]*\]$/
 const WORKSPACE_PATH = /^(?:upload|media)\//
+// /skills 选中的技能,Composer 发送时每个技能追加【独占一行】的 [请使用技能:X];渲染时摘成 chip。
+// ⚠️ 整行锚定(^…$):marker 必须独占整行才剥离——用户在正文句中内联打 [请使用技能:x] 不会被
+// 误吞(对抗审查 High,与附件 marker 的 H1 防护同源)。每技能一行 → 技能名可含 、, 等任意字符。
+const SKILL_LINE = /^\[请使用技能:\s*([^\]]+)\]$/
 
-export function parseUserMessage(text: string): { body: string; attachments: string[] } {
+export function parseUserMessage(text: string): {
+  body: string
+  attachments: string[]
+  skills: string[]
+} {
   const normalized = text.replace(/\r\n/g, "\n") // CRLF 归一,否则 marker/路径不匹配会原样暴露
-  const m = MARKER_RE.exec(normalized)
-  if (!m || m.index === undefined) return { body: text, attachments: [] }
-  const lines = normalized
+  // 1. 逐行摘出【独占整行】的技能 marker;其余行保留(防误吞正文)。
+  const skills: string[] = []
+  const kept: string[] = []
+  for (const line of normalized.split("\n")) {
+    const sm = SKILL_LINE.exec(line.trim())
+    if (sm) skills.push(sm[1].trim())
+    else kept.push(line)
+  }
+  const hadSkill = skills.length > 0
+  // 有 skill:用去掉 skill 行的文本(折叠剥离后多余空行);无 skill:保持原 text(既有"无 marker 原样"语义)。
+  const work = hadSkill ? kept.join("\n").replace(/\n{3,}/g, "\n\n").trim() : normalized
+  const fallbackBody = hadSkill ? work : text
+  // 2. 附件解析(逻辑不变,on work)
+  const m = MARKER_RE.exec(work)
+  if (!m || m.index === undefined) return { body: fallbackBody, attachments: [], skills }
+  const lines = work
     .slice(m.index + m[0].length)
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean)
   // 每行必须是工作区路径,或(多段附件时残留的)另一个 marker——混入其它文本即视为用户正文。
   if (!lines.length || !lines.every((l) => WORKSPACE_PATH.test(l) || MARKER_LINE.test(l))) {
-    return { body: text, attachments: [] }
+    return { body: fallbackBody, attachments: [], skills }
   }
   const attachments = lines.filter((l) => WORKSPACE_PATH.test(l))
-  if (!attachments.length) return { body: text, attachments: [] }
-  return { body: normalized.slice(0, m.index).trim(), attachments }
+  if (!attachments.length) return { body: fallbackBody, attachments: [], skills }
+  return { body: work.slice(0, m.index).trim(), attachments, skills }
 }
