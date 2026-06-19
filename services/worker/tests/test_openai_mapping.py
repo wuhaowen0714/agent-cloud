@@ -25,6 +25,33 @@ def test_to_openai_messages_includes_system_only_if_present():
     assert to_openai_messages(req2)[0] == {"role": "user", "content": "hi"}
 
 
+def test_to_openai_messages_user_with_images_builds_content_parts():
+    # 多模态:user 带 images → content 为 parts 列表(text + image_url)。
+    data_uri = "data:image/png;base64,AAAA"
+    msgs = [Message(role=Role.USER, text="what is this?", images=[data_uri])]
+    out = to_openai_messages(CompletionRequest(system="", messages=msgs, tools=[]))
+    content = out[0]["content"]
+    assert isinstance(content, list)
+    assert {"type": "text", "text": "what is this?"} in content
+    assert {"type": "image_url", "image_url": {"url": data_uri}} in content
+
+
+def test_to_openai_messages_user_images_only_no_text():
+    # 只有图无文本 → content 只含 image_url part(不放空 text part)。
+    data_uri = "data:image/jpeg;base64,BBBB"
+    msgs = [Message(role=Role.USER, text="", images=[data_uri])]
+    out = to_openai_messages(CompletionRequest(system="", messages=msgs, tools=[]))
+    assert out[0]["content"] == [{"type": "image_url", "image_url": {"url": data_uri}}]
+
+
+def test_to_openai_messages_user_without_images_stays_plain_string():
+    # 回归:无 images 的 user 仍是纯字符串 content(不影响现有文本路径)。
+    out = to_openai_messages(
+        CompletionRequest(system="", messages=[Message(role=Role.USER, text="hi")], tools=[])
+    )
+    assert out[0] == {"role": "user", "content": "hi"}
+
+
 def test_to_openai_messages_assistant_tool_calls_and_tool_results():
     msgs = [
         Message(

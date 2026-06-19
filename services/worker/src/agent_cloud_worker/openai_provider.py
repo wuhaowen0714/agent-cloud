@@ -137,7 +137,15 @@ def to_openai_messages(request: CompletionRequest) -> list[dict]:
         out.append({"role": "system", "content": request.system})
     for m in request.messages:
         if m.role == Role.USER:
-            out.append({"role": "user", "content": m.text})
+            if m.images:
+                # 多模态:文本 + 图片拼成 content parts(OpenAI vision 格式)。
+                parts: list[dict] = []
+                if m.text:
+                    parts.append({"type": "text", "text": m.text})
+                parts += [{"type": "image_url", "image_url": {"url": u}} for u in m.images]
+                out.append({"role": "user", "content": parts})
+            else:
+                out.append({"role": "user", "content": m.text})
         elif m.role == Role.ASSISTANT:
             # content 仅在有 tool_calls 时才可为 null;否则空文本必须是 ""(OpenAI 拒绝
             # 无 tool_calls 的 content=null),否则回放历史里的空 assistant 会 400。
