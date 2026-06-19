@@ -33,13 +33,14 @@ export function streamTurn(
   sessionId: string,
   content: string,
   onEvent: (e: TurnEvent) => void,
+  images: string[] = [],
 ): { done: Promise<void>; abort: () => void } {
   const ctrl = new AbortController()
   const done = (async () => {
     const res = await authedFetch(`/api/sessions/${sessionId}/turn/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, images }),
       signal: ctrl.signal,
     })
     if (!res.ok || !res.body) {
