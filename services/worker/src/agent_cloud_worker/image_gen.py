@@ -393,8 +393,10 @@ _EDIT_MIME = {
 }
 
 
-def _to_data_uri(path: str, data: bytes) -> str:
-    """把图片字节编码成 data URI(sophnet input.images 接受 URL 或 base64 数据)。"""
+def to_data_uri(path: str, data: bytes) -> str:
+    """把图片字节编码成 data URI(sophnet input.images 接受 URL 或 base64 数据)。
+
+    edit_image 与 multimodal 回合(server._read_turn_images)共用,故为公开 API。"""
     ext = path.rsplit(".", 1)[-1].lower() if "." in path else "png"
     mime = _EDIT_MIME.get(ext, "image/png")
     return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
@@ -491,7 +493,7 @@ class ImageEditExecutor:
                     ),
                     is_error=True,
                 )
-            images.append(_to_data_uri(p, data))
+            images.append(to_data_uri(p, data))
 
         size = args.get("size")
         size = size.strip() if isinstance(size, str) and size.strip() else None

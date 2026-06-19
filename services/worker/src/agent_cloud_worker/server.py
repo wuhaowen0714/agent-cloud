@@ -29,6 +29,7 @@ from agent_cloud_worker.image_gen import (
     edit_image_enabled,
     generate_image_enabled,
     make_sophnet_image_generator,
+    to_data_uri,
 )
 from agent_cloud_worker.loop import run_turn, run_turn_stream
 from agent_cloud_worker.memory_extract import MemoryParseError, reconcile_memory
@@ -50,6 +51,20 @@ from agent_cloud_worker.web_search import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def _read_turn_images(read_binary, paths: list[str]) -> list[str]:
+    """工作区图片路径经沙箱 ReadBinary 读成 data_uri;单张失败跳过(不中断回合)。"""
+    out: list[str] = []
+    for p in paths:
+        try:
+            data = await read_binary(p)
+        except Exception:  # noqa: BLE001 — 单图读失败不该炸掉整个回合
+            logger.warning("turn image read failed, skipping: %s", p)
+            continue
+        out.append(to_data_uri(p, data))
+    return out
+
 
 # 由 agent 的 (model, provider, api_key, base_url) 造一个 Provider。
 ProviderFactory = Callable[[str, str, str, str], Provider]
@@ -181,7 +196,7 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                 read_binary_fn=sandbox_exec.read_binary,
                 write_binary_fn=sandbox_exec.write_binary,
             )
-        return executor
+        return executor, sandbox_exec
 
     async def RunTurn(
         self, request: worker_pb2.RunTurnRequest, context: grpc.aio.ServicerContext
@@ -218,7 +233,8 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                 ("grpc.max_receive_message_length", MAX_GRPC_MESSAGE_BYTES),
             ],
         ) as channel:
-            executor = self._build_executor(channel, request)
+            executor, sandbox_exec = self._build_executor(channel, request)
+            user_images = await _read_turn_images(sandbox_exec.read_binary, request.turn_images)
             try:
                 result = await run_turn(
                     provider,
@@ -226,6 +242,7 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                     system=system,
                     history=history,
                     user_message=request.user_message,
+                    user_images=user_images,
                     max_iterations=self._max_iterations,
                 )
             except CompletionBudgetExceeded as exc:
@@ -289,7 +306,8 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
             ("grpc.max_receive_message_length", MAX_GRPC_MESSAGE_BYTES),
         ]
         async with grpc.aio.insecure_channel(request.sandbox_endpoint, options=options) as channel:
-            executor = self._build_executor(channel, request)
+            executor, sandbox_exec = self._build_executor(channel, request)
+            user_images = await _read_turn_images(sandbox_exec.read_binary, request.turn_images)
             # 流中途失败(provider 抛错 / loop 守卫)是 worker-fault:收敛为通用 INTERNAL,
             # 不把原始异常文本泄漏给客户端(会暴露内部细节且与 UNKNOWN 无法区分)。
             # context.abort 不在 run_turn_stream 内调用,故此处的宽 except 是安全的。
@@ -300,6 +318,7 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                     system=system,
                     history=history,
                     user_message=request.user_message,
+                    user_images=user_images,
                     max_iterations=self._max_iterations,
                 ):
                     yield turn_event_to_proto(event)

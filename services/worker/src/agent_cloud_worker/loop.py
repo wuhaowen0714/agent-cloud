@@ -61,6 +61,7 @@ async def run_turn(
     system: str,
     history: list[Message],
     user_message: str,
+    user_images: list[str] | None = None,
     max_iterations: int = 10,
 ) -> TurnResult:
     """跑一个回合:调 LLM → 有工具调用则执行并回填 → 直到无工具调用或达上限。
@@ -80,7 +81,10 @@ async def run_turn(
     if max_iterations < 1:
         raise ValueError("max_iterations must be >= 1")
 
-    working: list[Message] = [*history, Message(role=Role.USER, text=user_message)]
+    working: list[Message] = [
+        *history,
+        Message(role=Role.USER, text=user_message, images=user_images or []),
+    ]
     new_messages: list[Message] = []
     usage = Usage()
     last_input = 0  # 最后一次调用的 input_tokens = 真实上下文大小(usage 是累加,不能用于压缩判阈)
@@ -121,6 +125,7 @@ async def run_turn_stream(
     system: str,
     history: list[Message],
     user_message: str,
+    user_images: list[str] | None = None,
     max_iterations: int = 10,
 ) -> AsyncIterator[TurnEvent]:
     """流式版回合:消费 provider.stream 转发增量、执行工具并 yield 事件,最后 yield TurnDone。
@@ -131,7 +136,10 @@ async def run_turn_stream(
     if max_iterations < 1:
         raise ValueError("max_iterations must be >= 1")
 
-    working: list[Message] = [*history, Message(role=Role.USER, text=user_message)]
+    working: list[Message] = [
+        *history,
+        Message(role=Role.USER, text=user_message, images=user_images or []),
+    ]
     new_messages: list[Message] = []
     usage = Usage()
     last_input = 0  # 最后一次调用的 input_tokens = 真实上下文大小(供压缩判阈值)
