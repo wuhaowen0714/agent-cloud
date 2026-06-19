@@ -15,7 +15,11 @@ from agent_cloud_backend.repositories.memory_entry import MemoryEntryRepository
 from agent_cloud_backend.repositories.message import MessageRepository
 from agent_cloud_backend.skills.materialize import skill_location
 from agent_cloud_backend.turn.credentials import resolve_session_key
-from agent_cloud_backend.turn.messages import orm_to_common, strip_unanswered_user_messages
+from agent_cloud_backend.turn.messages import (
+    active_images,
+    orm_to_common,
+    strip_unanswered_user_messages,
+)
 
 
 async def build_run_turn_request(
@@ -29,6 +33,7 @@ async def build_run_turn_request(
     work_subdir: str | None = None,
     sandbox_token: str = "",
     is_scheduled_run: bool = False,
+    images: list[str] | None = None,
 ) -> worker_pb2.RunTurnRequest:
     agent = await AgentConfigRepository(db).get(session.agent_config_id)
     doc_repo = ContextDocumentRepository(db)
@@ -83,6 +88,7 @@ async def build_run_turn_request(
         ],
         messages=[msg_to_proto(orm_to_common(m)) for m in history],
         user_message=user_message,
+        turn_images=active_images(history, images or []),
         sandbox_endpoint=sandbox_endpoint,
         work_subdir=work_subdir if work_subdir is not None else session.work_subdir,
         history_summary=session.summary,

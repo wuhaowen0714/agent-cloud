@@ -45,6 +45,35 @@ def _executor(tmp_path):
     return LocalToolExecutor(workdir=tmp_path, tools=builtin_tools())
 
 
+class _CapturingProvider:
+    """记录最后一次 complete 收到的 request,用于断言 run_turn 组装的消息。"""
+
+    def __init__(self, result: CompletionResult) -> None:
+        self._result = result
+        self.last_request = None
+
+    async def complete(self, request):
+        self.last_request = request
+        return self._result
+
+
+async def test_run_turn_attaches_user_images_to_user_message(tmp_path):
+    prov = _CapturingProvider(_say("ok"))
+    await run_turn(
+        prov, _executor(tmp_path), system="", history=[],
+        user_message="what is this?", user_images=["data:image/png;base64,XYZ"],
+    )
+    user_msg = prov.last_request.messages[-1]
+    assert user_msg.role == Role.USER
+    assert user_msg.images == ["data:image/png;base64,XYZ"]
+
+
+async def test_run_turn_without_images_leaves_empty_list(tmp_path):
+    prov = _CapturingProvider(_say("ok"))
+    await run_turn(prov, _executor(tmp_path), system="", history=[], user_message="hi")
+    assert prov.last_request.messages[-1].images == []
+
+
 async def test_single_response_no_tools(tmp_path):
     provider = FakeProvider([_say("final answer")])
     result = await run_turn(

@@ -76,14 +76,22 @@ class Settings(BaseSettings):
     # 平台(sophnet)可选模型清单 + 新建 session 的默认模型(session 选 sophnet 时的 model 候选;
     # BYOK provider 的模型走用户 credential.models)。env 覆盖走 JSON:
     # AGENT_CLOUD_PLATFORM_MODELS='["DeepSeek-V4-Pro","GLM-5.1"]'。
-    platform_models: list[str] = ["DeepSeek-V4-Pro", "DeepSeek-V4-Flash", "GLM-5.1"]
+    platform_models: list[str] = ["DeepSeek-V4-Pro", "DeepSeek-V4-Flash", "GLM-5.1", "Kimi-K2.6"]
     default_model: str = "DeepSeek-V4-Pro"
+    # 支持图片输入(vision/多模态)的平台模型清单。上传图片问答需 vision 模型;非 vision 模型
+    # 收到图片由前端拦截提示切换(spec: image-understanding)。仿 model_context_windows 模式,
+    # env JSON 覆盖:AGENT_CLOUD_VISION_MODELS='["Kimi-K2.6"]'。BYOK 模型的 vision 走凭据标记。
+    vision_models: list[str] = ["Kimi-K2.6"]
 
     def resolve_default_model(self) -> str:
         """新建 session 的默认模型;default_model 须 ∈ platform_models,否则取首个(空清单兜底)。"""
         if self.default_model in self.platform_models:
             return self.default_model
         return self.platform_models[0] if self.platform_models else "DeepSeek-V4-Pro"
+
+    def is_vision_model(self, model: str) -> bool:
+        """该平台模型是否支持图片输入。BYOK 模型的 vision 由凭据标记决定,不走这里。"""
+        return model in self.vision_models
 
     # ── 定时任务(spec 2026-06-13-scheduled-tasks)──
     scheduler_enabled: bool = True  # 进程内轮询器开关(多副本可全开,SKIP LOCKED 防重复触发)

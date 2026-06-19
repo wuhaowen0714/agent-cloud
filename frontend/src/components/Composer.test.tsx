@@ -28,7 +28,7 @@ const SESSIONS = [
 
 const FILE_INDEX = ["src/app.py", "docs/读我.md", "README.md"]
 
-function setup(opts?: { disabled?: boolean }) {
+function setup(opts?: { disabled?: boolean; visionModels?: string[] }) {
   const qc = new QueryClient()
   useStore.setState({ userId: USER, agentId: "a1", sessionId: "s1" })
   qc.setQueryData(["agents", USER], AGENTS)
@@ -38,6 +38,7 @@ function setup(opts?: { disabled?: boolean }) {
   vi.spyOn(api, "getPlatformModels").mockResolvedValue({
     models: ["DeepSeek-V4-Pro", "DeepSeek-V4-Flash", "gpt-4o"],
     default: "DeepSeek-V4-Pro",
+    vision_models: opts?.visionModels ?? ["gpt-4o"], // 默认 gpt-4o 是 vision;路由测试可覆盖为 []
   })
   vi.spyOn(api, "listCredentials").mockResolvedValue([])
   vi.spyOn(api, "indexFiles").mockResolvedValue(FILE_INDEX)
@@ -85,7 +86,7 @@ describe("Composer 基础", () => {
     const { onSend } = setup()
     type("hi")
     fireEvent.click(screen.getByText("发送"))
-    expect(onSend).toHaveBeenCalledWith("hi")
+    expect(onSend).toHaveBeenCalledWith("hi", [])
   })
   it("streaming 显示停止", () => {
     setup({ disabled: true })
@@ -166,7 +167,7 @@ describe("斜杠面板", () => {
     type("/usr/bin/python")
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
     fireEvent.keyDown(box(), { key: "Enter" })
-    expect(onSend).toHaveBeenCalledWith("/usr/bin/python")
+    expect(onSend).toHaveBeenCalledWith("/usr/bin/python", [])
   })
 
   it("Esc 关面板后 Enter → 直通发送", () => {
@@ -176,7 +177,7 @@ describe("斜杠面板", () => {
     fireEvent.keyDown(box(), { key: "Escape" })
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
     fireEvent.keyDown(box(), { key: "Enter" })
-    expect(onSend).toHaveBeenCalledWith("/status")
+    expect(onSend).toHaveBeenCalledWith("/status", [])
   })
 
   it("无 agent 时 /new 不建会话且如实反馈(不谎报成功)", async () => {
@@ -323,7 +324,7 @@ describe("@ 文件引用", () => {
     type("@zzz")
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
     fireEvent.keyDown(box(), { key: "Enter" })
-    expect(onSend).toHaveBeenCalledWith("@zzz")
+    expect(onSend).toHaveBeenCalledWith("@zzz", [])
   })
 
   it("邮箱不触发浮层", () => {
@@ -347,7 +348,7 @@ describe("@ 文件引用", () => {
     await screen.findByRole("listbox")
     fireEvent.keyDown(box(), { key: "Escape" }) // 豁免 start=0
     fireEvent.keyDown(box(), { key: "Enter" }) // 直通发送 "@a"
-    expect(onSend).toHaveBeenCalledWith("@a")
+    expect(onSend).toHaveBeenCalledWith("@a", [])
     type("@") // 新消息开头同样 start=0,不应被旧豁免压住
     expect(await screen.findByRole("listbox")).toBeInTheDocument()
   })
@@ -450,6 +451,19 @@ describe("图片上传(附件)", () => {
     fireEvent.click(screen.getByText("发送")) // 不打字
     const sent = (onSend as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
     expect(sent).toContain("upload/cat.png")
+  })
+
+  it("带图但当前模型不支持图片 → 不发送,提示切换", async () => {
+    vi.spyOn(api, "uploadFiles").mockResolvedValue([
+      { name: "cat.png", path: "upload/cat.png", size: 10, is_dir: false },
+    ] as never)
+    vi.spyOn(api, "previewUrl").mockResolvedValue("blob:fake")
+    const { onSend } = setup({ visionModels: [] }) // gpt-4o 不再标 vision
+    await pick()
+    await screen.findByAltText("cat.png")
+    fireEvent.click(screen.getByText("发送"))
+    expect(onSend).not.toHaveBeenCalled() // 被路由拦下,没发出
+    expect(await screen.findByText(/不支持图片/)).toBeInTheDocument()
   })
 
   it("拖拽任意文件到输入区上传(非图也行,路径在 upload/)", async () => {

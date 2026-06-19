@@ -167,7 +167,7 @@ export function ChatView() {
     )
   }
 
-  const onSend = async (text: string) => {
+  const onSend = async (text: string, images: string[] = []) => {
     // 已有进行中回合则忽略(防 IME 回车 / 双击 / disabled 更新前的竞态导致重复发送)。
     if (useStore.getState().live?.status === "streaming") return
     const sid = sessionId
@@ -176,7 +176,8 @@ export function ChatView() {
     if (useStore.getState().compactions[sid]?.phase === "running") return
     const wasFirst = messages.length === 0 // 首回合:标题将在服务端异步生成
     startLive(text, sid)
-    await consume(sid, streamTurn(sid, text, (e) => feed(sid, e)))
+    // 重试(onRetry)走 images=[]:错误兜底重发不重带图(活跃图片仍由后端从历史回灌)。
+    await consume(sid, streamTurn(sid, text, (e) => feed(sid, e), images))
     // 首回合标题在服务端异步生成:轮询刷 sessions 直到它出现(单次延迟刷常赶不上 LLM)
     if (wasFirst && userId) pollSessionTitle(qc, userId, sid)
   }

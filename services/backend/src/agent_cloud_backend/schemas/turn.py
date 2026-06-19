@@ -5,6 +5,7 @@ from agent_cloud_backend.schemas.message import MessageRead
 
 class TurnRequest(BaseModel):
     content: str
+    images: list[str] = []  # 本回合上传的图片工作区相对路径(多模态;spec: image-understanding)
 
 
 class TurnUsage(BaseModel):

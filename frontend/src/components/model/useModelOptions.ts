@@ -18,5 +18,11 @@ export function useProviderOptions(): { providers: ProviderOption[] } {
     queryFn: () => api.listCredentials(),
     enabled: !!userId,
   })
-  return { providers: buildProviderOptions(platform?.models ?? [DEFAULT_MODEL], creds) }
+  return {
+    providers: buildProviderOptions(
+      platform?.models ?? [DEFAULT_MODEL],
+      platform?.vision_models ?? [],
+      creds,
+    ),
+  }
 }

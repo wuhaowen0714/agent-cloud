@@ -3,8 +3,10 @@ import { useEffect, useRef, useState } from "react"
 import { api } from "../api/client"
 import { parseUserMessage } from "../chatText"
 import { atTokenAt, filterPaths } from "../fileRef"
+import { findProvider, isVisionModel } from "../models"
 import { useStore } from "../store"
 import { ModelMenu } from "./model/ModelMenu"
+import { useProviderOptions } from "./model/useModelOptions"
 import { COMPACT_MESSAGES, matchCommands, parseInput } from "./slash/commands"
 import { SlashPalette } from "./slash/SlashPalette"
 import { StatusCard } from "./slash/StatusCard"
@@ -12,6 +14,9 @@ import { useSlashCommands } from "./slash/useSlashCommands"
 import { Button, Textarea } from "./ui"
 import { SkillChips } from "./SkillChips"
 import { UserAttachments } from "./UserAttachments"
+
+// 走多模态 images 的位图后缀(与后端 extract.py 的 IMAGE_SUFFIXES 一致;svg 不算,走文本)。
+const VISION_IMG = /\.(png|jpe?g|gif|webp|bmp)$/i
 
 type Notice = { kind: "flash"; flash: string } | { kind: "status" } | { kind: "help" } | null
 interface Entry {
@@ -26,7 +31,7 @@ export function Composer({
   onStop,
 }: {
   disabled: boolean
-  onSend: (text: string) => void
+  onSend: (text: string, images: string[]) => void
   onStop?: () => void
 }) {
   const [text, setText] = useState("")
@@ -109,6 +114,11 @@ export function Composer({
     enabled: !!userId,
   })
   const currentSession = sessions.find((s) => s.id === sessionId)
+  // 当前会话模型是否支持图片输入(带图发送的路由判断)。
+  const { providers } = useProviderOptions()
+  const sessionVision = currentSession
+    ? isVisionModel(findProvider(providers, currentSession.credential_id), currentSession.model)
+    : false
   const updateSessionModel = async (model: string, credentialId: string | null) => {
     if (!sessionId) return
     await api.patchSession(sessionId, { model, credential_id: credentialId })
@@ -250,6 +260,16 @@ export function Composer({
       if (selectedSkills.length > 0) setNotice({ kind: "flash", flash: "补充需求后再发送" })
       return
     }
+    // 图片附件额外作为结构化 images 发出(走多模态直传);带图但当前模型不支持图片 → 提示切换、
+    // 不发(尊重会话级模型选择,不偷偷换)。图片路径仍随附件块走文本(气泡缩略图回显照旧)。
+    const imagePaths = attachments.filter((a) => VISION_IMG.test(a.path)).map((a) => a.path)
+    if (imagePaths.length > 0 && !sessionVision) {
+      setNotice({
+        kind: "flash",
+        flash: "当前模型不支持图片,请在左下把模型切到支持图片的(如 Kimi-K2.6)再发送",
+      })
+      return
+    }
     // 拼装:用户正文 + 选中技能(每技能独占一行,让 agent 调用)+ 附件路径,各段空行分隔。消息
     // 气泡渲染时 parseUserMessage 会把技能/附件这两段解析回 chip,不以裸文本示人。
     const parts: string[] = []
@@ -263,7 +283,7 @@ export function Composer({
           .join("\n")}`,
       )
     const full = parts.join("\n\n")
-    onSend(full)
+    onSend(full, imagePaths)
     setText("")
     setAttachments([])
     setSelectedSkills([])

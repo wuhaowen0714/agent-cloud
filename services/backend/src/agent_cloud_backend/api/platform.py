@@ -14,6 +14,7 @@ router = APIRouter(prefix="/platform", tags=["platform"])
 class PlatformModels(BaseModel):
     models: list[str]
     default: str
+    vision_models: list[str]  # models 中支持图片输入的子集(前端路由用;spec: image-understanding)
 
 
 @router.get("/models", response_model=PlatformModels)
@@ -24,4 +25,5 @@ async def get_platform_models(
     return PlatformModels(
         models=settings.platform_models,
         default=settings.resolve_default_model(),
+        vision_models=settings.vision_models,
     )

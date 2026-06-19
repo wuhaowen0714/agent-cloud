@@ -102,7 +102,12 @@ async def stream_turn_endpoint(
                     session_id=session_id,
                     seq=0,
                     role="user",
-                    content={"text": body.content, "tool_calls": [], "tool_results": []},
+                    content={
+                        "text": body.content,
+                        "images": body.images,
+                        "tool_calls": [],
+                        "tool_results": [],
+                    },
                 ),
             )
             await db.commit()
@@ -126,6 +131,7 @@ async def stream_turn_endpoint(
                 sandbox_endpoint=sandbox_endpoint,
                 sandbox_token=sandbox_token,
                 user_message=body.content,
+                images=body.images,
                 exclude_message_id=user_msg.id,
                 enabled_skills=enabled_skills,
                 work_subdir=req_work_subdir,
@@ -150,6 +156,7 @@ async def stream_turn_endpoint(
                 sandbox_endpoint=sandbox_endpoint,
                 sandbox_token=sandbox_token,
                 user_message=body.content,
+                images=body.images,
                 exclude_message_id=user_msg.id,
                 enabled_skills=rskills,
                 work_subdir=req_work_subdir,

@@ -58,3 +58,19 @@ def test_memory_settings_defaults():
     assert s.memory_min_rounds == 10
     assert s.memory_idle_seconds == 1800
     assert s.memory_max_versions == 20
+
+
+def test_vision_models_default_and_lookup():
+    s = Settings(_env_file=None)
+    assert "Kimi-K2.6" in s.vision_models
+    assert s.is_vision_model("Kimi-K2.6") is True
+    assert s.is_vision_model("DeepSeek-V4-Pro") is False  # 纯文本模型
+    assert s.is_vision_model("") is False
+
+
+def test_vision_models_env_override(monkeypatch):
+    # env JSON 整体替换(同 model_context_windows / platform_models 的覆盖语义)
+    monkeypatch.setenv("AGENT_CLOUD_VISION_MODELS", '["my-vlm","other-vlm"]')
+    s = Settings()
+    assert s.is_vision_model("my-vlm") is True
+    assert s.is_vision_model("Kimi-K2.6") is False  # 默认被整体覆盖掉

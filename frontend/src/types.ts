@@ -6,7 +6,7 @@ export interface AgentConfig {
 }
 export interface ProviderCredential { id: string; name: string; base_url: string; masked: string; models: string[]; created_at: string }
 export interface MemoryBlock { scope: string; owner_id: string; content: string; version: number }
-export interface PlatformModels { models: string[]; default: string }
+export interface PlatformModels { models: string[]; default: string; vision_models: string[] }
 export interface Session { id: string; user_id: string; agent_config_id: string; model: string; credential_id: string | null; title: string | null; work_subdir: string; last_active_at: string; last_context_tokens: number | null; scheduled_task_id: string | null; unread: boolean }
 export interface ScheduledTask {
   id: string; user_id: string; agent_config_id: string; name: string; prompt: string
