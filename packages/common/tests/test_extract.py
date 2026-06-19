@@ -47,6 +47,25 @@ def test_legacy_office_raises_friendly_error(tmp_path):
         extract_text(p)
 
 
+def test_image_returns_attach_hint_not_error(tmp_path):
+    # 图片不读像素,返回引导提示(作为附件上传给 vision 模型),且不抛异常。
+    p = tmp_path / "cat.png"
+    p.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00fakepngbytes")
+    out = extract_text(p)
+    assert "image" in out
+    assert "vision" in out
+    assert "cat.png" in out
+
+
+def test_image_hint_skips_size_limit(tmp_path, monkeypatch):
+    # 图片提示在大小检查前返回 → 即便超 _MAX_INPUT_BYTES 也只回提示、不被 "too large" 拦。
+    monkeypatch.setattr(extract_mod, "_MAX_INPUT_BYTES", 4)
+    p = tmp_path / "big.jpg"
+    p.write_bytes(b"\xff\xd8\xff\xe0" + b"x" * 100)
+    out = extract_text(p)
+    assert "image" in out
+
+
 # ---- 文档抽取主路径 ----
 
 

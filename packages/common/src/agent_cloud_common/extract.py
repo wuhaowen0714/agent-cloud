@@ -27,6 +27,14 @@ DOC_SUFFIXES = frozenset({".pdf", ".docx", ".pptx", ".xlsx", ".xlsm"})
 # 旧二进制 Office 格式(非 OOXML zip),python 库不认,需 LibreOffice 转换,第一版不支持。
 _LEGACY_OFFICE = frozenset({".doc", ".xls", ".ppt"})
 
+# 图片格式:read_file 不解析像素;返回提示引导"作为附件上传给 vision 模型"(spec:
+# image-understanding),而非让模型以为文件损坏、反复 read_file 浪费回合。
+IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"})
+_IMAGE_HINT = (
+    "is an image; read_file does not parse image pixels. To let the model see this image, "
+    "attach it in the chat instead (requires a vision-capable model)."
+)
+
 # 抽取的内存防线:输入文件硬上限;zip 类额外限制解压后总大小(防 zip 炸弹高压缩比放大)。
 _MAX_INPUT_BYTES = 25 * 1024 * 1024
 _MAX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
@@ -44,6 +52,9 @@ def extract_text(path: Path) -> str:
             f"{path.name}: legacy binary Office format ({suffix}) is not supported; "
             "convert it to .docx/.xlsx/.pptx and upload again."
         )
+    if suffix in IMAGE_SUFFIXES:
+        # 图片只回引导提示、不读像素,故置于大小检查前(不载入文件、不受 25MB 限)。
+        return f"{path.name} {_IMAGE_HINT}"
 
     _guard_input_size(path)
 
