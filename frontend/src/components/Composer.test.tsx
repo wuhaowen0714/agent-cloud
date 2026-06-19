@@ -38,6 +38,7 @@ function setup(opts?: { disabled?: boolean }) {
   vi.spyOn(api, "getPlatformModels").mockResolvedValue({
     models: ["DeepSeek-V4-Pro", "DeepSeek-V4-Flash", "gpt-4o"],
     default: "DeepSeek-V4-Pro",
+    vision_models: [],
   })
   vi.spyOn(api, "listCredentials").mockResolvedValue([])
   vi.spyOn(api, "indexFiles").mockResolvedValue(FILE_INDEX)

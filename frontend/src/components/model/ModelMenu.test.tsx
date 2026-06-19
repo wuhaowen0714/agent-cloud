@@ -12,6 +12,7 @@ function setup(model = "DeepSeek-V4-Pro", credentialId: string | null = null) {
   vi.spyOn(api, "getPlatformModels").mockResolvedValue({
     models: ["DeepSeek-V4-Pro", "DeepSeek-V4-Flash"],
     default: "DeepSeek-V4-Pro",
+    vision_models: [],
   })
   vi.spyOn(api, "listCredentials").mockResolvedValue([
     {
