@@ -712,3 +712,29 @@ def test_slugify_strips_nul_and_control():
 def test_slugify_truncate_leaves_no_trailing_hyphen():
     s = _slugify("x" * 39 + " " + "y" * 10)  # 第 40 位附近切在连字符处
     assert len(s) <= 40 and not s.endswith("-")
+
+
+def test_downscale_for_vision_passes_small_through():
+    from agent_cloud_worker.image_gen import downscale_for_vision
+
+    small = b"x" * 1000
+    data, mime = downscale_for_vision(small)
+    assert data == small and mime == ""  # 小图原样、不转码
+
+
+def test_downscale_for_vision_shrinks_oversized_image():
+    import io
+    import os
+
+    from agent_cloud_worker.image_gen import _MAX_VISION_B64_BYTES, downscale_for_vision
+    from PIL import Image
+
+    n = 1200  # 噪声 PNG raw ≈ 1200*1200*3 ≈ 4.3MB,不可压缩 → 必超上限
+    buf = io.BytesIO()
+    Image.frombytes("RGB", (n, n), os.urandom(n * n * 3)).save(buf, "PNG")
+    raw = buf.getvalue()
+    assert len(raw) * 4 // 3 > _MAX_VISION_B64_BYTES  # 前提:确实超限
+    data, mime = downscale_for_vision(raw)
+    assert mime == "image/jpeg"  # 转成 JPEG
+    assert len(data) * 4 // 3 <= _MAX_VISION_B64_BYTES  # 压到上限内
+    Image.open(io.BytesIO(data)).verify()  # 仍是有效图

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import json
 import re
 import time
@@ -393,13 +394,39 @@ _EDIT_MIME = {
 }
 
 
-def to_data_uri(path: str, data: bytes) -> str:
+def to_data_uri(path: str, data: bytes, mime: str = "") -> str:
     """把图片字节编码成 data URI(sophnet input.images 接受 URL 或 base64 数据)。
 
-    edit_image 与 multimodal 回合(server._read_turn_images)共用,故为公开 API。"""
-    ext = path.rsplit(".", 1)[-1].lower() if "." in path else "png"
-    mime = _EDIT_MIME.get(ext, "image/png")
+    edit_image 与 multimodal 回合(server._read_turn_images)共用,故为公开 API。
+    mime 非空时直接用它(图被压成 JPEG 后覆盖);否则按 path 后缀推断。"""
+    if not mime:
+        ext = path.rsplit(".", 1)[-1].lower() if "." in path else "png"
+        mime = _EDIT_MIME.get(ext, "image/png")
     return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+
+
+# vision 多模态图片 base64 体积上限。sophnet 网关请求体限制约 3MB(实测 b64 2.5MB 通过、
+# 3.9MB 报 "Request body is empty");压到 1.5MB 留余量,加上文本/system prompt 也稳妥。
+_MAX_VISION_B64_BYTES = 1_500_000
+
+
+def downscale_for_vision(data: bytes) -> tuple[bytes, str]:
+    """超大图缩放(最长边 ≤1568,OpenAI high-detail 标准)+ JPEG 压,确保 base64 ≤ 上限,
+    避免撞 sophnet 请求体限制。小图原样返回 (data, "");否则返回 (jpeg_bytes, "image/jpeg")。
+    base64 膨胀约 4/3,故按 len*4//3 估算编码后大小。"""
+    if len(data) * 4 // 3 <= _MAX_VISION_B64_BYTES:
+        return data, ""
+    from PIL import Image
+
+    img = Image.open(io.BytesIO(data)).convert("RGB")
+    img.thumbnail((1568, 1568))
+    quality = 85
+    while True:
+        out = io.BytesIO()
+        img.save(out, "JPEG", quality=quality)
+        if len(out.getvalue()) * 4 // 3 <= _MAX_VISION_B64_BYTES or quality <= 40:
+            return out.getvalue(), "image/jpeg"
+        quality -= 15
 
 
 class ImageEditExecutor:
