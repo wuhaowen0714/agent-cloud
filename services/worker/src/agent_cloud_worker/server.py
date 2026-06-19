@@ -26,6 +26,7 @@ from agent_cloud_worker.image_gen import (
     DEFAULT_IMAGE_MODEL,
     ImageEditExecutor,
     ImageGenExecutor,
+    downscale_for_vision,
     edit_image_enabled,
     generate_image_enabled,
     make_sophnet_image_generator,
@@ -62,7 +63,8 @@ async def _read_turn_images(read_binary, paths: list[str]) -> list[str]:
         except Exception:  # noqa: BLE001 — 单图读失败不该炸掉整个回合
             logger.warning("turn image read failed, skipping: %s", p)
             continue
-        out.append(to_data_uri(p, data))
+        comp, mime = downscale_for_vision(data)  # 超大图缩放压缩,避免撞 sophnet 请求体限制
+        out.append(to_data_uri(p, comp, mime))
     return out
 
 
