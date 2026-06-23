@@ -82,12 +82,13 @@ class Settings(BaseSettings):
         "GLM-5.1",
         "Kimi-K2.6",
         "claude-opus-4-8",
+        "gpt-5.5",
     ]
     default_model: str = "DeepSeek-V4-Pro"
     # 支持图片输入(vision/多模态)的平台模型清单。上传图片问答需 vision 模型;非 vision 模型
     # 收到图片由前端拦截提示切换(spec: image-understanding)。仿 model_context_windows 模式,
     # env JSON 覆盖:AGENT_CLOUD_VISION_MODELS='["Kimi-K2.6"]'。BYOK 模型的 vision 走凭据标记。
-    vision_models: list[str] = ["Kimi-K2.6", "claude-opus-4-8"]
+    vision_models: list[str] = ["Kimi-K2.6", "claude-opus-4-8", "gpt-5.5"]
 
     def resolve_default_model(self) -> str:
         """新建 session 的默认模型;default_model 须 ∈ platform_models,否则取首个(空清单兜底)。"""
