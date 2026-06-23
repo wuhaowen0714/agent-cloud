@@ -19,8 +19,18 @@ export function FilePreview({ entry, onClose }: { entry: FileEntry; onClose: () 
     // markdown/html 连同文本一起预取:渲染用(md)+「源码」切换零等待。
     if (kind === "download") return
     let alive = true
+    // doc(docx/pptx/xlsx)走后端抽文本,不取原始 blob(原文件是 zip,前端读不了)。
+    if (kind === "doc") {
+      api
+        .extractText(entry.path)
+        .then((r) => alive && setText(r.text))
+        .catch(() => alive && setErr(true))
+      return () => {
+        alive = false
+      }
+    }
     let created: string | null = null
-    // <img>/<a>/<iframe> 带不了 Bearer → 用带 token 的 fetch 取回 blob,生成本地 object URL。
+    // image/pdf/text/markdown/html:<img>/<iframe> 带不了 Bearer → 带 token fetch 取 blob URL。
     api
       .previewUrl(entry.path)
       .then(async (u) => {
@@ -30,7 +40,8 @@ export function FilePreview({ entry, onClose }: { entry: FileEntry; onClose: () 
         }
         created = u
         setUrl(u)
-        if (kind !== "image") {
+        // 只有需要文本展示的(text/markdown/html)才读 blob 文本;image/pdf 用 url 直接渲染。
+        if (kind === "text" || kind === "markdown" || kind === "html") {
           const t = await fetch(u).then((r) => r.text()) // blob: URL 同源可直接读
           if (alive) setText(t)
         }
@@ -126,6 +137,30 @@ export function FilePreview({ entry, onClose }: { entry: FileEntry; onClose: () 
                 />
               ) : (
                 <div className="text-sm text-slate-400">加载中…</div>
+              )}
+            </>
+          )}
+          {!err && kind === "pdf" && (
+            <>
+              {url ? (
+                // PDF 用浏览器内置查看器渲染。不套 HTML 那种 sandbox="allow-scripts"
+                // (会挡住 PDF 查看器);blob: 同源、内容是用户自己的文件,安全。
+                <iframe
+                  title={entry.name}
+                  src={url}
+                  className="h-[72vh] w-full rounded-lg border border-slate-100 bg-white"
+                />
+              ) : (
+                <div className="text-sm text-slate-400">加载中…</div>
+              )}
+            </>
+          )}
+          {!err && kind === "doc" && (
+            <>
+              {text === null ? (
+                <div className="text-sm text-slate-400">正在提取文本…</div>
+              ) : (
+                <Markdown>{text}</Markdown>
               )}
             </>
           )}

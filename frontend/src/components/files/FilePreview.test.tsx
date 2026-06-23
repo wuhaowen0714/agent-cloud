@@ -38,6 +38,20 @@ const htmlEntry = {
   size: 30,
   mtime: 0,
 } as FileEntry
+const pdfEntry = {
+  name: "report.pdf",
+  path: "report.pdf",
+  is_dir: false,
+  size: 50_000,
+  mtime: 0,
+} as FileEntry
+const docEntry = {
+  name: "spec.docx",
+  path: "spec.docx",
+  is_dir: false,
+  size: 50_000,
+  mtime: 0,
+} as FileEntry
 
 const stubFetchText = (text: string) =>
   vi.stubGlobal(
@@ -67,6 +81,24 @@ describe("FilePreview 渲染(spec 2026-06-10-preview-render)", () => {
     expect(frame.getAttribute("src")).toBe("blob:fake-html")
     fireEvent.click(screen.getByText("源码"))
     expect(screen.getByText("<h1>hi</h1>")).toBeInTheDocument()
+  })
+
+  it("pdf 走 iframe 浏览器原生渲染,且绝不带 sandbox(否则 PDF 查看器被挡)", async () => {
+    vi.spyOn(api, "previewUrl").mockResolvedValue("blob:fake-pdf")
+    render(<FilePreview entry={pdfEntry} onClose={() => {}} />)
+    const frame = await screen.findByTitle("report.pdf")
+    expect(frame.tagName).toBe("IFRAME")
+    expect(frame.getAttribute("src")).toBe("blob:fake-pdf")
+    expect(frame.getAttribute("sandbox")).toBeNull() // 有 sandbox 会挡住内置 PDF 查看器
+  })
+
+  it("doc(docx/pptx/xlsx)调后端 extractText 抽文本渲染,不取原始 zip blob", async () => {
+    const ex = vi.spyOn(api, "extractText").mockResolvedValue({ text: "# 抽出的标题\n\n正文" })
+    const pv = vi.spyOn(api, "previewUrl").mockResolvedValue("blob:should-not-be-used")
+    render(<FilePreview entry={docEntry} onClose={() => {}} />)
+    expect(await screen.findByRole("heading", { name: "抽出的标题" })).toBeInTheDocument()
+    expect(ex).toHaveBeenCalledWith("spec.docx")
+    expect(pv).not.toHaveBeenCalled() // 原文件是 zip,前端不取 blob,只展示后端抽出的文本
   })
 })
 

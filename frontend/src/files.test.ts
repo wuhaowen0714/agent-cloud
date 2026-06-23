@@ -36,6 +36,16 @@ describe("previewKind", () => {
     expect(previewKind({ name: "big.md", size: 2_000_000 })).toBe("download")
     expect(previewKind({ name: "big.html", size: 2_000_000 })).toBe("download")
   })
+  it("pdf 原生渲染、office 文档后端抽文本,都在 1MB 上限之前判定", () => {
+    expect(previewKind({ name: "report.pdf", size: 100 })).toBe("pdf")
+    expect(previewKind({ name: "r.docx", size: 100 })).toBe("doc")
+    expect(previewKind({ name: "slides.pptx", size: 100 })).toBe("doc")
+    expect(previewKind({ name: "sheet.xlsx", size: 100 })).toBe("doc")
+    expect(previewKind({ name: "macro.xlsm", size: 100 })).toBe("doc")
+    // 关键:文档体积常 >1MB,绝不能掉进 download(extract 内部另有 25MB 闸兜底)
+    expect(previewKind({ name: "big.pdf", size: 9_000_000 })).toBe("pdf")
+    expect(previewKind({ name: "big.xlsx", size: 9_000_000 })).toBe("doc")
+  })
 })
 
 describe("isHiddenEntry", () => {
