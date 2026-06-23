@@ -108,6 +108,9 @@ export const api = {
   listFiles: (path: string) => http<FileEntry[]>(`/files?path=${encodeURIComponent(path)}`),
   // 工作区全部文件的相对路径(composer @ 文件引用的索引;仅文件,后端截断 2000)
   indexFiles: () => http<string[]>("/files/index"),
+  // 文档(pdf/docx/pptx/xlsx)抽成文本供预览(复用 read_file 的 extract_text)
+  extractText: (path: string) =>
+    http<{ text: string }>(`/files/extract?path=${encodeURIComponent(path)}`),
   previewUrl: (path: string) => _blobUrl(path, false),
   downloadUrl: (path: string) => _blobUrl(path, true),
   uploadFiles: async (path: string, files: File[]) => {

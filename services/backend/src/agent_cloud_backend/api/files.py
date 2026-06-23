@@ -1,6 +1,7 @@
 import mimetypes
 from urllib.parse import quote
 
+from agent_cloud_common import extract_text
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 
@@ -128,6 +129,29 @@ def raw(
         media_type=media,
         headers={"Content-Disposition": _content_disposition(disp, entry.name)},
     )
+
+
+@router.get("/extract")
+def extract(
+    path: str,
+    store: FileStore = Depends(get_file_store),
+    user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    """把文档(pdf/docx/pptx/xlsx)抽成文本供前端预览,复用 read_file 工具的 extract_text。"""
+    uid = str(user.id)
+    try:
+        entry = store.stat(uid, path)  # 404 / 越狱防护
+        if entry.is_dir:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "is a directory")
+        text = extract_text(store.abspath(uid, path))
+    except HTTPException:
+        raise
+    except RuntimeError as exc:
+        # extract_text 的友好错误(损坏/超大/扫描件)→ 当预览文本展示,不冒泡成 500
+        text = f"⚠️ {exc}"
+    except Exception as exc:
+        raise _http_from(exc) from exc
+    return {"text": text}
 
 
 @router.post("/upload", response_model=list[FileEntryRead], status_code=status.HTTP_201_CREATED)

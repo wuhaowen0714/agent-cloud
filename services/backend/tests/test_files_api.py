@@ -294,3 +294,72 @@ def test_sanitize_rel_upload_path_edge_cases():
         _sanitize_rel_upload_path("a/../b.txt")  # 夹在中间的父引用
     # 绝对路径被锚定为围栏内相对路径(首空段丢弃)
     assert _sanitize_rel_upload_path("/etc/passwd") == "etc/passwd"
+
+
+# ---- /files/extract:文档(pdf/docx/pptx/xlsx)抽文本供前端预览(复用 read_file 的 extract_text)----
+
+_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+def _upload_bytes(client, name, data, mime="application/octet-stream"):
+    r = client.post("/files/upload", files=[("files", (name, data, mime))])
+    assert r.status_code == 201
+
+
+def test_extract_docx_returns_text(client):
+    import io
+
+    import docx
+
+    document = docx.Document()
+    document.add_paragraph("Hello from docx")
+    table = document.add_table(rows=1, cols=2)
+    table.rows[0].cells[0].text = "Name"
+    table.rows[0].cells[1].text = "Qty"
+    buf = io.BytesIO()
+    document.save(buf)
+    _upload_bytes(client, "doc.docx", buf.getvalue(), _DOCX_MIME)
+
+    r = client.get("/files/extract", params={"path": "doc.docx"})
+    assert r.status_code == 200
+    text = r.json()["text"]
+    assert "Hello from docx" in text
+    assert "Name" in text and "|" in text  # 表格转 '|' 轻结构
+
+
+def test_extract_xlsx_returns_text(client):
+    import io
+
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    ws.append(["name", "qty"])
+    ws.append(["apple", 5])
+    buf = io.BytesIO()
+    wb.save(buf)
+    _upload_bytes(client, "sheet.xlsx", buf.getvalue())
+
+    r = client.get("/files/extract", params={"path": "sheet.xlsx"})
+    assert r.status_code == 200
+    text = r.json()["text"]
+    assert "apple" in text and "--- sheet: Data ---" in text
+
+
+def test_extract_directory_is_400(client):
+    client.post("/files/mkdir", json={"path": "d"})
+    assert client.get("/files/extract", params={"path": "d"}).status_code == 400
+
+
+def test_extract_missing_is_404(client):
+    assert client.get("/files/extract", params={"path": "nope.docx"}).status_code == 404
+
+
+def test_extract_corrupt_doc_degrades_to_warning_not_500(client):
+    # 损坏/非真文档:extract_text 抛 RuntimeError,端点降级成 ⚠️ 预览文本(绝不冒泡 500)。
+    _upload_bytes(client, "broken.docx", b"this is plainly not a zip archive")
+    r = client.get("/files/extract", params={"path": "broken.docx"})
+    assert r.status_code == 200
+    text = r.json()["text"]
+    assert text.startswith("⚠️") and "broken.docx" in text

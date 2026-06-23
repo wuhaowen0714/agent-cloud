@@ -31,11 +31,17 @@ export function splitBreadcrumb(path: string): Crumb[] {
 const IMG = new Set(["png", "jpg", "jpeg", "gif", "svg", "webp"])
 const MD = new Set(["md", "markdown"])
 const HTML = new Set(["html", "htm"])
+const PDF = new Set(["pdf"])
+const DOC = new Set(["docx", "pptx", "xlsx", "xlsm"]) // 后端 extract_text 抽成文本预览
 const TEXT_MAX = 1024 * 1024 // 1 MB:超过只给下载
-export type PreviewKind = "image" | "text" | "markdown" | "html" | "download"
+export type PreviewKind = "image" | "text" | "markdown" | "html" | "pdf" | "doc" | "download"
 export function previewKind(entry: { name: string; size: number }): PreviewKind {
   const ext = entry.name.split(".").pop()?.toLowerCase() ?? ""
   if (IMG.has(ext)) return "image"
+  // pdf / office 文档在 1MB 文本上限之前判定:PDF 浏览器原生渲染、doc 后端抽文本
+  // (extract 内部有 25MB 闸),都不该因 >1MB 掉进 download。
+  if (PDF.has(ext)) return "pdf"
+  if (DOC.has(ext)) return "doc"
   if (entry.size > TEXT_MAX) return "download"
   if (MD.has(ext)) return "markdown" // 渲染展示(可切源码)
   if (HTML.has(ext)) return "html" // 沙箱 iframe 渲染(可切源码)
