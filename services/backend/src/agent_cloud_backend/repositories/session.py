@@ -144,6 +144,40 @@ class SessionRepository(BaseRepository[Session]):
         )
         return result.rowcount == 1
 
+    async def delete_idle_by_ids(
+        self, user_id: uuid.UUID, session_ids: list[uuid.UUID], lease_seconds: int = 600
+    ) -> tuple[int, list[uuid.UUID]]:
+        """批量删指定 id 的会话:仅 user_id 拥有 + idle/租约过期才删。返回 (删除数, 跳过 id 列表)。
+
+        skipped = 本人拥有但回合进行中(running 且租约未过期)、未删的会话 id(供前端判断当前打开
+        的会话是否真被删)。越权/不存在的 id 不计入、静默忽略——按 user_id 过滤,绝不误删他人。
+        delete 自带 status guard,与回合 try_acquire 靠行锁串行,无「检查后被开跑再删」的 TOCTOU。"""
+        if not session_ids:
+            return 0, []
+        cutoff = datetime.now(UTC) - timedelta(seconds=lease_seconds)
+        rows = (
+            await self.session.execute(
+                select(Session.id, Session.status, Session.last_active_at).where(
+                    Session.user_id == user_id, Session.id.in_(session_ids)
+                )
+            )
+        ).all()
+        skipped: list[uuid.UUID] = []
+        deletable: list[uuid.UUID] = []
+        for r in rows:
+            target = deletable if (r.status == "idle" or r.last_active_at < cutoff) else skipped
+            target.append(r.id)
+        deleted = 0
+        if deletable:
+            result = await self.session.execute(
+                delete(Session).where(
+                    Session.id.in_(deletable),
+                    or_(Session.status == "idle", Session.last_active_at < cutoff),
+                )
+            )
+            deleted = result.rowcount
+        return deleted, skipped
+
     async def delete_idle_for_agent(self, agent_id: uuid.UUID, lease_seconds: int = 600) -> None:
         """删除该 agent 的全部可删会话(同上守卫);留下的(在跑)由调用方数出并 409。"""
         cutoff = datetime.now(UTC) - timedelta(seconds=lease_seconds)

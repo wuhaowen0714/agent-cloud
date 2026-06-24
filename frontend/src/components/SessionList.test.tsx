@@ -98,6 +98,35 @@ describe("SessionList", () => {
     await waitFor(() => expect(del).toHaveBeenCalledWith("s1"))
     await waitFor(() => expect(useStore.getState().sessionId).toBeNull())
   })
+
+  it("分组清除:两次点击调 bulkDeleteSessions 传该组 id,真正删掉当前会话则退出", async () => {
+    vi.spyOn(api, "listSessions").mockResolvedValue([
+      { ...S1, id: "s1", title: "今天甲", last_active_at: day(0) },
+      { ...S1, id: "s2", title: "今天乙", last_active_at: day(0) },
+    ] as never)
+    const bulk = vi.spyOn(api, "bulkDeleteSessions").mockResolvedValue({ deleted: 2, skipped: [] })
+    render(wrap(<SessionList />))
+    await screen.findByText("今天甲")
+    // 第一次点进入二次确认,第二次执行
+    fireEvent.click(screen.getByRole("button", { name: "清除今天" }))
+    fireEvent.click(await screen.findByText("清除 2 个?"))
+    await waitFor(() => expect(bulk).toHaveBeenCalledTimes(1))
+    expect(new Set(bulk.mock.calls[0][0])).toEqual(new Set(["s1", "s2"]))
+    await waitFor(() => expect(useStore.getState().sessionId).toBeNull()) // s1(当前)被删 → 退出
+  })
+
+  it("分组清除:当前会话被 busy 跳过(在 skipped 里)则不退出,并提示", async () => {
+    vi.spyOn(api, "listSessions").mockResolvedValue([
+      { ...S1, id: "s1", title: "今天甲", last_active_at: day(0) },
+    ] as never)
+    vi.spyOn(api, "bulkDeleteSessions").mockResolvedValue({ deleted: 0, skipped: ["s1"] })
+    render(wrap(<SessionList />))
+    await screen.findByText("今天甲")
+    fireEvent.click(screen.getByRole("button", { name: "清除今天" }))
+    fireEvent.click(await screen.findByText("清除 1 个?"))
+    expect(await screen.findByText("1 个进行中的会话未删")).toBeInTheDocument()
+    expect(useStore.getState().sessionId).toBe("s1") // 当前会话 busy 没删 → 保持,不退出
+  })
 })
 
 describe("SessionList 定时任务标记", () => {
