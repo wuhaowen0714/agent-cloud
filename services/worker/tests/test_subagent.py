@@ -12,7 +12,7 @@ from agent_cloud_common import (
     Usage,
 )
 from agent_cloud_worker.provider import FakeProvider
-from agent_cloud_worker.subagent import SubagentExecutor
+from agent_cloud_worker.subagent import SubagentExecutor, subagent_enabled
 
 
 class _InnerExec:
@@ -117,3 +117,9 @@ async def test_usage_accumulates():
     # 子 agent 两轮:input 2+3=5、output 1+2=3
     assert ex.accumulated_usage.input_tokens == 5
     assert ex.accumulated_usage.output_tokens == 3
+
+
+def test_subagent_enabled_switch():
+    assert subagent_enabled([]) is True  # 空 = 全部启用(含 task)
+    assert subagent_enabled(["task"]) is True
+    assert subagent_enabled(["bash", "read_file"]) is False  # 显式列表无 task → 不启用

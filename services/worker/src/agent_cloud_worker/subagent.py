@@ -62,6 +62,11 @@ def _last_assistant_text(messages: list[Message]) -> str:
     return ""
 
 
+def subagent_enabled(enabled_tools: list[str]) -> bool:
+    """空 enabled_tools = 全部(含 task);否则需显式列出 'task'。与其它工具开关一致。"""
+    return not enabled_tools or "task" in enabled_tools
+
+
 class SubagentExecutor:
     """装饰器层:暴露 `task` 工具,handler 跑嵌套 run_turn_stream(子 agent)并透传其事件到 emit。
 
