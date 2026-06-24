@@ -65,6 +65,12 @@ def test_payload_len_tool_role_content():
     assert payload_text_len(msgs) == len("result text")
 
 
+def test_payload_len_counts_reasoning_content():
+    # 思考端点回传的 reasoning_content 也上行(to_openai_messages 会带),计入 prefill 长度
+    msgs = [{"role": "assistant", "content": "ans", "reasoning_content": "think harder"}]
+    assert payload_text_len(msgs) == len("ans") + len("think harder")
+
+
 # ---- ttft_budget ----
 
 

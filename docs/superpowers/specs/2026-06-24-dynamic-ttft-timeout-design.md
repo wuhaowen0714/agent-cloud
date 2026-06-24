@@ -35,8 +35,10 @@
 
 改动点:
 - `config.py`:+6 个 `ttft_*` 配置项(env 可覆盖),紧邻 `openai_timeout_seconds`。
-- `openai_provider.py`:`OpenAIProvider.__init__` 加可选 `ttft: TtftConfig | None`(默认 None → 不套动态超时,向后兼容)。`stream()`/`complete()` 在已算好的 `kwargs["messages"]` 上算 budget,`has_images = any(m.images for m in request.messages)`,设 `kwargs["timeout"]=budget`,并 `logger.info` 出 `model/images/payload_chars/budget`(可观测,供上线后调参)。
-- `factory.py`:从 `settings` 构造 `TtftConfig` 传给 `OpenAIProvider`。
+- `openai_provider.py`:`OpenAIProvider.__init__` 加可选 `ttft: TtftConfig | None`(默认 None → 不套,向后兼容)。**仅 `stream()`** 在已算好的 `kwargs["messages"]` 上算 budget、设 `kwargs["timeout"]=budget`、`logger.info` 出 `model/images/payload_chars/budget`(可观测,供调参)。`has_images = any(m.images for m in request.messages)`——历史消息经 `codec.msg_from_proto` **不回填 images**,故恰好只在当前回合有新上传图时为真(若将来 codec 改成回填,text-only 跟进回合会误套多模态档,需同步调整)。
+- **`complete()`(非流式)不套 TTFT**:非流式 timeout 作用于整次生成(无首字节/chunk 之分),套了会把 `RunTurn`(`loop.run_turn`,可生成至 `request_max_tokens`≈32k)等正常长输出误杀成 INTERNAL。
+- 长度计入 `reasoning_content`(思考端点回传、上行算入 prefill 负担)。
+- `factory.py`:从 `settings` 构造 `TtftConfig` 传给 `OpenAIProvider`(含 wiring 测试,防漏传参静默失效)。
 
 不碰:keepwarm(独立 120s 心跳);错误处理与 SDK `max_retries=3` 重试链(budget 超时即复用现有重试)。
 
@@ -50,5 +52,7 @@
 ## 取舍
 
 - 治标,不治本:根因在 sophnet 上游冷启,不可控。本特性只缩短撞冷启时的等待。
-- per-request `timeout` 流式下也作用于"等后续 chunk",但正常 chunk 间隔 <1s,远不撞预算;长输出只要持续吐字不被误杀。只有首字节(冷启)会撞——正是目标。
-- 参数默认保守(ceil≤45 不比现状差),配 debug log 观察真实 payload 分布后再调死。
+- per-request `timeout` 流式下是 **per-chunk read 截断**(每收到一个 chunk 即重置),不是整流总时长(已逐层核 openai→httpx→httpcore→anyio)——长输出只要相邻 chunk 间隔 < budget 就不被误杀。冷启(响应头阶段久不来)落在 SDK 重试窗口内,正是优化目标。
+- **已知回归面(接受 + 观察)**:流到一半若上游停顿 > budget,该 read 超时落在 SDK 重试范围**外**(消费阶段),整回合失败(无半成品、需重发)。原固定 45s 对 mid-stream 停顿有 45s 容忍,纯文本档收紧到 ~10–18s。但正常相邻 chunk 间隔 <1s、远不撞,`floor` 给下限容忍;先上线靠 debug log 观察 mid-stream 误杀是否真实出现,再决定是否回调。(根因:裸 float 让 connect/read 同值,无法只收紧首字节而放宽 chunk 间隔。)
+- **最坏总时长**:budget 超时即 SDK 重试(每次同 budget),最坏 `(max_retries+1)×budget + 退避`。纯文本短 ≈ 4×12+~3.5 ≈ 52s、多模态 ≈ 4×25 ≈ 103s——连续撞冷的罕见路径并不比原 45×N 短;收益在**常见路径**(第一次撞冷 fail-fast、keepwarm 在退避窗口内焐热、第二次秒回 ≈ 15s,对比原 ~49s)。
+- 参数默认保守(ceil≤45,最坏不比现状差),配 debug log 观察真实 payload 分布后再调死。

@@ -239,10 +239,15 @@ class OpenAIProvider:
         return kwargs
 
     def _maybe_set_ttft_timeout(self, request: CompletionRequest, kwargs: dict) -> None:
-        """有 ttft 配置时,按 payload 大小 + 是否多模态算 per-request 首字节超时并设入 kwargs。
+        """【仅供 stream() 调用】按 payload 大小 + 是否多模态算 per-request 首字节超时设入 kwargs。
 
-        流式下该 timeout 作用于"等下一个 chunk"(含首字节);正常 chunk 间隔远小于预算,
-        只有冷启首字节会撞 → 提前 fail-fast,由 SDK max_retries 重试到 keepwarm 焐热的路由。
+        只对流式成立:timeout 作用于"等下一个 chunk"(含首字节),正常 chunk 间隔远小于预算,
+        只有冷启首字节会撞 → fail-fast,由 SDK max_retries 重试到 keepwarm 焐热的路由。非流式
+        complete() 的 timeout 作用于整次生成(无首字节/chunk 之分),套 TTFT 会误杀正常长输出,
+        故 complete 不调本方法。
+        ⚠️ 代价:流到一半若上游停顿 > budget,read 超时落在 SDK 重试范围外 → 整回合失败。但
+        正常 chunk 间隔 <1s、远不撞,floor 也给了下限容忍;主要收益场景是冷启(响应头阶段久不来,
+        正落在 SDK 重试窗口内)。
         """
         if self._ttft is None:
             return
@@ -258,10 +263,10 @@ class OpenAIProvider:
         )
 
     async def complete(self, request: CompletionRequest) -> CompletionResult:
-        kwargs = self._create_kwargs(request)
-        self._maybe_set_ttft_timeout(request, kwargs)
+        # 非流式:timeout 作用于整次生成(无首字节/后续 chunk 之分),不套 TTFT 预算——套了会把
+        # RunTurn(loop.run_turn,可生成至 request_max_tokens)等正常长输出误杀。TTFT 仅 stream 用。
         try:
-            resp = await self._client.chat.completions.create(**kwargs)
+            resp = await self._client.chat.completions.create(**self._create_kwargs(request))
         except openai.BadRequestError as exc:
             if _is_completion_budget_error(exc):  # 先于超窗判:其文案同样命中超窗 markers
                 raise CompletionBudgetExceeded(str(exc)) from exc

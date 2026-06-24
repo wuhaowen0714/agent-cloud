@@ -39,6 +39,8 @@ def payload_text_len(messages: list[dict]) -> int:
             for part in content:
                 if isinstance(part, dict) and part.get("type") == "text":
                     total += len(part.get("text") or "")
+        # 思考端点(DeepSeek 等)回传的 reasoning_content 也上行,计入 prefill 负担
+        total += len(m.get("reasoning_content") or "")
         for tc in m.get("tool_calls") or []:
             fn = tc.get("function") or {}
             total += len(fn.get("name") or "") + len(fn.get("arguments") or "")

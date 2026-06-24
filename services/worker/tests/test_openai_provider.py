@@ -555,15 +555,17 @@ _TTFT = TtftConfig(
 )
 
 
-async def test_complete_sets_ttft_timeout_from_payload():
+async def test_complete_does_not_set_ttft_timeout_even_with_config():
+    # 非流式 complete 的 timeout 作用于整次生成,套 TTFT 会误杀正常长输出(如 RunTurn)→
+    # 即便配了 ttft 也绝不设 per-request timeout,沿用 client 默认。TTFT 仅 stream 套。
     captured = {}
     resp = SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content="x", tool_calls=None))],
         usage=SimpleNamespace(prompt_tokens=0, completion_tokens=0),
     )
     provider = OpenAIProvider(client=_client(resp, captured), model="m", max_tokens=9, ttft=_TTFT)
-    await provider.complete(_req(text="x" * 12000))  # SYS(3) + 12000 = 12003 字符
-    assert captured["timeout"] == pytest.approx(12 + 12003 / 2000)
+    await provider.complete(_req(text="x" * 12000))
+    assert "timeout" not in captured
 
 
 async def test_stream_sets_ttft_timeout_from_payload():
