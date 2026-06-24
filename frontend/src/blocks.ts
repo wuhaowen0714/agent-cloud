@@ -1,4 +1,4 @@
-import type { Message, ToolCall, ToolResult } from "./types"
+import type { Message, ToolCall, ToolResult, TurnEvent } from "./types"
 
 // 一个回合(turn)按【时间顺序】拆成的展示块:思考 / 正文 / 工具调用(含结果)。
 // live 流式与已落库历史都归一成 Block[],用同一个渲染器 → 顺序一致、回合结束刷新历史时不突变。
@@ -9,6 +9,8 @@ export type Block =
   | { kind: "thinking"; id: string; text: string }
   | { kind: "text"; id: string; text: string }
   | { kind: "tool"; id: string; call: ToolCall; result?: ToolResult; progress?: ToolProgress }
+  // 子 agent(task 派生):同 subagent_id 的事件收拢进内部 blocks,渲染成折叠卡片。
+  | { kind: "subagent"; id: string; description: string; blocks: Block[]; running: boolean; ok: boolean }
 
 // 流式:把思考/正文增量并入 blocks。尾块同类则追加,否则新开一块 → 还原模型真实时序。
 // 返回新数组(不可变,触发 React 更新)。
@@ -58,6 +60,49 @@ export function attachToolResult(blocks: Block[], callId: string, result: ToolRe
   return blocks.map((b) => (b.kind === "tool" && b.call.id === callId ? { ...b, result } : b))
 }
 
+// 把一个流事件应用到一组 blocks(顶层与 subagent 内部共用)。非 block 类事件
+// (turn_done/error/reset/subagent_*)由调用方单独处理,这里原样返回。
+export function applyEvent(blocks: Block[], e: TurnEvent): Block[] {
+  switch (e.type) {
+    case "thinking_delta":
+      return appendDelta(blocks, "thinking", e.text)
+    case "text_delta":
+      return appendDelta(blocks, "text", e.text)
+    case "tool_call_progress":
+      return upsertToolProgress(blocks, e)
+    case "tool_call_start":
+      return appendToolCall(blocks, { id: e.call_id, name: e.tool, arguments: e.args })
+    case "tool_result":
+      return attachToolResult(blocks, e.call_id, {
+        call_id: e.call_id,
+        content: e.result,
+        is_error: e.is_error,
+      })
+    default:
+      return blocks
+  }
+}
+
+// 子 agent 开始:新开一个 subagent 块(幂等;同 id 已存在则不重开)。
+export function startSubagent(blocks: Block[], id: string, description: string): Block[] {
+  if (blocks.some((b) => b.kind === "subagent" && b.id === id)) return blocks
+  return [...blocks, { kind: "subagent", id, description, blocks: [], running: true, ok: true }]
+}
+
+// 子 agent 事件:应用到对应 subagent 块的内部 blocks(找不到该 id 则原样返回)。
+export function appendToSubagent(blocks: Block[], id: string, e: TurnEvent): Block[] {
+  return blocks.map((b) =>
+    b.kind === "subagent" && b.id === id ? { ...b, blocks: applyEvent(b.blocks, e) } : b,
+  )
+}
+
+// 子 agent 结束:标记 running=false + ok(是否自动折叠由渲染层依 running 决定)。
+export function finishSubagent(blocks: Block[], id: string, ok: boolean): Block[] {
+  return blocks.map((b) =>
+    b.kind === "subagent" && b.id === id ? { ...b, running: false, ok } : b,
+  )
+}
+
 // 历史里一个回合:可能有用户消息(userText),以及该回合的展示块。
 export interface Turn {
   id: string
@@ -84,7 +129,22 @@ export function messagesToTurns(messages: Message[]): Turn[] {
     for (const m of cur.assistants) {
       if (m.content.text) blocks.push({ kind: "text", id: `${m.id}-text`, text: m.content.text })
       for (const c of m.content.tool_calls) {
-        blocks.push({ kind: "tool", id: c.id, call: c, result: cur.results.get(c.id) })
+        if (c.name === "task") {
+          // 子 agent 过程不落库,历史里只剩 task 调用 + 结果 → 渲染成折叠的 subagent 卡片
+          // (与 live 视觉一致):description 取自 args,体 = 结果文本。
+          const r = cur.results.get(c.id)
+          const desc = (c.arguments as { description?: unknown }).description
+          blocks.push({
+            kind: "subagent",
+            id: c.id,
+            description: typeof desc === "string" ? desc : "子任务",
+            blocks: r ? [{ kind: "text", id: `${c.id}-r`, text: r.content }] : [],
+            running: false,
+            ok: !(r?.is_error ?? false),
+          })
+        } else {
+          blocks.push({ kind: "tool", id: c.id, call: c, result: cur.results.get(c.id) })
+        }
       }
     }
     turns.push({ id: cur.id, userText: cur.user, userAt: cur.userAt, doneAt: cur.lastAt, blocks })

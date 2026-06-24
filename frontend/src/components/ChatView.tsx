@@ -4,11 +4,11 @@ import { api, HttpError } from "../api/client"
 import { pollSessionTitle } from "../api/queryClient"
 import { cancelTurn, resumeTurn, streamTurn } from "../api/stream"
 import {
-  appendDelta,
-  appendToolCall,
-  attachToolResult,
+  appendToSubagent,
+  applyEvent,
   dropPendingTools,
-  upsertToolProgress,
+  finishSubagent,
+  startSubagent,
 } from "../blocks"
 import { useStore } from "../store"
 import type { TurnEvent } from "../types"
@@ -52,26 +52,13 @@ export function ChatView() {
   // 把一个回合事件灌进 live(仅当仍停留在该会话,丢弃切走会话的残余事件)
   const feed = (sid: string, e: TurnEvent) => {
     if (useStore.getState().sessionId !== sid) return
-    if (e.type === "thinking_delta")
-      setLive((t) => ({ ...t, blocks: appendDelta(t.blocks, "thinking", e.text) }))
-    else if (e.type === "text_delta")
-      setLive((t) => ({ ...t, blocks: appendDelta(t.blocks, "text", e.text) }))
-    else if (e.type === "tool_call_progress")
-      setLive((t) => ({ ...t, blocks: upsertToolProgress(t.blocks, e) }))
-    else if (e.type === "tool_call_start")
-      setLive((t) => ({
-        ...t,
-        blocks: appendToolCall(t.blocks, { id: e.call_id, name: e.tool, arguments: e.args }),
-      }))
-    else if (e.type === "tool_result")
-      setLive((t) => ({
-        ...t,
-        blocks: attachToolResult(t.blocks, e.call_id, {
-          call_id: e.call_id,
-          content: e.result,
-          is_error: e.is_error,
-        }),
-      }))
+    if (e.type === "subagent_started")
+      setLive((t) => ({ ...t, blocks: startSubagent(t.blocks, e.subagent_id, e.description) }))
+    else if (e.type === "subagent_done")
+      setLive((t) => ({ ...t, blocks: finishSubagent(t.blocks, e.subagent_id, e.ok) }))
+    else if ("subagent_id" in e && e.subagent_id)
+      // 子 agent 事件:路由进对应 subagent 块的内部 blocks(而非顶层) → 折叠卡片
+      setLive((t) => ({ ...t, blocks: appendToSubagent(t.blocks, e.subagent_id as string, e) }))
     else if (e.type === "turn_done") setLive((t) => ({ ...t, status: "done" }))
     else if (e.type === "reset")
       // 透明自动重试:清掉本回合已显示内容,从头重来(状态保持 streaming)
@@ -91,6 +78,9 @@ export function ChatView() {
         errorMessage: e.message,
         recoverable: e.recoverable,
       }))
+    else
+      // 顶层(主 agent)的 thinking/text/tool 增量
+      setLive((t) => ({ ...t, blocks: applyEvent(t.blocks, e) }))
   }
 
   // 消费一个流(POST 或 GET resume)到结束:成功→刷新历史+清 live;主动中断(切走)→不动。

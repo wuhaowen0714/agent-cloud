@@ -23,14 +23,17 @@ export interface Message { id: string; seq: number; role: "user" | "assistant" |
 
 // SSE 回合事件(后端 turn_event_to_sse 的形状)
 export type TurnEvent =
-  | { type: "text_delta"; text: string }
-  | { type: "thinking_delta"; text: string }
-  | { type: "tool_call_start"; call_id: string; tool: string; args: Record<string, unknown> }
-  | { type: "tool_call_progress"; call_id: string; tool: string; args_chars: number; lines: number; path: string }
-  | { type: "tool_result"; call_id: string; result: string; is_error: boolean }
+  | { type: "text_delta"; text: string; subagent_id?: string }
+  | { type: "thinking_delta"; text: string; subagent_id?: string }
+  | { type: "tool_call_start"; call_id: string; tool: string; args: Record<string, unknown>; subagent_id?: string }
+  | { type: "tool_call_progress"; call_id: string; tool: string; args_chars: number; lines: number; path: string; subagent_id?: string }
+  | { type: "tool_result"; call_id: string; result: string; is_error: boolean; subagent_id?: string }
   | { type: "turn_done"; usage: { input_tokens: number; output_tokens: number }; message_ids: string[]; stop_reason: string }
   | { type: "error"; message: string; recoverable: boolean }
   | { type: "reset" }  // 透明自动重试:清掉本回合已显示内容,从头重来
+  // 子 agent(task 派生):start/done 包裹其事件区间,中间事件带 subagent_id 标记归属
+  | { type: "subagent_started"; subagent_id: string; description: string }
+  | { type: "subagent_done"; subagent_id: string; ok: boolean }
 
 // 手动压缩结果四态:压缩了 / 没东西可压 / 会话忙(回合进行中)/ 出错。
 // 定义在此(而非 slash/commands)以便 store 引用而不形成 store↔commands 循环依赖。
