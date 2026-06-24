@@ -48,6 +48,29 @@ class TurnDone:
     context_tokens: int = 0  # 最后一次 LLM 调用的 input_tokens(真实上下文大小,供压缩判阈值)
 
 
+@dataclass
+class SubagentStarted:
+    """子 agent(task 工具)开始:包裹其事件区间起点。subagent_id 回合内唯一。"""
+
+    subagent_id: str
+    description: str
+
+
+@dataclass
+class SubagentDone:
+    """子 agent 结束:ok=False 表示子 agent 抛错/未自然收尾。"""
+
+    subagent_id: str
+    ok: bool
+
+
 TurnEvent = (
-    TextDelta | ThinkingDelta | ToolCallProgress | ToolCallStarted | ToolResultEvent | TurnDone
+    TextDelta
+    | ThinkingDelta
+    | ToolCallProgress
+    | ToolCallStarted
+    | ToolResultEvent
+    | TurnDone
+    | SubagentStarted
+    | SubagentDone
 )

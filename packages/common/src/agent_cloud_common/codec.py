@@ -5,6 +5,8 @@ import json
 from agent_cloud.v1 import worker_pb2
 
 from agent_cloud_common.events import (
+    SubagentDone,
+    SubagentStarted,
     TextDelta,
     ThinkingDelta,
     ToolCallProgress,
@@ -55,7 +57,15 @@ def msg_from_proto(proto: worker_pb2.Msg) -> Message:
     )
 
 
-def turn_event_to_proto(event: TurnEvent) -> worker_pb2.TurnEvent:
+def turn_event_to_proto(event: TurnEvent, subagent_id: str = "") -> worker_pb2.TurnEvent:
+    """domain 事件 → proto。subagent_id 非空时填进外层(标识此事件来自哪个子 agent)。"""
+    proto = _event_oneof_to_proto(event)
+    if subagent_id:
+        proto.subagent_id = subagent_id
+    return proto
+
+
+def _event_oneof_to_proto(event: TurnEvent) -> worker_pb2.TurnEvent:
     if isinstance(event, TextDelta):
         return worker_pb2.TurnEvent(text_delta=worker_pb2.TextDelta(text=event.text))
     if isinstance(event, ThinkingDelta):
@@ -91,6 +101,16 @@ def turn_event_to_proto(event: TurnEvent) -> worker_pb2.TurnEvent:
                 context_tokens=event.context_tokens,
             )
         )
+    if isinstance(event, SubagentStarted):
+        return worker_pb2.TurnEvent(
+            subagent_started=worker_pb2.SubagentStarted(
+                subagent_id=event.subagent_id, description=event.description
+            )
+        )
+    if isinstance(event, SubagentDone):
+        return worker_pb2.TurnEvent(
+            subagent_done=worker_pb2.SubagentDone(subagent_id=event.subagent_id, ok=event.ok)
+        )
     raise ValueError(f"unknown turn event type: {type(event).__name__}")
 
 
@@ -122,4 +142,10 @@ def turn_event_from_proto(proto: worker_pb2.TurnEvent) -> TurnEvent:
             stop_reason=t.stop_reason,
             context_tokens=t.context_tokens,
         )
+    if which == "subagent_started":
+        t = proto.subagent_started
+        return SubagentStarted(subagent_id=t.subagent_id, description=t.description)
+    if which == "subagent_done":
+        t = proto.subagent_done
+        return SubagentDone(subagent_id=t.subagent_id, ok=t.ok)
     raise ValueError(f"empty or unknown TurnEvent oneof: {which!r}")

@@ -16,6 +16,8 @@ from agent_cloud_common import (
     Message,
     Role,
     SkillRef,
+    TurnDone,
+    Usage,
 )
 from agent_cloud_common.codec import msg_from_proto, msg_to_proto, turn_event_to_proto
 
@@ -32,7 +34,7 @@ from agent_cloud_worker.image_gen import (
     make_sophnet_image_generator,
     to_data_uri,
 )
-from agent_cloud_worker.loop import run_turn, run_turn_stream
+from agent_cloud_worker.loop import _Tagged, run_turn, run_turn_stream
 from agent_cloud_worker.memory_extract import MemoryParseError, reconcile_memory
 from agent_cloud_worker.notify import NotifyingExecutor, notify_enabled
 from agent_cloud_worker.provider import (
@@ -43,6 +45,7 @@ from agent_cloud_worker.provider import (
 from agent_cloud_worker.remember import RememberingExecutor, remember_enabled
 from agent_cloud_worker.sandbox_executor import SandboxToolExecutor
 from agent_cloud_worker.schedule_task import SchedulingExecutor, schedule_task_enabled
+from agent_cloud_worker.subagent import SubagentExecutor, subagent_enabled
 from agent_cloud_worker.title import TITLE_SYSTEM, clean_title
 from agent_cloud_worker.web_search import (
     DEFAULT_SEARCH_ENDPOINT,
@@ -309,6 +312,15 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
         ]
         async with grpc.aio.insecure_channel(request.sandbox_endpoint, options=options) as channel:
             executor, sandbox_exec = self._build_executor(channel, request)
+            # subagent:最外层包 SubagentExecutor(暴露 task;inner 是完整工具链不含 task → 封顶 1)。
+            # emit 队列让子 agent 事件流回 run_turn_stream 的工具执行处穿插透传(仅流式路径接入)。
+            emit_queue: asyncio.Queue = asyncio.Queue()
+            subagent_exec: SubagentExecutor | None = None
+            if subagent_enabled(list(request.agent.enabled_tools)):
+                subagent_exec = SubagentExecutor(
+                    executor, provider, emit_queue, max_iterations=self._max_iterations
+                )
+                executor = subagent_exec
             user_images = await _read_turn_images(sandbox_exec.read_binary, request.turn_images)
             # 流中途失败(provider 抛错 / loop 守卫)是 worker-fault:收敛为通用 INTERNAL,
             # 不把原始异常文本泄漏给客户端(会暴露内部细节且与 UNKNOWN 无法区分)。
@@ -322,7 +334,19 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                     user_message=request.user_message,
                     user_images=user_images,
                     max_iterations=self._max_iterations,
+                    emit=emit_queue,
                 ):
+                    if isinstance(event, _Tagged):
+                        yield turn_event_to_proto(event.event, event.subagent_id)
+                        continue
+                    # 主回合收尾:把子 agent 累计 usage 并入总 usage(token 计费)。
+                    if isinstance(event, TurnDone) and subagent_exec is not None:
+                        event.usage = Usage(
+                            input_tokens=event.usage.input_tokens
+                            + subagent_exec.accumulated_usage.input_tokens,
+                            output_tokens=event.usage.output_tokens
+                            + subagent_exec.accumulated_usage.output_tokens,
+                        )
                     yield turn_event_to_proto(event)
             except CompletionBudgetExceeded as exc:
                 # 配置错误(输出预算 ≥ 模型窗口):压缩救不了,绝不能映射成 RESOURCE_EXHAUSTED

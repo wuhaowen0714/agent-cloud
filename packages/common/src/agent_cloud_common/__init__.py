@@ -1,5 +1,7 @@
 from agent_cloud_common.edit import apply_edits
 from agent_cloud_common.events import (
+    SubagentDone,
+    SubagentStarted,
     TextDelta,
     ThinkingDelta,
     ToolCallProgress,
@@ -48,4 +50,6 @@ __all__ = [
     "ToolResultEvent",
     "TurnDone",
     "TurnEvent",
+    "SubagentStarted",
+    "SubagentDone",
 ]

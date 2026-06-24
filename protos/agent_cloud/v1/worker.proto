@@ -129,7 +129,12 @@ message TurnDone {
   string stop_reason = 4;
   int64 context_tokens = 5;  // 最后一次 LLM 调用的 input_tokens(真实上下文大小)
 }
+// 子 agent 派生(task 工具):start/done 包裹子 agent 的事件区间,description 是子任务。
+message SubagentStarted { string subagent_id = 1; string description = 2; }
+message SubagentDone { string subagent_id = 1; bool ok = 2; }
 message TurnEvent {
+  // 非空 = 此事件来自该 id 的子 agent(前端按它分组渲染);空 = 主 agent。在 oneof 外,所有事件共享。
+  string subagent_id = 7;
   oneof event {
     TextDelta text_delta = 1;
     ThinkingDelta thinking_delta = 2;
@@ -137,6 +142,8 @@ message TurnEvent {
     ToolResultEvent tool_result = 4;
     TurnDone turn_done = 5;
     ToolCallProgress tool_call_progress = 6;
+    SubagentStarted subagent_started = 8;
+    SubagentDone subagent_done = 9;
   }
 }
 

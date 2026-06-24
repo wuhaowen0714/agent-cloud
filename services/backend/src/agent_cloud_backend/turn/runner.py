@@ -141,7 +141,11 @@ async def run_turn(
                                 }
                             )
                         else:
-                            await active.emit(turn_event_to_sse(event))
+                            # subagent_id 在 proto 外层(转 domain 时不带);从 proto_event 直接取,
+                            # 透传给 SSE 让前端把子 agent 事件分组。
+                            await active.emit(
+                                turn_event_to_sse(event, proto_event.subagent_id)
+                            )
                     # 回合成功收尾 → 主动压缩(仍在心跳内续租)→ 异步起名 → 结束
                     await maybe_compact_after_turn(
                         session_id, ctx_tokens, model=current.agent.model, settings=settings
