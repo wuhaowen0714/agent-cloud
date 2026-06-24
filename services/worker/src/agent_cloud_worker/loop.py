@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
@@ -44,6 +45,18 @@ _MALFORMED_CALL_RESULT = (
 # 连续这么多轮出现被截断的工具调用就熔断收尾:模型没有接受修复引导,
 # 继续循环只会按 max_iterations 烧满每轮的输出预算。
 _TRUNCATION_FUSE = 2
+
+
+@dataclass
+class _Tagged:
+    """run_turn_stream 透传子 agent 事件时的包装。
+
+    主 agent 自身事件仍 yield 裸 TurnEvent(无包装、现有调用方不受影响);只有经 emit 队列
+    透传出来的子 agent 事件被包成 _Tagged,server 据此把 subagent_id 填进 proto 外层。
+    """
+
+    event: TurnEvent
+    subagent_id: str
 
 
 @dataclass
@@ -127,8 +140,13 @@ async def run_turn_stream(
     user_message: str,
     user_images: list[str] | None = None,
     max_iterations: int = 10,
-) -> AsyncIterator[TurnEvent]:
+    emit: asyncio.Queue | None = None,
+) -> AsyncIterator[TurnEvent | _Tagged]:
     """流式版回合:消费 provider.stream 转发增量、执行工具并 yield 事件,最后 yield TurnDone。
+
+    emit:子 agent 事件透传队列(元素为 (子事件, subagent_id))。非 None 时,执行工具期间边
+    drain 该队列边 yield 子事件(包成 _Tagged);None 时退化为普通工具执行。由 SubagentExecutor
+    往队列里 put,本函数在工具执行处 drain —— 实现子 agent 流式透传。
 
     TurnDone 携带本回合新增的 assistant/tool 消息(供后端持久化);用户消息不计入。
     stop_reason="max_iterations" 表示回合未完成(可能止于 tool 消息),由调用方决定丢弃/重试。
@@ -193,6 +211,27 @@ async def run_turn_stream(
             if call.id in completed.truncated_call_ids:
                 # 参数被截断/非法:不执行,回灌修复性错误让模型在回合内自行重试
                 result = ToolResult(call_id=call.id, content=repair_msg, is_error=True)
+            elif emit is not None:
+                # 工具执行期间边 drain emit 队列(子 agent 透传的事件)边 yield,实现流式透传。
+                # asyncio.wait(FIRST_COMPLETED) 在"工具完成"与"队列有事件"间择一,不轮询不阻塞;
+                # 队列元素是 (子事件, subagent_id)。不透传的工具队列恒空,退化为普通 await。
+                exec_task = asyncio.create_task(executor.execute(call))
+                get_task = asyncio.create_task(emit.get())
+                while True:
+                    done, _ = await asyncio.wait(
+                        {exec_task, get_task}, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    if get_task in done:
+                        sub_ev, sub_id = get_task.result()
+                        yield _Tagged(event=sub_ev, subagent_id=sub_id)
+                        get_task = asyncio.create_task(emit.get())
+                    if exec_task in done:
+                        get_task.cancel()  # 取消最后一个未取到的 get
+                        while not emit.empty():  # drain 工具完成瞬间的积压,绝不丢
+                            sub_ev, sub_id = emit.get_nowait()
+                            yield _Tagged(event=sub_ev, subagent_id=sub_id)
+                        break
+                result = exec_task.result()
             else:
                 result = await executor.execute(call)
             yield ToolResultEvent(
