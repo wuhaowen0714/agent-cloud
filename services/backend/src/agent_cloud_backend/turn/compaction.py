@@ -12,7 +12,11 @@ from agent_cloud_backend.repositories.message import MessageRepository
 from agent_cloud_backend.repositories.session import SessionRepository
 from agent_cloud_backend.turn.credentials import resolve_session_key
 from agent_cloud_backend.turn.memory_extract import extract_session_memory
-from agent_cloud_backend.turn.messages import orm_to_common, strip_unanswered_user_messages
+from agent_cloud_backend.turn.messages import (
+    is_subagent_orm,
+    orm_to_common,
+    strip_unanswered_user_messages,
+)
 from agent_cloud_backend.turn.worker_client import summarize_via_worker
 
 logger = logging.getLogger(__name__)
@@ -40,6 +44,8 @@ async def compact(
         if session is None:
             return False
         history = await MessageRepository(db).list_by_session(session_id)
+        # 子 agent 中间消息不进摘要(只服务前端历史重建);其 seq 在回合末尾,随后续回合压缩自然越过。
+        history = [m for m in history if not is_subagent_orm(m)]
         history_after = [m for m in history if m.seq > session.summary_through_seq]
         folded = _fold_boundary(history_after, keep_recent)
         if folded is None:

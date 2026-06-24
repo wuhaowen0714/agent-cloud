@@ -156,6 +156,51 @@ async def test_runner_persists_and_releases_without_any_subscriber(engine, monke
     assert hub.get(sid) is None  # 已移除
 
 
+async def test_runner_length_truncation_targets_main_not_subagent(engine, monkeypatch):
+    # 回归:length 截断标记贴到最后一条主 agent 消息,而非并入末尾的子 agent 消息(parent_call_id)。
+    from agent_cloud_backend.config import Settings
+    from agent_cloud_backend.models.message import Message as M
+    from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub
+    from agent_cloud_backend.turn.runner import run_turn
+
+    _patch_global_sessionmaker(monkeypatch, engine)
+    sid = await _make_session_row(engine)
+    await _acquire(engine, sid)
+
+    async def _gen(endpoint, request):
+        yield turn_event_to_proto(
+            TurnDone(
+                new_messages=[
+                    Message(role=Role.ASSISTANT, text="主回答"),
+                    Message(role=Role.ASSISTANT, text="子过程", parent_call_id="task1"),
+                ],
+                usage=Usage(input_tokens=1, output_tokens=2),
+                stop_reason="length",
+            )
+        )
+
+    _fake_worker(monkeypatch, _gen)
+    hub = TurnHub()
+    active = ActiveTurn(session_id=sid)
+    hub.register(active)
+    await run_turn(
+        hub, active, worker_endpoint="x", request=_REQ, reassemble=_reassemble,
+        session_id=sid, heartbeat_interval=999, settings=Settings(),
+    )
+
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        contents = (
+            (await db.execute(select(M.content).where(M.session_id == sid).order_by(M.seq)))
+            .scalars()
+            .all()
+        )
+    main = next(c for c in contents if not c.get("parent_call_id"))
+    sub = next(c for c in contents if c.get("parent_call_id"))
+    assert "主回答" in main["text"] and main["text"] != "主回答"  # 截断标记追加到主消息
+    assert sub["text"] == "子过程"  # 子消息原样,未被贴标记
+
+
 async def test_runner_persists_context_tokens(engine, monkeypatch):
     # /status 用:回合结束把 worker 报告的 context_tokens 落到 session.last_context_tokens。
     from agent_cloud_backend.config import Settings
