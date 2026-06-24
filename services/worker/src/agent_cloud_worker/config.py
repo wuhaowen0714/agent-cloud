@@ -28,6 +28,19 @@ class WorkerSettings(BaseSettings):
     openai_timeout_seconds: float = 45.0
     openai_max_retries: int = 3
 
+    # 动态首字节(TTFT)超时:流式请求的 per-request timeout 按 payload 大小 + 是否多模态动态算,
+    # 取代固定 openai_timeout_seconds 作用于"等首个 chunk"。撞 sophnet 冷启时纯文本/短上下文
+    # 快速 fail-fast 重试到 keepwarm 焐热的路由,多模态/长上下文给足不误杀。预算 = clamp(base
+    # + 长度加成, floor, ceil);长度 = to_openai_messages 后文本字符数(图 base64 不计)。ceil
+    # 取 = openai_timeout_seconds,保证最坏不比固定超时差。全部可经 env 覆盖,见
+    # docs/superpowers/specs/2026-06-24-dynamic-ttft-timeout-design.md。
+    ttft_text_base_seconds: float = 12.0  # 纯文本基线:路由热时连接 + 冷启判定余量
+    ttft_multimodal_base_seconds: float = 25.0  # 含图基线:图编码首字节本就慢
+    ttft_chars_per_second: float = 2000.0  # 长度加成:每这么多字符 +1s
+    ttft_length_cap_seconds: float = 20.0  # 长度加成封顶
+    ttft_floor_seconds: float = 10.0  # 预算下限:防过激误杀(GLM-5.1 常驻首字节 6-7s)
+    ttft_ceil_seconds: float = 45.0  # 预算上限(=openai_timeout,最坏不比现状差)
+
     # LLM 路由保活:sophnet 对 idle 客户端冷启,首请求久不吐字(实测间歇性 ~60s,见上)。后台
     # 每隔 keepwarm_interval_seconds 给每个平台模型发个 max_tokens=1 的小请求,把 sophnet 上游
     # 路由一直焐着热的。⚠️ 冷启是**按模型**的:2026-06-18 线上抓到——keepwarm 只焐 Flash 时其

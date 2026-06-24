@@ -6,6 +6,7 @@ from agent_cloud_worker.config import WorkerSettings
 from agent_cloud_worker.openai_provider import OpenAIProvider
 from agent_cloud_worker.provider import Provider
 from agent_cloud_worker.server import ProviderFactory
+from agent_cloud_worker.ttft import TtftConfig
 
 
 def _effective_credentials(
@@ -38,6 +39,14 @@ def build_provider_factory(settings: WorkerSettings) -> ProviderFactory:
             model=model,
             max_tokens=settings.request_max_tokens,
             max_tokens_param=settings.max_tokens_param,
+            ttft=TtftConfig(
+                text_base=settings.ttft_text_base_seconds,
+                multimodal_base=settings.ttft_multimodal_base_seconds,
+                chars_per_second=settings.ttft_chars_per_second,
+                length_cap=settings.ttft_length_cap_seconds,
+                floor=settings.ttft_floor_seconds,
+                ceil=settings.ttft_ceil_seconds,
+            ),
         )
 
     return factory

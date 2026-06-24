@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import secrets
 import time
@@ -26,6 +27,9 @@ from agent_cloud_worker.provider import (
     ProviderThinkingDelta,
     ProviderToolCallProgress,
 )
+from agent_cloud_worker.ttft import TtftConfig, ttft_budget
+
+logger = logging.getLogger(__name__)
 
 # 工具参数生成进度:最小发射间隔(秒)。全局单计时器——流里 call 串行到达,
 # 这同时也是整条流进度事件率的上界(回放缓冲量级随之有界)。
@@ -210,12 +214,18 @@ class OpenAIProvider:
     """
 
     def __init__(
-        self, client, model: str, max_tokens: int, max_tokens_param: str = "max_tokens"
+        self,
+        client,
+        model: str,
+        max_tokens: int,
+        max_tokens_param: str = "max_tokens",
+        ttft: TtftConfig | None = None,
     ) -> None:
         self._client = client
         self._model = model
         self._max_tokens = max_tokens
         self._max_tokens_param = max_tokens_param
+        self._ttft = ttft  # None → 不套动态首字节超时(向后兼容,用 client 默认 timeout)
 
     def _create_kwargs(self, request: CompletionRequest) -> dict:
         kwargs: dict = {
@@ -228,9 +238,30 @@ class OpenAIProvider:
             kwargs["tools"] = to_openai_tools(request.tools)
         return kwargs
 
+    def _maybe_set_ttft_timeout(self, request: CompletionRequest, kwargs: dict) -> None:
+        """有 ttft 配置时,按 payload 大小 + 是否多模态算 per-request 首字节超时并设入 kwargs。
+
+        流式下该 timeout 作用于"等下一个 chunk"(含首字节);正常 chunk 间隔远小于预算,
+        只有冷启首字节会撞 → 提前 fail-fast,由 SDK max_retries 重试到 keepwarm 焐热的路由。
+        """
+        if self._ttft is None:
+            return
+        has_images = any(m.images for m in request.messages)
+        budget, chars = ttft_budget(kwargs["messages"], has_images, self._ttft)
+        kwargs["timeout"] = budget
+        logger.info(
+            "ttft budget: model=%s images=%s payload_chars=%d budget=%.1fs",
+            self._model,
+            has_images,
+            chars,
+            budget,
+        )
+
     async def complete(self, request: CompletionRequest) -> CompletionResult:
+        kwargs = self._create_kwargs(request)
+        self._maybe_set_ttft_timeout(request, kwargs)
         try:
-            resp = await self._client.chat.completions.create(**self._create_kwargs(request))
+            resp = await self._client.chat.completions.create(**kwargs)
         except openai.BadRequestError as exc:
             if _is_completion_budget_error(exc):  # 先于超窗判:其文案同样命中超窗 markers
                 raise CompletionBudgetExceeded(str(exc)) from exc
@@ -250,6 +281,7 @@ class OpenAIProvider:
         kwargs = self._create_kwargs(request)
         kwargs["stream"] = True
         kwargs["stream_options"] = {"include_usage": True}
+        self._maybe_set_ttft_timeout(request, kwargs)
         try:
             stream = await self._client.chat.completions.create(**kwargs)
         except openai.BadRequestError as exc:

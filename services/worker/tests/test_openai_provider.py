@@ -544,3 +544,69 @@ async def test_stream_text_only_emits_no_progress():
     provider = OpenAIProvider(client=_stream_client(chunks), model="m", max_tokens=9)
     events = [e async for e in provider.stream(_req())]
     assert not any(isinstance(e, ProviderToolCallProgress) for e in events)
+
+
+# ---- 动态首字节(TTFT)超时:provider 按 payload 设 per-request timeout ----
+from agent_cloud_worker.ttft import TtftConfig  # noqa: E402
+
+_TTFT = TtftConfig(
+    text_base=12.0, multimodal_base=25.0, chars_per_second=2000.0,
+    length_cap=20.0, floor=10.0, ceil=45.0,
+)
+
+
+async def test_complete_sets_ttft_timeout_from_payload():
+    captured = {}
+    resp = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="x", tool_calls=None))],
+        usage=SimpleNamespace(prompt_tokens=0, completion_tokens=0),
+    )
+    provider = OpenAIProvider(client=_client(resp, captured), model="m", max_tokens=9, ttft=_TTFT)
+    await provider.complete(_req(text="x" * 12000))  # SYS(3) + 12000 = 12003 字符
+    assert captured["timeout"] == pytest.approx(12 + 12003 / 2000)
+
+
+async def test_stream_sets_ttft_timeout_from_payload():
+    captured = {}
+    chunks = [_delta(content="hi"), _usage_chunk(1, 1)]
+    provider = OpenAIProvider(
+        client=_stream_client(chunks, captured), model="m", max_tokens=9, ttft=_TTFT
+    )
+    async for _ in provider.stream(_req(text="x" * 12000)):
+        pass
+    assert captured["timeout"] == pytest.approx(12 + 12003 / 2000)
+
+
+async def test_ttft_none_keeps_client_default_timeout():
+    # 不传 ttft(向后兼容)→ 不设 per-request timeout,沿用 client 默认 45s
+    captured = {}
+    resp = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="x", tool_calls=None))],
+        usage=SimpleNamespace(prompt_tokens=0, completion_tokens=0),
+    )
+    provider = OpenAIProvider(client=_client(resp, captured), model="m", max_tokens=9)
+    await provider.complete(_req())
+    assert "timeout" not in captured
+
+
+async def test_ttft_multimodal_uses_higher_base_excluding_image_bytes():
+    # 含图 → 用多模态基线(25)而非文本(12);图 base64 不计入长度
+    captured = {}
+    chunks = [_delta(content="hi"), _usage_chunk(1, 1)]
+    provider = OpenAIProvider(
+        client=_stream_client(chunks, captured), model="m", max_tokens=9, ttft=_TTFT
+    )
+    req = CompletionRequest(
+        system="SYS",  # 3
+        messages=[
+            Message(
+                role=Role.USER,
+                text="看图",  # 2
+                images=["data:image/jpeg;base64," + "Z" * 50000],
+            )
+        ],
+        tools=[],
+    )
+    async for _ in provider.stream(req):
+        pass
+    assert captured["timeout"] == pytest.approx(25 + 5 / 2000)  # 图 5 万字节不计入
