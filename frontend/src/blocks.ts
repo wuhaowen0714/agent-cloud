@@ -71,6 +71,10 @@ export function applyEvent(blocks: Block[], e: TurnEvent): Block[] {
     case "tool_call_progress":
       return upsertToolProgress(blocks, e)
     case "tool_call_start":
+      // task 由 subagent_started 承载成子 agent 卡片,顶层不再建工具卡 —— 否则 live 会把一次
+      // task 画成 ToolCallCard + SubagentCard 两张,且回合结束刷历史时跳变成一张(历史只有
+      // subagent 卡)。对应的 tool_result 因顶层无此 task 块,attachToolResult 原样返回、无害。
+      if (e.tool === "task") return blocks
       return appendToolCall(blocks, { id: e.call_id, name: e.tool, arguments: e.args })
     case "tool_result":
       return attachToolResult(blocks, e.call_id, {

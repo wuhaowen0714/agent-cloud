@@ -37,4 +37,16 @@ describe("SubagentCard(经 TurnBlocks)", () => {
     render(<TurnBlocks blocks={[sub({ running: false, ok: false })]} />)
     expect(screen.getByText(/✗/)).toBeInTheDocument()
   })
+
+  it("历史态(内部无工具、steps=0):只显示状态、不显示「0 步」", () => {
+    render(
+      <TurnBlocks
+        blocks={[
+          sub({ running: false, ok: true, blocks: [{ kind: "text", id: "r", text: "结果" }] }),
+        ]}
+      />,
+    )
+    expect(screen.getByText("✓")).toBeInTheDocument()
+    expect(screen.queryByText(/步/)).toBeNull()
+  })
 })

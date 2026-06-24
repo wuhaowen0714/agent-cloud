@@ -69,8 +69,11 @@ function SubagentCard({
         {running ? (
           <span className="shrink-0 text-xs text-sky-600">运行中…</span>
         ) : (
+          // 历史里子过程不落库 → steps=0,只显示状态图标(不显示误导的「0 步」);
+          // live 完成时 steps 为真实工具数,显示「✓ N 步」。
           <span className="shrink-0 text-xs text-sky-600">
-            {ok ? "✓" : "✗"} {steps} 步
+            {ok ? "✓" : "✗"}
+            {steps > 0 ? ` ${steps} 步` : ""}
           </span>
         )}
         {!running &&
