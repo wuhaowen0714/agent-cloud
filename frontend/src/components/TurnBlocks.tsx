@@ -25,6 +25,7 @@ export function TurnBlocks({ blocks, streaming = false }: { blocks: Block[]; str
             <SubagentCard
               key={b.id}
               description={b.description}
+              prompt={b.prompt}
               blocks={b.blocks}
               running={b.running}
               ok={b.ok}
@@ -42,11 +43,13 @@ export function TurnBlocks({ blocks, streaming = false }: { blocks: Block[]; str
 // 内部 blocks 递归用 TurnBlocks 渲染(同一渲染器,缩进在卡片体的 padding)。
 function SubagentCard({
   description,
+  prompt,
   blocks,
   running,
   ok,
 }: {
   description: string
+  prompt: string
   blocks: Block[]
   running: boolean
   ok: boolean
@@ -85,6 +88,12 @@ function SubagentCard({
       </button>
       {expanded && (
         <div className="border-t border-sky-100 bg-white px-3 py-2">
+          {prompt && (
+            <div className="mb-2 rounded-lg bg-sky-50 px-2.5 py-1.5 text-xs">
+              <span className="font-medium text-sky-600">任务指令</span>
+              <p className="mt-0.5 whitespace-pre-wrap break-words text-slate-600">{prompt}</p>
+            </div>
+          )}
           <TurnBlocks blocks={blocks} streaming={running} />
         </div>
       )}

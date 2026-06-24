@@ -46,6 +46,7 @@ message Msg {
   string text = 2;
   repeated ToolCall tool_calls = 3;
   repeated ToolResult tool_results = 4;
+  string parent_call_id = 5;  // 非空 = 此消息属于该 task 工具调用派生的子 agent;空 = 主 agent
 }
 
 message Agent {
@@ -130,7 +131,7 @@ message TurnDone {
   int64 context_tokens = 5;  // 最后一次 LLM 调用的 input_tokens(真实上下文大小)
 }
 // 子 agent 派生(task 工具):start/done 包裹子 agent 的事件区间,description 是子任务。
-message SubagentStarted { string subagent_id = 1; string description = 2; }
+message SubagentStarted { string subagent_id = 1; string description = 2; string prompt = 3; }
 message SubagentDone { string subagent_id = 1; bool ok = 2; }
 message TurnEvent {
   // 非空 = 此事件来自该 id 的子 agent(前端按它分组渲染);空 = 主 agent。在 oneof 外,所有事件共享。

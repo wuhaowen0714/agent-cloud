@@ -30,6 +30,7 @@ def msg_to_proto(message: Message) -> worker_pb2.Msg:
             worker_pb2.ToolResult(call_id=r.call_id, content=r.content, is_error=r.is_error)
             for r in message.tool_results
         ],
+        parent_call_id=message.parent_call_id,
     )
 
 
@@ -54,6 +55,7 @@ def msg_from_proto(proto: worker_pb2.Msg) -> Message:
             ToolResult(call_id=r.call_id, content=r.content, is_error=r.is_error)
             for r in proto.tool_results
         ],
+        parent_call_id=proto.parent_call_id,
     )
 
 
@@ -104,7 +106,7 @@ def _event_oneof_to_proto(event: TurnEvent) -> worker_pb2.TurnEvent:
     if isinstance(event, SubagentStarted):
         return worker_pb2.TurnEvent(
             subagent_started=worker_pb2.SubagentStarted(
-                subagent_id=event.subagent_id, description=event.description
+                subagent_id=event.subagent_id, description=event.description, prompt=event.prompt
             )
         )
     if isinstance(event, SubagentDone):
@@ -144,7 +146,9 @@ def turn_event_from_proto(proto: worker_pb2.TurnEvent) -> TurnEvent:
         )
     if which == "subagent_started":
         t = proto.subagent_started
-        return SubagentStarted(subagent_id=t.subagent_id, description=t.description)
+        return SubagentStarted(
+            subagent_id=t.subagent_id, description=t.description, prompt=t.prompt
+        )
     if which == "subagent_done":
         t = proto.subagent_done
         return SubagentDone(subagent_id=t.subagent_id, ok=t.ok)

@@ -30,6 +30,7 @@ def orm_to_common(message: OrmMessage) -> CommonMessage:
         images=content.get("images") or [],
         tool_calls=[ToolCall(**c) for c in content.get("tool_calls", [])],
         tool_results=[ToolResult(**r) for r in content.get("tool_results", [])],
+        parent_call_id=content.get("parent_call_id", ""),
     )
 
 
@@ -44,6 +45,7 @@ def common_to_content(message: CommonMessage) -> dict:
             {"call_id": r.call_id, "content": r.content, "is_error": r.is_error}
             for r in message.tool_results
         ],
+        "parent_call_id": message.parent_call_id,
     }
 
 

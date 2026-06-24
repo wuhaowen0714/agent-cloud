@@ -7,6 +7,7 @@ const sub = (over: Partial<Extract<Block, { kind: "subagent" }>> = {}): Block =>
   kind: "subagent",
   id: "sub-1",
   description: "搜世界杯",
+  prompt: "",
   blocks: [
     { kind: "tool", id: "c1", call: { id: "c1", name: "web_search", arguments: {} } },
     { kind: "text", id: "x", text: "子结果文本" },
@@ -36,6 +37,16 @@ describe("SubagentCard(经 TurnBlocks)", () => {
   it("失败:显示 ✗ 标记", () => {
     render(<TurnBlocks blocks={[sub({ running: false, ok: false })]} />)
     expect(screen.getByText(/✗/)).toBeInTheDocument()
+  })
+
+  it("展开后显示「任务指令」(prompt);无 prompt 则不显示", () => {
+    const { rerender } = render(
+      <TurnBlocks blocks={[sub({ running: true, prompt: "搜今天的世界杯比分" })]} streaming />,
+    )
+    expect(screen.getByText("任务指令")).toBeInTheDocument()
+    expect(screen.getByText("搜今天的世界杯比分")).toBeInTheDocument()
+    rerender(<TurnBlocks blocks={[sub({ running: true, prompt: "" })]} streaming />)
+    expect(screen.queryByText("任务指令")).toBeNull() // 无 prompt → 不渲染该区
   })
 
   it("历史态(内部无工具、steps=0):只显示状态、不显示「0 步」", () => {

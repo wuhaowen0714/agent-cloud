@@ -53,7 +53,10 @@ export function ChatView() {
   const feed = (sid: string, e: TurnEvent) => {
     if (useStore.getState().sessionId !== sid) return
     if (e.type === "subagent_started")
-      setLive((t) => ({ ...t, blocks: startSubagent(t.blocks, e.subagent_id, e.description) }))
+      setLive((t) => ({
+        ...t,
+        blocks: startSubagent(t.blocks, e.subagent_id, e.description, e.prompt),
+      }))
     else if (e.type === "subagent_done")
       setLive((t) => ({ ...t, blocks: finishSubagent(t.blocks, e.subagent_id, e.ok) }))
     else if ("subagent_id" in e && e.subagent_id)

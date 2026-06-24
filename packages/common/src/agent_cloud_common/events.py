@@ -54,6 +54,7 @@ class SubagentStarted:
 
     subagent_id: str
     description: str
+    prompt: str = ""  # 主 agent 给子 agent 的完整指令(task args.prompt);前端卡里展示
 
 
 @dataclass

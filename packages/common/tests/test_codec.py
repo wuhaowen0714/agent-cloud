@@ -1,6 +1,7 @@
 import pytest
 from agent_cloud.v1 import worker_pb2
 from agent_cloud_common import (
+    SubagentStarted,
     TextDelta,
     ThinkingDelta,
     ToolCallProgress,
@@ -45,6 +46,27 @@ def test_round_trip_plain_user():
     back = msg_from_proto(msg_to_proto(m))
     assert back.role == Role.USER and back.text == "hello"
     assert back.tool_calls == [] and back.tool_results == []
+
+
+def test_round_trip_parent_call_id():
+    # 子 agent 消息带 parent_call_id(关联 task 工具调用)往返保真;主 agent 消息默认空串
+    sub = msg_from_proto(
+        msg_to_proto(Message(role=Role.ASSISTANT, text="子", parent_call_id="call_abc"))
+    )
+    assert sub.parent_call_id == "call_abc"
+    main = msg_from_proto(msg_to_proto(Message(role=Role.ASSISTANT, text="主")))
+    assert main.parent_call_id == ""
+
+
+def test_round_trip_subagent_started_prompt():
+    # SubagentStarted 带主 agent 给子 agent 的完整 prompt,往返保真
+    back = turn_event_from_proto(
+        turn_event_to_proto(
+            SubagentStarted(subagent_id="sub-1", description="d", prompt="详细指令")
+        )
+    )
+    assert isinstance(back, SubagentStarted)
+    assert back.prompt == "详细指令" and back.description == "d"
 
 
 def test_from_proto_rejects_non_dict_arguments():

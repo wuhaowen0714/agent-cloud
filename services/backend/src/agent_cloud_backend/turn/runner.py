@@ -38,8 +38,10 @@ async def _persist(
     # 末条是 assistant 但零文本(如思考烧光预算)→ 标记本身作为正文,免得静默空气泡;
     # 末条不是 assistant(工具截断熔断收尾)→ 不加,修复性错误已在工具结果里说明。
     if stop_reason == "length" and new_messages:
-        last = new_messages[-1]
-        if last.role == Role.ASSISTANT:
+        # 截断发生在主 agent 最后一次输出上;子 agent 消息(parent_call_id 非空)是更早 task 调用
+        # 累积、逻辑在前,跳过它们找最后一条主 agent 消息(否则标记会错贴到子消息上)。
+        last = next((m for m in reversed(new_messages) if not m.parent_call_id), None)
+        if last is not None and last.role == Role.ASSISTANT:
             if last.text:
                 last.text += _TRUNCATION_NOTICE
             else:
@@ -62,7 +64,9 @@ async def _persist(
         await SessionRepository(db).set_context_tokens(session_id, context_tokens)
         await db.commit()
     # agent 主动工具副作用(remember + schedule_task):独立事务、best-effort,绝不拖垮上面的持久化。
-    await run_tool_side_effects(session_id, new_messages)
+    # 只认主 agent 消息:子 agent 工具调用归子上下文,不在 backend 层重复触发(也防子 agent 意外
+    # 自排期)。与阶段 1(子消息不落库、副作用扫不到子)行为一致。
+    await run_tool_side_effects(session_id, [m for m in new_messages if not m.parent_call_id])
     return ids
 
 

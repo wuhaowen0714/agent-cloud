@@ -339,7 +339,8 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                     if isinstance(event, _Tagged):
                         yield turn_event_to_proto(event.event, event.subagent_id)
                         continue
-                    # 主回合收尾:把子 agent 累计 usage 并入总 usage(token 计费)。
+                    # 主回合收尾:把子 agent 累计 usage 并入总 usage(token 计费),并把子 agent
+                    # 过程消息(带 parent_call_id)并入 new_messages 一起落库(供前端刷新后重建)。
                     if isinstance(event, TurnDone) and subagent_exec is not None:
                         event.usage = Usage(
                             input_tokens=event.usage.input_tokens
@@ -347,6 +348,10 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                             output_tokens=event.usage.output_tokens
                             + subagent_exec.accumulated_usage.output_tokens,
                         )
+                        event.new_messages = [
+                            *event.new_messages,
+                            *subagent_exec.accumulated_sub_messages,
+                        ]
                     yield turn_event_to_proto(event)
             except CompletionBudgetExceeded as exc:
                 # 配置错误(输出预算 ≥ 模型窗口):压缩救不了,绝不能映射成 RESOURCE_EXHAUSTED

@@ -64,6 +64,7 @@ def _event_to_sse_dict(event) -> dict:
             "type": "subagent_started",
             "subagent_id": event.subagent_id,
             "description": event.description,
+            "prompt": event.prompt,
         }
     if isinstance(event, SubagentDone):
         return {"type": "subagent_done", "subagent_id": event.subagent_id, "ok": event.ok}
