@@ -119,6 +119,38 @@ async def test_usage_accumulates():
     assert ex.accumulated_usage.output_tokens == 3
 
 
+async def test_subagent_max_iterations_notes_incomplete():
+    # 子 agent 每轮都发工具调用、不收尾 → 达 max_iterations → 结果带"未自然收尾"提示
+    inner = _InnerExec()
+    prov = FakeProvider(
+        [
+            CompletionResult(
+                message=Message(
+                    role=Role.ASSISTANT,
+                    text="",
+                    tool_calls=[ToolCall(id="t1", name="read_file", arguments={})],
+                ),
+                usage=Usage(),
+            ),
+            CompletionResult(
+                message=Message(
+                    role=Role.ASSISTANT,
+                    text="",
+                    tool_calls=[ToolCall(id="t2", name="read_file", arguments={})],
+                ),
+                usage=Usage(),
+            ),
+        ]
+    )
+    q = asyncio.Queue()
+    ex = SubagentExecutor(inner, prov, q, max_iterations=2)
+    result = await ex.execute(
+        ToolCall(id="c1", name="task", arguments={"description": "x", "prompt": "go"})
+    )
+    assert result.is_error is False  # 达上限不算失败
+    assert "incomplete" in result.content and "max_iterations" in result.content
+
+
 def test_subagent_enabled_switch():
     assert subagent_enabled([]) is True  # 空 = 全部启用(含 task)
     assert subagent_enabled(["task"]) is True

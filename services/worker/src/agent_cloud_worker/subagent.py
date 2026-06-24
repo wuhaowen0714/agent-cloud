@@ -102,7 +102,7 @@ class SubagentExecutor:
         if not prompt:
             return ToolResult(call_id=call.id, content="task: 'prompt' is required", is_error=True)
         await self._emit.put((SubagentStarted(subagent_id=sid, description=description), sid))
-        final, ok = "", True
+        final, ok, sub_stop = "", True, "end_turn"
         try:
             async for ev in run_turn_stream(
                 self._provider,
@@ -115,6 +115,7 @@ class SubagentExecutor:
             ):
                 if isinstance(ev, TurnDone):
                     final = _last_assistant_text(ev.new_messages)
+                    sub_stop = ev.stop_reason
                     self.accumulated_usage = Usage(
                         input_tokens=self.accumulated_usage.input_tokens + ev.usage.input_tokens,
                         output_tokens=self.accumulated_usage.output_tokens + ev.usage.output_tokens,
@@ -124,6 +125,11 @@ class SubagentExecutor:
         except Exception as exc:  # noqa: BLE001 — 子 agent 任意失败收敛为工具错误,不挂主回合
             ok = False
             final = f"sub-agent failed: {exc}"
+        # 子 agent 未自然收尾(达迭代/输出上限)→ 提示主 agent 结果可能不完整,否则主 agent
+        # 无从区分"子正常完成"与"子被截断"(只拿到一段 summary 文本)。
+        if ok and sub_stop != "end_turn":
+            note = f"[sub-agent stopped early: {sub_stop} — result may be incomplete]"
+            final = f"{final}\n\n{note}" if final else note
         await self._emit.put((SubagentDone(subagent_id=sid, ok=ok), sid))
         return ToolResult(
             call_id=call.id,
