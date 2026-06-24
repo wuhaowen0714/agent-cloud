@@ -4,6 +4,8 @@ import json
 
 import grpc
 from agent_cloud_common import (
+    SubagentDone,
+    SubagentStarted,
     TextDelta,
     ThinkingDelta,
     ToolCallProgress,
@@ -20,8 +22,16 @@ _RECOVERABLE = {
 }
 
 
-def turn_event_to_sse(event) -> dict:
-    """把流式回合事件(非 TurnDone)映射成前端 SSE JSON。TurnDone 由端点单独处理。"""
+def turn_event_to_sse(event, subagent_id: str = "") -> dict:
+    """把流式回合事件(非 TurnDone)映射成前端 SSE JSON。subagent_id 非空时附在每个事件上
+    (前端按它把子 agent 的事件分组渲染)。TurnDone 由端点单独处理。"""
+    d = _event_to_sse_dict(event)
+    if subagent_id:
+        d["subagent_id"] = subagent_id
+    return d
+
+
+def _event_to_sse_dict(event) -> dict:
     if isinstance(event, TextDelta):
         return {"type": "text_delta", "text": event.text}
     if isinstance(event, ThinkingDelta):
@@ -49,6 +59,14 @@ def turn_event_to_sse(event) -> dict:
             "result": event.content,
             "is_error": event.is_error,
         }
+    if isinstance(event, SubagentStarted):
+        return {
+            "type": "subagent_started",
+            "subagent_id": event.subagent_id,
+            "description": event.description,
+        }
+    if isinstance(event, SubagentDone):
+        return {"type": "subagent_done", "subagent_id": event.subagent_id, "ok": event.ok}
     raise ValueError(f"unmapped streaming event: {type(event).__name__}")
 
 
