@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { CalendarClock, ChevronDown, ChevronRight, Trash2 } from "lucide-react"
-import { Fragment, useRef, useState } from "react"
+import { Fragment, useEffect, useRef, useState } from "react"
 import { api } from "../api/client"
 import { useStore } from "../store"
 import { timeGroupLabel } from "../time"
@@ -22,6 +22,7 @@ export function SessionList() {
   const [confirmingGroup, setConfirmingGroup] = useState<string | null>(null)
   const [clearNote, setClearNote] = useState<string | null>(null)
   const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const toggleGroup = (lbl: string) =>
     setCollapsed((prev) => {
       const next = new Set(prev)
@@ -73,6 +74,21 @@ export function SessionList() {
     if (useStore.getState().sessionId === id) setSession(null)
   }
 
+  // 顶部短提示:3s 后自动消失;timer 收进 ref 以便 unmount 清理。
+  const flashNote = (msg: string) => {
+    setClearNote(msg)
+    if (noteTimer.current) clearTimeout(noteTimer.current)
+    noteTimer.current = setTimeout(() => setClearNote(null), 3000)
+  }
+  // unmount(登出/切换)时清掉挂起的 timer,避免对已卸载组件 setState。
+  useEffect(
+    () => () => {
+      if (confirmTimer.current) clearTimeout(confirmTimer.current)
+      if (noteTimer.current) clearTimeout(noteTimer.current)
+    },
+    [],
+  )
+
   // 清除整组:第一次点进入二次确认(3s 不点自动取消),再点执行批量删除。
   const clearGroup = async (groupLabel: string, items: Session[]) => {
     if (confirmingGroup !== groupLabel) {
@@ -90,13 +106,9 @@ export function SessionList() {
       const cur = useStore.getState().sessionId
       // 只对【真正删掉】的会话退出:被 busy 跳过的虽在本组但仍存在,不该把视图切走
       if (cur && ids.includes(cur) && !skipped.includes(cur)) setSession(null)
-      if (skipped.length > 0) {
-        setClearNote(`${skipped.length} 个进行中的会话未删`)
-        setTimeout(() => setClearNote(null), 3000)
-      }
+      if (skipped.length > 0) flashNote(`${skipped.length} 个进行中的会话未删`)
     } catch {
-      setClearNote("清除失败,请重试")
-      setTimeout(() => setClearNote(null), 3000)
+      flashNote("清除失败,请重试")
     }
   }
 
