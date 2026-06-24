@@ -13,6 +13,8 @@ from agent_cloud_backend.models.user import User
 from agent_cloud_backend.repositories.message import MessageRepository
 from agent_cloud_backend.repositories.session import SessionRepository
 from agent_cloud_backend.schemas.session import (
+    BulkDeleteRequest,
+    BulkDeleteResult,
     ForkRequest,
     ForkResult,
     RollbackRequest,
@@ -93,6 +95,22 @@ async def delete_session(
     if not await SessionRepository(session).delete_if_idle(session_id):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="session busy")
     await session.commit()  # messages 由 FK CASCADE 连带删除
+
+
+@router.post("/bulk-delete", response_model=BulkDeleteResult)
+async def bulk_delete_sessions(
+    body: BulkDeleteRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    """批量删除会话(分组清除):按 id 列表删本人拥有 + 空闲的;回合进行中的跳过、计入 skipped。
+    越权/不存在 id 静默忽略(按 user_id 过滤,绝不误删他人)。路径 /bulk-delete 在 POST 方法下
+    与 /{session_id}/* 不冲突(那些都带二级段)。"""
+    deleted, skipped = await SessionRepository(session).delete_idle_by_ids(
+        user.id, body.session_ids
+    )
+    await session.commit()
+    return BulkDeleteResult(deleted=deleted, skipped=skipped)
 
 
 @router.post("/{session_id}/compact")

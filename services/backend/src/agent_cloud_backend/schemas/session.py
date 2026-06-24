@@ -52,3 +52,12 @@ class ForkRequest(BaseModel):
 class ForkResult(BaseModel):
     new_session_id: uuid.UUID
     user_text: str
+
+
+class BulkDeleteRequest(BaseModel):
+    session_ids: list[uuid.UUID]
+
+
+class BulkDeleteResult(BaseModel):
+    deleted: int
+    skipped: list[uuid.UUID]  # 本人拥有但回合进行中、未删的会话 id(供前端判断当前会话是否真被删)

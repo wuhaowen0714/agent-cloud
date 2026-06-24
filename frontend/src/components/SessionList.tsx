@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { CalendarClock, ChevronDown, ChevronRight } from "lucide-react"
-import { Fragment, useState } from "react"
+import { CalendarClock, ChevronDown, ChevronRight, Trash2 } from "lucide-react"
+import { Fragment, useEffect, useRef, useState } from "react"
 import { api } from "../api/client"
 import { useStore } from "../store"
 import { timeGroupLabel } from "../time"
@@ -19,6 +19,10 @@ export function SessionList() {
   const qc = useQueryClient()
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(DEFAULT_COLLAPSED))
+  const [confirmingGroup, setConfirmingGroup] = useState<string | null>(null)
+  const [clearNote, setClearNote] = useState<string | null>(null)
+  const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const toggleGroup = (lbl: string) =>
     setCollapsed((prev) => {
       const next = new Set(prev)
@@ -70,28 +74,89 @@ export function SessionList() {
     if (useStore.getState().sessionId === id) setSession(null)
   }
 
+  // 顶部短提示:3s 后自动消失;timer 收进 ref 以便 unmount 清理。
+  const flashNote = (msg: string) => {
+    setClearNote(msg)
+    if (noteTimer.current) clearTimeout(noteTimer.current)
+    noteTimer.current = setTimeout(() => setClearNote(null), 3000)
+  }
+  // unmount(登出/切换)时清掉挂起的 timer,避免对已卸载组件 setState。
+  useEffect(
+    () => () => {
+      if (confirmTimer.current) clearTimeout(confirmTimer.current)
+      if (noteTimer.current) clearTimeout(noteTimer.current)
+    },
+    [],
+  )
+
+  // 清除整组:第一次点进入二次确认(3s 不点自动取消),再点执行批量删除。
+  const clearGroup = async (groupLabel: string, items: Session[]) => {
+    if (confirmingGroup !== groupLabel) {
+      setConfirmingGroup(groupLabel)
+      if (confirmTimer.current) clearTimeout(confirmTimer.current)
+      confirmTimer.current = setTimeout(() => setConfirmingGroup(null), 3000)
+      return
+    }
+    if (confirmTimer.current) clearTimeout(confirmTimer.current)
+    setConfirmingGroup(null)
+    const ids = items.map((s) => s.id)
+    try {
+      const { skipped } = await api.bulkDeleteSessions(ids)
+      await invalidate()
+      const cur = useStore.getState().sessionId
+      // 只对【真正删掉】的会话退出:被 busy 跳过的虽在本组但仍存在,不该把视图切走
+      if (cur && ids.includes(cur) && !skipped.includes(cur)) setSession(null)
+      if (skipped.length > 0) flashNote(`${skipped.length} 个进行中的会话未删`)
+    } catch {
+      flashNote("清除失败,请重试")
+    }
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {clearNote && (
+        <div className="mx-1 mb-1 rounded-md bg-red-50 px-2 py-1 text-[11px] text-red-600">
+          {clearNote}
+        </div>
+      )}
       <ul className="min-h-0 flex-1 space-y-0.5 overflow-auto">
         {groups.map((g) => {
           const isCollapsed = collapsed.has(g.label)
           const unread = g.items.filter((s) => s.unread).length
           return (
             <Fragment key={g.label}>
-              <li className="first:pt-0.5">
-                <button
-                  type="button"
-                  onClick={() => toggleGroup(g.label)}
-                  aria-expanded={!isCollapsed}
-                  className="flex w-full items-center gap-1 px-1 pb-1 pt-3 text-[11px] font-medium tracking-wide text-slate-400 transition hover:text-slate-600"
-                >
-                  {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-                  <span>{g.label}</span>
-                  {isCollapsed && <span className="text-slate-300">{g.items.length}</span>}
-                  {isCollapsed && unread > 0 && (
-                    <span aria-label="有未读" className="h-1.5 w-1.5 rounded-full bg-brand-500" />
-                  )}
-                </button>
+              <li className="group/hdr first:pt-0.5">
+                <div className="flex w-full items-center gap-1 px-1 pb-1 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(g.label)}
+                    aria-expanded={!isCollapsed}
+                    className="flex min-w-0 flex-1 items-center gap-1 text-[11px] font-medium tracking-wide text-slate-400 transition hover:text-slate-600"
+                  >
+                    {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                    <span>{g.label}</span>
+                    {isCollapsed && <span className="text-slate-300">{g.items.length}</span>}
+                    {isCollapsed && unread > 0 && (
+                      <span aria-label="有未读" className="h-1.5 w-1.5 rounded-full bg-brand-500" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void clearGroup(g.label, g.items)}
+                    aria-label={`清除${g.label}`}
+                    className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] transition ${
+                      confirmingGroup === g.label
+                        ? "bg-red-50 font-medium text-red-600"
+                        : "text-slate-400 opacity-0 hover:text-red-600 focus-visible:opacity-100 group-hover/hdr:opacity-100"
+                    }`}
+                  >
+                    {confirmingGroup === g.label ? (
+                      `清除 ${g.items.length} 个?`
+                    ) : (
+                      <Trash2 size={12} aria-hidden />
+                    )}
+                  </button>
+                </div>
               </li>
               {!isCollapsed &&
                 g.items.map((s) => (

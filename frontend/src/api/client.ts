@@ -102,6 +102,12 @@ export const api = {
     body: { title?: string; model?: string; credential_id?: string | null },
   ) => http<Session>(`/sessions/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteSession: (id: string) => http<void>(`/sessions/${id}`, { method: "DELETE" }),
+  // 分组清除:批量删本人拥有 + 空闲的会话,返回删除数 + 跳过数(回合进行中未删)
+  bulkDeleteSessions: (sessionIds: string[]) =>
+    http<{ deleted: number; skipped: string[] }>("/sessions/bulk-delete", {
+      method: "POST",
+      body: JSON.stringify({ session_ids: sessionIds }),
+    }),
   deleteAgent: (id: string) => http<void>(`/agent-configs/${id}`, { method: "DELETE" }),
 
   // ── files ──
