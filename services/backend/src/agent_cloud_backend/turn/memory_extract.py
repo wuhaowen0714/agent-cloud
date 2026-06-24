@@ -16,7 +16,7 @@ from agent_cloud_backend.repositories.agent_config import AgentConfigRepository
 from agent_cloud_backend.repositories.memory_entry import MemoryConflict, MemoryEntryRepository
 from agent_cloud_backend.repositories.message import MessageRepository
 from agent_cloud_backend.turn.credentials import resolve_session_key
-from agent_cloud_backend.turn.messages import orm_to_common
+from agent_cloud_backend.turn.messages import is_subagent_orm, orm_to_common
 from agent_cloud_backend.turn.worker_client import extract_memory_via_worker
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,8 @@ async def extract_session_memory(session_id: uuid.UUID, *, settings: Settings, r
         msgs = [
             m
             for m in await MessageRepository(db).list_by_session(s.id)
-            if m.seq > s.memory_through_seq
+            if m.seq > s.memory_through_seq and not is_subagent_orm(m)
+            # 子 agent 中间过程不喂记忆抽取(只服务前端历史重建)
         ]
         if not msgs:
             return False

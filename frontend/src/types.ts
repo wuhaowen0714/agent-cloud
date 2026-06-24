@@ -18,7 +18,7 @@ export interface ScheduledTask {
 
 export interface ToolCall { id: string; name: string; arguments: Record<string, unknown> }
 export interface ToolResult { call_id: string; content: string; is_error: boolean }
-export interface MessageContent { text: string; tool_calls: ToolCall[]; tool_results: ToolResult[] }
+export interface MessageContent { text: string; tool_calls: ToolCall[]; tool_results: ToolResult[]; parent_call_id?: string }
 export interface Message { id: string; seq: number; role: "user" | "assistant" | "tool"; content: MessageContent; created_at: string }
 
 // SSE 回合事件(后端 turn_event_to_sse 的形状)
@@ -32,7 +32,7 @@ export type TurnEvent =
   | { type: "error"; message: string; recoverable: boolean }
   | { type: "reset" }  // 透明自动重试:清掉本回合已显示内容,从头重来
   // 子 agent(task 派生):start/done 包裹其事件区间,中间事件带 subagent_id 标记归属
-  | { type: "subagent_started"; subagent_id: string; description: string }
+  | { type: "subagent_started"; subagent_id: string; description: string; prompt: string }
   | { type: "subagent_done"; subagent_id: string; ok: boolean }
 
 // 手动压缩结果四态:压缩了 / 没东西可压 / 会话忙(回合进行中)/ 出错。

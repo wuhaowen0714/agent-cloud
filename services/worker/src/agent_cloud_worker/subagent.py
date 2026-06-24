@@ -9,6 +9,7 @@ docs/superpowers/specs/2026-06-24-streaming-subagent-design.md。
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 
 from agent_cloud_common import (
     Message,
@@ -88,6 +89,9 @@ class SubagentExecutor:
         self._max_iter = max_iterations
         self._n = 0
         self.accumulated_usage = Usage()
+        # 子 agent 中间消息(assistant/tool),每条标 parent_call_id=task call_id;server 在主回合
+        # TurnDone 时并入 new_messages 一起落库,供前端刷新后重建子 agent 过程。
+        self.accumulated_sub_messages: list[Message] = []
 
     def specs(self) -> list[ToolSpec]:
         return [*self._inner.specs(), _TASK_SPEC]
@@ -101,7 +105,9 @@ class SubagentExecutor:
         prompt = str(call.arguments.get("prompt", "")).strip()
         if not prompt:
             return ToolResult(call_id=call.id, content="task: 'prompt' is required", is_error=True)
-        await self._emit.put((SubagentStarted(subagent_id=sid, description=description), sid))
+        await self._emit.put(
+            (SubagentStarted(subagent_id=sid, description=description, prompt=prompt), sid)
+        )
         final, ok, sub_stop = "", True, "end_turn"
         try:
             async for ev in run_turn_stream(
@@ -116,6 +122,10 @@ class SubagentExecutor:
                 if isinstance(ev, TurnDone):
                     final = _last_assistant_text(ev.new_messages)
                     sub_stop = ev.stop_reason
+                    # 子过程消息标 parent_call_id,落库后前端按它归到对应子 agent 卡。
+                    self.accumulated_sub_messages.extend(
+                        replace(m, parent_call_id=call.id) for m in ev.new_messages
+                    )
                     self.accumulated_usage = Usage(
                         input_tokens=self.accumulated_usage.input_tokens + ev.usage.input_tokens,
                         output_tokens=self.accumulated_usage.output_tokens + ev.usage.output_tokens,

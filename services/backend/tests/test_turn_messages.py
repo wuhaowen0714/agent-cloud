@@ -1,5 +1,10 @@
 from agent_cloud_backend.models.message import Message as OrmMessage
-from agent_cloud_backend.turn.messages import active_images, common_to_content, orm_to_common
+from agent_cloud_backend.turn.messages import (
+    active_images,
+    common_to_content,
+    is_subagent_orm,
+    orm_to_common,
+)
 from agent_cloud_common import Message as CommonMessage
 from agent_cloud_common import Role, ToolResult
 
@@ -31,10 +36,34 @@ def test_common_to_content_round_trip():
         "images": [],
         "tool_calls": [],
         "tool_results": [{"call_id": "c1", "content": "out", "is_error": False}],
+        "parent_call_id": "",
     }
     # round trip through orm shape
     back = orm_to_common(OrmMessage(session_id=None, seq=0, role="tool", content=content))
     assert back.tool_results[0].call_id == "c1" and back.tool_results[0].is_error is False
+
+
+def test_parent_call_id_round_trip_through_content():
+    # 子 agent 消息的 parent_call_id 经 content JSONB 往返;主 agent/旧数据缺键 → 容错空串
+    cm = CommonMessage(role=Role.ASSISTANT, text="子", parent_call_id="call_abc")
+    content = common_to_content(cm)
+    assert content["parent_call_id"] == "call_abc"
+    back = orm_to_common(OrmMessage(session_id=None, seq=0, role="assistant", content=content))
+    assert back.parent_call_id == "call_abc"
+    legacy = orm_to_common(OrmMessage(session_id=None, seq=0, role="user", content={"text": "hi"}))
+    assert legacy.parent_call_id == ""
+
+
+def test_is_subagent_orm():
+    def m(content):
+        return OrmMessage(session_id=None, seq=0, role="assistant", content=content)
+
+    # 子消息(parent_call_id 非空)→ True
+    assert is_subagent_orm(m({"text": "子", "parent_call_id": "task1"})) is True
+    # 主消息(空串)/旧数据(缺键)/content=None → False(绝不误判主消息为子消息)
+    assert is_subagent_orm(m({"text": "主", "parent_call_id": ""})) is False
+    assert is_subagent_orm(m({"text": "无键"})) is False
+    assert is_subagent_orm(m(None)) is False
 
 
 def test_orm_to_common_tolerates_missing_keys():

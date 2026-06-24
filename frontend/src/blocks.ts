@@ -10,7 +10,7 @@ export type Block =
   | { kind: "text"; id: string; text: string }
   | { kind: "tool"; id: string; call: ToolCall; result?: ToolResult; progress?: ToolProgress }
   // 子 agent(task 派生):同 subagent_id 的事件收拢进内部 blocks,渲染成折叠卡片。
-  | { kind: "subagent"; id: string; description: string; blocks: Block[]; running: boolean; ok: boolean }
+  | { kind: "subagent"; id: string; description: string; prompt: string; blocks: Block[]; running: boolean; ok: boolean }
 
 // 流式:把思考/正文增量并入 blocks。尾块同类则追加,否则新开一块 → 还原模型真实时序。
 // 返回新数组(不可变,触发 React 更新)。
@@ -88,9 +88,14 @@ export function applyEvent(blocks: Block[], e: TurnEvent): Block[] {
 }
 
 // 子 agent 开始:新开一个 subagent 块(幂等;同 id 已存在则不重开)。
-export function startSubagent(blocks: Block[], id: string, description: string): Block[] {
+export function startSubagent(
+  blocks: Block[], id: string, description: string, prompt: string,
+): Block[] {
   if (blocks.some((b) => b.kind === "subagent" && b.id === id)) return blocks
-  return [...blocks, { kind: "subagent", id, description, blocks: [], running: true, ok: true }]
+  return [
+    ...blocks,
+    { kind: "subagent", id, description, prompt, blocks: [], running: true, ok: true },
+  ]
 }
 
 // 子 agent 事件:应用到对应 subagent 块的内部 blocks(找不到该 id 则原样返回)。
@@ -120,53 +125,85 @@ export interface Turn {
 // 消息都归入该回合,直到下一条 user 消息。每个回合内按消息顺序展开成 Block[]:
 // assistant 消息 → 正文块 + 各工具调用块;tool 消息 → 结果按 call_id 配对回填到工具块。
 // 思考不落库,故历史里没有思考块(仅 live 流式期间可见)。
+// 把一组消息(按顺序的 assistant/tool)重建成展示块:assistant → 正文 + 工具块;tool → 结果按
+// call_id 回填。task 工具调用渲染成折叠 subagent 卡:内部 blocks 由 parent_call_id=call_id 的子
+// 消息(subByCall)递归重建;子过程未落库的旧数据回退到结果文本。子消息无 task,递归止于一层。
+function rebuildBlocks(msgs: Message[], subByCall: Map<string, Message[]>): Block[] {
+  const results = new Map<string, ToolResult>()
+  for (const m of msgs) {
+    if (m.role === "tool") for (const r of m.content.tool_results) results.set(r.call_id, r)
+  }
+  const blocks: Block[] = []
+  for (const m of msgs) {
+    if (m.role === "tool") continue
+    if (m.content.text) blocks.push({ kind: "text", id: `${m.id}-text`, text: m.content.text })
+    for (const c of m.content.tool_calls) {
+      if (c.name === "task") {
+        const r = results.get(c.id)
+        const desc = (c.arguments as { description?: unknown }).description
+        const prompt = (c.arguments as { prompt?: unknown }).prompt
+        const subMsgs = subByCall.get(c.id) ?? []
+        // 子过程已落库 → 重建子 blocks;旧数据(子过程未落库)→ 回退到结果文本。
+        const inner: Block[] = subMsgs.length
+          ? rebuildBlocks(subMsgs, subByCall)
+          : r
+            ? [{ kind: "text", id: `${c.id}-r`, text: r.content }]
+            : []
+        blocks.push({
+          kind: "subagent",
+          id: c.id,
+          description: typeof desc === "string" ? desc : "子任务",
+          prompt: typeof prompt === "string" ? prompt : "",
+          blocks: inner,
+          running: false,
+          ok: !(r?.is_error ?? false),
+        })
+      } else {
+        blocks.push({ kind: "tool", id: c.id, call: c, result: results.get(c.id) })
+      }
+    }
+  }
+  return blocks
+}
+
 export function messagesToTurns(messages: Message[]): Turn[] {
+  // 子 agent 消息(parent_call_id 非空)先按 parent_call_id 分组、从主序列剔除:它们不参与回合
+  // 分组,而是重建进对应 task 的 subagent 卡。思考不落库,故历史里没有思考块。
+  const subByCall = new Map<string, Message[]>()
+  const mains: Message[] = []
+  for (const m of messages) {
+    const pid = m.content.parent_call_id
+    if (pid) {
+      const arr = subByCall.get(pid) ?? []
+      arr.push(m)
+      subByCall.set(pid, arr)
+    } else {
+      mains.push(m)
+    }
+  }
+
   const turns: Turn[] = []
   let cur: {
-    id: string; user: string | null; userAt: string | null; lastAt: string | null
-    assistants: Message[]; results: Map<string, ToolResult>
+    id: string; user: string | null; userAt: string | null; lastAt: string | null; msgs: Message[]
   } | null = null
 
   const flush = () => {
     if (!cur) return
-    const blocks: Block[] = []
-    for (const m of cur.assistants) {
-      if (m.content.text) blocks.push({ kind: "text", id: `${m.id}-text`, text: m.content.text })
-      for (const c of m.content.tool_calls) {
-        if (c.name === "task") {
-          // 子 agent 过程不落库,历史里只剩 task 调用 + 结果 → 渲染成折叠的 subagent 卡片
-          // (与 live 视觉一致):description 取自 args,体 = 结果文本。
-          const r = cur.results.get(c.id)
-          const desc = (c.arguments as { description?: unknown }).description
-          blocks.push({
-            kind: "subagent",
-            id: c.id,
-            description: typeof desc === "string" ? desc : "子任务",
-            blocks: r ? [{ kind: "text", id: `${c.id}-r`, text: r.content }] : [],
-            running: false,
-            ok: !(r?.is_error ?? false),
-          })
-        } else {
-          blocks.push({ kind: "tool", id: c.id, call: c, result: cur.results.get(c.id) })
-        }
-      }
-    }
-    turns.push({ id: cur.id, userText: cur.user, userAt: cur.userAt, doneAt: cur.lastAt, blocks })
+    turns.push({
+      id: cur.id, userText: cur.user, userAt: cur.userAt, doneAt: cur.lastAt,
+      blocks: rebuildBlocks(cur.msgs, subByCall),
+    })
     cur = null
   }
 
-  for (const m of messages) {
+  for (const m of mains) {
     if (m.role === "user") {
       flush()
-      cur = { id: m.id, user: m.content.text, userAt: m.created_at, lastAt: null, assistants: [], results: new Map() }
+      cur = { id: m.id, user: m.content.text, userAt: m.created_at, lastAt: null, msgs: [] }
     } else {
-      if (!cur) cur = { id: m.id, user: null, userAt: null, lastAt: null, assistants: [], results: new Map() }
+      if (!cur) cur = { id: m.id, user: null, userAt: null, lastAt: null, msgs: [] }
       cur.lastAt = m.created_at // 回合内任何 assistant/tool 消息都推进「完成时间」
-      if (m.role === "tool") {
-        for (const r of m.content.tool_results) cur.results.set(r.call_id, r)
-      } else {
-        cur.assistants.push(m)
-      }
+      cur.msgs.push(m)
     }
   }
   flush()

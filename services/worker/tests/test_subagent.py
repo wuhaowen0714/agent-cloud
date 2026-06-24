@@ -119,6 +119,30 @@ async def test_usage_accumulates():
     assert ex.accumulated_usage.output_tokens == 3
 
 
+async def test_subagent_started_carries_prompt():
+    # subagent_started 带上主 agent 给的完整 prompt(前端卡里展示)
+    q = asyncio.Queue()
+    ex = SubagentExecutor(_InnerExec(), _sub_provider(), q)
+    await ex.execute(
+        ToolCall(id="c1", name="task", arguments={"description": "读", "prompt": "读 a.txt 并总结"})
+    )
+    started = _drain(q)[0][0]
+    assert type(started).__name__ == "SubagentStarted" and started.prompt == "读 a.txt 并总结"
+
+
+async def test_accumulates_sub_messages_with_parent_call_id():
+    # 子 agent 中间消息(assistant/tool)累积、每条标 parent_call_id=task call_id,供落库后重建过程
+    q = asyncio.Queue()
+    ex = SubagentExecutor(_InnerExec(), _sub_provider(), q, max_iterations=5)
+    await ex.execute(
+        ToolCall(id="call_xyz", name="task", arguments={"description": "x", "prompt": "go"})
+    )
+    subs = ex.accumulated_sub_messages
+    assert len(subs) >= 2  # 子 agent:assistant(读)+ tool(结果)+ assistant(收尾)
+    assert all(m.parent_call_id == "call_xyz" for m in subs)
+    assert all(m.role != Role.USER for m in subs)  # user 不计入 new_messages(见 loop.py)
+
+
 async def test_subagent_max_iterations_notes_incomplete():
     # 子 agent 每轮都发工具调用、不收尾 → 达 max_iterations → 结果带"未自然收尾"提示
     inner = _InnerExec()

@@ -63,6 +63,46 @@ async def test_build_request_from_db(session):
     assert req.work_subdir == s.work_subdir
 
 
+async def test_build_request_excludes_subagent_messages(session):
+    # CRITICAL 回归:子 agent 消息(content.parent_call_id 非空)绝不进发给 LLM 的 messages
+    # —— 否则子过程(web_search 等)会作为主 agent 历史重新喂回模型、污染主上下文。
+    user = await UserRepository(session).create(User(email="sub@example.com"))
+    await session.flush()
+    agent = await AgentConfigRepository(session).create(
+        AgentConfig(user_id=user.id, name="coder", enabled_tools=["bash"])
+    )
+    await session.flush()
+    s = await SessionRepository(session).create_for(user.id, agent.id, None, model="m")
+    await session.flush()
+    await MessageRepository(session).append(
+        s.id, OrmMessage(session_id=s.id, seq=0, role="user", content={"text": "主问题"})
+    )
+    await MessageRepository(session).append(
+        s.id,
+        OrmMessage(
+            session_id=s.id, seq=0, role="assistant",
+            content={"text": "主回答", "tool_calls": [], "tool_results": []},
+        ),
+    )
+    # 子 agent 中间消息(parent_call_id 指向 task 调用):只服务前端重建,不该喂 LLM
+    await MessageRepository(session).append(
+        s.id,
+        OrmMessage(
+            session_id=s.id, seq=0, role="assistant",
+            content={"text": "子搜索", "tool_calls": [], "tool_results": [],
+                     "parent_call_id": "task1"},
+        ),
+    )
+    await session.commit()
+
+    req = await build_run_turn_request(
+        session, s, sandbox_endpoint="localhost:50051", user_message="now",
+        exclude_message_id=None,
+    )
+    # 主 agent 消息保留;子 agent 消息(parent_call_id)被排除出喂给模型的历史
+    assert [m.text for m in req.messages] == ["主问题", "主回答"]
+
+
 async def test_memory_injects_only_current_block(session):
     user = await UserRepository(session).create(User(email="b@example.com"))
     await session.flush()

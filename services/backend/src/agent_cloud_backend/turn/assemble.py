@@ -17,6 +17,7 @@ from agent_cloud_backend.skills.materialize import skill_location
 from agent_cloud_backend.turn.credentials import resolve_session_key
 from agent_cloud_backend.turn.messages import (
     active_images,
+    is_subagent_orm,
     orm_to_common,
     strip_unanswered_user_messages,
 )
@@ -55,7 +56,9 @@ async def build_run_turn_request(
     history = [
         m
         for m in history
-        if m.id != exclude_message_id and m.seq > session.summary_through_seq
+        if m.id != exclude_message_id
+        and m.seq > session.summary_through_seq
+        and not is_subagent_orm(m)  # 子 agent 中间过程绝不喂回主 agent(只服务前端历史重建)
     ]
     history = strip_unanswered_user_messages(history)
 

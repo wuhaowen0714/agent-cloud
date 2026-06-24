@@ -22,6 +22,14 @@ def strip_unanswered_user_messages(history: list) -> list:
     return kept
 
 
+def is_subagent_orm(message: OrmMessage) -> bool:
+    """ORM 消息是否属于子 agent(content.parent_call_id 非空)。子消息只服务前端历史重建,
+    绝不进发给 LLM / 压缩摘要 / 记忆抽取的集合 —— 否则子 agent 的中间过程(web_search、读文件等)
+    会作为主 agent 的历史动作重新喂回模型,污染主上下文、撑大 token、可能触发网关严格校验
+    (破坏 subagent "主 agent 只见 task 结果摘要" 的隔离不变量)。前端历史 API 仍返回它们供重建。"""
+    return bool((message.content or {}).get("parent_call_id"))
+
+
 def orm_to_common(message: OrmMessage) -> CommonMessage:
     content = message.content or {}
     return CommonMessage(
@@ -30,6 +38,7 @@ def orm_to_common(message: OrmMessage) -> CommonMessage:
         images=content.get("images") or [],
         tool_calls=[ToolCall(**c) for c in content.get("tool_calls", [])],
         tool_results=[ToolResult(**r) for r in content.get("tool_results", [])],
+        parent_call_id=content.get("parent_call_id", ""),
     )
 
 
@@ -44,6 +53,7 @@ def common_to_content(message: CommonMessage) -> dict:
             {"call_id": r.call_id, "content": r.content, "is_error": r.is_error}
             for r in message.tool_results
         ],
+        "parent_call_id": message.parent_call_id,
     }
 
 

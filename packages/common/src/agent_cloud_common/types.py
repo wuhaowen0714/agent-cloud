@@ -36,6 +36,9 @@ class Message:
     # 多模态:user 消息附带的图片(data_uri 字符串,如 "data:image/png;base64,...")。worker
     # 调 LLM 前由 turn_images 路径经沙箱读成 data_uri 填入(spec: image-understanding)。
     images: list[str] = field(default_factory=list)
+    # 非空 = 此消息属于该 task 工具调用(call_id)派生的子 agent;空 = 主 agent。前端历史按它把子
+    # 消息归到对应子 agent 卡;后端落库进 content JSONB(不占 DB 列)。
+    parent_call_id: str = ""
 
 
 @dataclass
