@@ -99,3 +99,44 @@ async def test_logout_revokes_refresh(client):
     assert out.status_code == 204
     client.cookies.clear()
     assert (await client.post("/auth/refresh", cookies={"ac_refresh": tok})).status_code == 401
+
+
+# ── 移动端:refresh token 走响应体(不依赖 cookie)──
+
+
+async def test_register_returns_refresh_in_body(client):
+    # 移动端:refresh 也在 body 返回(存 Keychain),且与 cookie 是同一个 token
+    r = await _register(client)
+    body = r.json()
+    assert body["refresh_token"]
+    assert body["refresh_token"] == r.cookies.get("ac_refresh")
+
+
+async def test_refresh_via_body_rotates_and_reuse_detected(client):
+    # 移动端无 cookie:refresh 放 body 发,照样轮换;旧的重用被检测
+    reg = await _register(client)
+    rt = reg.json()["refresh_token"]
+    client.cookies.clear()  # 模拟移动端:无 cookie
+    r1 = await client.post("/auth/refresh", json={"refresh_token": rt})
+    assert r1.status_code == 200
+    new_rt = r1.json()["refresh_token"]
+    assert new_rt and new_rt != rt  # body 返回轮换后的新 refresh
+    client.cookies.clear()
+    assert (await client.post("/auth/refresh", json={"refresh_token": rt})).status_code == 401
+
+
+async def test_refresh_empty_body_no_cookie_401(client):
+    # 既无 cookie 也无 body refresh → 401(不崩)
+    client.cookies.clear()
+    assert (await client.post("/auth/refresh", json={})).status_code == 401
+
+
+async def test_logout_via_body_revokes(client):
+    # 移动端 logout:body 带 refresh,吊销之
+    reg = await _register(client)
+    rt = reg.json()["refresh_token"]
+    client.cookies.clear()
+    out = await client.post("/auth/logout", json={"refresh_token": rt})
+    assert out.status_code == 204
+    client.cookies.clear()
+    assert (await client.post("/auth/refresh", json={"refresh_token": rt})).status_code == 401
