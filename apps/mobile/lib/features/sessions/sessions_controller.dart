@@ -39,6 +39,16 @@ class SessionsController extends AsyncNotifier<List<Session>> {
     ]);
   }
 
+  /// 重命名会话(PATCH title),就地替换。
+  Future<void> rename(String id, String title) async {
+    final s =
+        await ref.read(sessionsRepoProvider).patchSession(id, title: title);
+    state = AsyncValue.data([
+      for (final x in (state.asData?.value ?? <Session>[]))
+        x.id == id ? s : x,
+    ]);
+  }
+
   Future<void> refresh() async {
     state = await AsyncValue.guard(
         () => ref.read(sessionsRepoProvider).listSessions());

@@ -63,6 +63,64 @@ class _HomePageState extends ConsumerState<HomePage> {
     }
   }
 
+  /// 长按会话弹操作菜单:重命名 / 删除。
+  void _showActions(Session s) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.edit_outlined),
+            title: const Text('重命名'),
+            onTap: () {
+              Navigator.pop(context);
+              _rename(s);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete_outline, color: AppTheme.danger),
+            title:
+                const Text('删除', style: TextStyle(color: AppTheme.danger)),
+            onTap: () {
+              Navigator.pop(context);
+              ref.read(sessionsControllerProvider.notifier).remove(s.id);
+            },
+          ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _rename(Session s) async {
+    final ctrl = TextEditingController(text: s.title ?? '');
+    final title = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('重命名会话'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: '会话标题'),
+          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: const Text('保存')),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (title != null && title.isNotEmpty) {
+      await ref.read(sessionsControllerProvider.notifier).rename(s.id, title);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final sessions = ref.watch(sessionsControllerProvider);
@@ -152,6 +210,7 @@ class _HomePageState extends ConsumerState<HomePage> {
             child: InkWell(
               borderRadius: BorderRadius.circular(AppTheme.rCard),
               onTap: () => context.go('/chat/${s.id}'),
+              onLongPress: () => _showActions(s),
               child: Padding(
                 padding: const EdgeInsets.all(14),
                 child: Row(children: [
