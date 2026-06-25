@@ -21,8 +21,20 @@ class TokenStore {
     await _s.write(key: _kRefresh, value: refresh);
   }
 
-  Future<String?> access() async => _access ??= await _s.read(key: _kAccess);
-  Future<String?> refresh() async => _refresh ??= await _s.read(key: _kRefresh);
+  // 不能写成 `_access ??= await read`:它的 null 检查在 await 之前,await 期间若 save()
+  // 写入了 token,await 返回的旧值(null)会无条件覆盖它(新装登录 race → 401 的真因)。
+  // 正确:await 之后再 ??= 回填,只在仍为空时填,绝不覆盖并发写入的值。
+  Future<String?> access() async {
+    if (_access != null) return _access;
+    final v = await _s.read(key: _kAccess);
+    return _access ??= v;
+  }
+
+  Future<String?> refresh() async {
+    if (_refresh != null) return _refresh;
+    final v = await _s.read(key: _kRefresh);
+    return _refresh ??= v;
+  }
 
   Future<void> clear() async {
     _access = null;
