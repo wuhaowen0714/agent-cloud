@@ -10,9 +10,9 @@ void main() {
   testWidgets('登录页渲染 + 切到注册', (tester) async {
     await tester
         .pumpWidget(const ProviderScope(child: MaterialApp(home: LoginPage())));
-    expect(find.text('登录'), findsWidgets);
-    await tester.tap(find.text('没有账号?去注册'));
+    expect(find.text('登录以继续'), findsOneWidget); // 副标题,不受 busy 影响
+    await tester.tap(find.text('没有账号? 去注册'));
     await tester.pump();
-    expect(find.text('注册'), findsWidgets);
+    expect(find.text('创建一个新账号'), findsOneWidget);
   });
 }

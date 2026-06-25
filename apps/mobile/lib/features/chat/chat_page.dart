@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../core/theme/app_theme.dart';
 import '../files/files_repository.dart';
 import 'chat_controller.dart';
 import 'model_picker.dart';
@@ -89,44 +90,67 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     final streaming = state.status == ChatStatus.streaming;
     return ListView(
       controller: _scroll,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       children: [
         for (final t in state.turns) ...[
           if (t.userText != null && t.userText!.isNotEmpty)
             _userBubble(t.userText!),
           TurnBlocks(t.blocks),
-          const SizedBox(height: 16),
+          const SizedBox(height: 18),
         ],
         if (streaming || state.live.isNotEmpty) ...[
           if (state.liveUser.isNotEmpty) _userBubble(state.liveUser),
           TurnBlocks(state.live),
-          if (streaming)
-            const Padding(
-                padding: EdgeInsets.all(8),
-                child: Text('▍', style: TextStyle(color: Colors.teal))),
+          if (streaming) _typing(),
         ],
       ],
     );
   }
 
+  Widget _typing() => Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: Row(children: const [
+          SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: AppTheme.teal)),
+          SizedBox(width: 8),
+          Text('正在生成…',
+              style: TextStyle(color: AppTheme.muted, fontSize: 13)),
+        ]),
+      );
+
   Widget _userBubble(String text) => Align(
         alignment: Alignment.centerRight,
         child: Container(
           margin: const EdgeInsets.symmetric(vertical: 6),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-              color: Colors.teal.shade50,
-              borderRadius: BorderRadius.circular(12)),
-          child: Text(text),
+          constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.78),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: const BoxDecoration(
+            color: AppTheme.teal,
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(16),
+              topRight: Radius.circular(16),
+              bottomLeft: Radius.circular(16),
+              bottomRight: Radius.circular(4),
+            ),
+          ),
+          child: Text(text,
+              style: const TextStyle(
+                  color: Colors.white, fontSize: 15, height: 1.4)),
         ),
       );
 
   Widget _failedBanner() => Container(
-        color: Colors.red.shade50,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        color: AppTheme.dangerSoft,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         child: Row(children: [
+          const Icon(Icons.error_outline, size: 18, color: AppTheme.danger),
+          const SizedBox(width: 8),
           const Expanded(
-              child: Text('发送失败', style: TextStyle(color: Colors.red))),
+              child: Text('发送失败', style: TextStyle(color: AppTheme.danger))),
           TextButton(
             onPressed: () => ref
                 .read(chatControllerProvider(widget.sessionId).notifier)
@@ -138,45 +162,68 @@ class _ChatPageState extends ConsumerState<ChatPage> {
 
   Widget _composer(ChatState state) {
     final busy = state.status == ChatStatus.streaming || _uploading;
-    return SafeArea(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        if (_pending.isNotEmpty) _previewRow(),
-        Padding(
-          padding: const EdgeInsets.all(8),
-          child: Row(children: [
-            IconButton(
-              onPressed: busy ? null : _pickImages,
-              icon: const Icon(Icons.image_outlined),
-              tooltip: '添加图片',
-            ),
-            Expanded(
-              child: TextField(
-                controller: _input,
-                minLines: 1,
-                maxLines: 4,
-                decoration: const InputDecoration(
-                    hintText: '说点什么…', border: OutlineInputBorder()),
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppTheme.surface,
+        border: Border(top: BorderSide(color: AppTheme.border)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (_pending.isNotEmpty) _previewRow(),
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              IconButton(
+                onPressed: busy ? null : _pickImages,
+                icon: const Icon(Icons.add_photo_alternate_outlined),
+                color: AppTheme.muted,
+                tooltip: '添加图片',
               ),
-            ),
-            const SizedBox(width: 8),
-            IconButton.filled(
-              onPressed: busy ? null : _send,
-              icon: _uploading
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.send),
-            ),
-          ]),
-        ),
-      ]),
+              Expanded(
+                child: TextField(
+                  controller: _input,
+                  minLines: 1,
+                  maxLines: 5,
+                  decoration: const InputDecoration(
+                    hintText: '说点什么…',
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              _sendBtn(busy),
+            ]),
+          ),
+        ]),
+      ),
     );
   }
 
+  Widget _sendBtn(bool busy) => Material(
+        color: busy ? AppTheme.faint : AppTheme.teal,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: busy ? null : _send,
+          child: Padding(
+            padding: const EdgeInsets.all(11),
+            child: _uploading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.arrow_upward, color: Colors.white, size: 20),
+          ),
+        ),
+      );
+
   Widget _previewRow() => Container(
-        height: 76,
+        height: 80,
         alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.only(top: 8),
         child: ListView.separated(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -184,7 +231,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
           separatorBuilder: (_, _) => const SizedBox(width: 8),
           itemBuilder: (_, i) => Stack(children: [
             ClipRRect(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(10),
               child: Image.file(File(_pending[i].path),
                   width: 64, height: 64, fit: BoxFit.cover),
             ),

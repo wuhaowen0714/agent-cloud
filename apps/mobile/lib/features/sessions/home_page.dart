@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/theme/app_theme.dart';
+import '../../models/session.dart';
 import '../update/update_service.dart';
 import 'sessions_controller.dart';
 
@@ -28,15 +30,31 @@ class _HomePageState extends ConsumerState<HomePage> {
         ? agents.first.id
         : await showModalBottomSheet<String>(
             context: context,
+            shape: const RoundedRectangleBorder(
+                borderRadius:
+                    BorderRadius.vertical(top: Radius.circular(20))),
             builder: (_) => SafeArea(
-              child: ListView(
-                shrinkWrap: true,
-                children: agents
-                    .map((a) => ListTile(
-                          title: Text(a.name),
-                          onTap: () => Navigator.pop(context, a.id),
-                        ))
-                    .toList(),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(20, 18, 20, 8),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text('选择智能体',
+                          style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.ink)),
+                    ),
+                  ),
+                  ...agents.map((a) => ListTile(
+                        leading: const Icon(Icons.smart_toy_outlined),
+                        title: Text(a.name),
+                        onTap: () => Navigator.pop(context, a.id),
+                      )),
+                  const SizedBox(height: 8),
+                ],
               ),
             ),
           );
@@ -59,45 +77,127 @@ class _HomePageState extends ConsumerState<HomePage> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
+      floatingActionButton: FloatingActionButton.extended(
         onPressed: _newSession,
-        child: const Icon(Icons.add),
+        icon: const Icon(Icons.add),
+        label: const Text('新对话'),
       ),
       body: sessions.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('加载失败: $e')),
         data: (list) => list.isEmpty
-            ? const Center(child: Text('还没有会话,点 + 新建'))
+            ? _emptyState()
             : RefreshIndicator(
                 onRefresh: () =>
                     ref.read(sessionsControllerProvider.notifier).refresh(),
-                child: ListView.separated(
+                child: ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
                   itemCount: list.length,
-                  separatorBuilder: (_, _) => const Divider(height: 1),
-                  itemBuilder: (_, i) {
-                    final s = list[i];
-                    return Dismissible(
-                      key: ValueKey(s.id),
-                      direction: DismissDirection.endToStart,
-                      background: Container(
-                        color: Colors.red,
-                        alignment: Alignment.centerRight,
-                        padding: const EdgeInsets.only(right: 16),
-                        child: const Icon(Icons.delete, color: Colors.white),
-                      ),
-                      onDismissed: (_) => ref
-                          .read(sessionsControllerProvider.notifier)
-                          .remove(s.id),
-                      child: ListTile(
-                        title: Text(s.displayTitle),
-                        subtitle: Text(s.model),
-                        onTap: () => context.go('/chat/${s.id}'),
-                      ),
-                    );
-                  },
+                  itemBuilder: (_, i) => _sessionCard(list[i]),
                 ),
               ),
       ),
     );
   }
+
+  Widget _emptyState() => Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 72,
+              height: 72,
+              decoration: const BoxDecoration(
+                  color: AppTheme.tealSoft, shape: BoxShape.circle),
+              child: const Icon(Icons.forum_outlined,
+                  size: 34, color: AppTheme.teal),
+            ),
+            const SizedBox(height: 16),
+            const Text('还没有会话',
+                style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.ink)),
+            const SizedBox(height: 6),
+            const Text('点右下角「新对话」开始',
+                style: TextStyle(color: AppTheme.muted)),
+          ],
+        ),
+      );
+
+  Widget _sessionCard(Session s) => Dismissible(
+        key: ValueKey(s.id),
+        direction: DismissDirection.endToStart,
+        background: Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          alignment: Alignment.centerRight,
+          padding: const EdgeInsets.only(right: 20),
+          decoration: BoxDecoration(
+            color: AppTheme.dangerSoft,
+            borderRadius: BorderRadius.circular(AppTheme.rCard),
+          ),
+          child: const Icon(Icons.delete_outline, color: AppTheme.danger),
+        ),
+        onDismissed: (_) =>
+            ref.read(sessionsControllerProvider.notifier).remove(s.id),
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(AppTheme.rCard),
+            border: Border.all(color: AppTheme.border),
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(AppTheme.rCard),
+              onTap: () => context.go('/chat/${s.id}'),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: AppTheme.tealSoft,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.forum_outlined,
+                        color: AppTheme.teal, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(s.displayTitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.ink)),
+                        const SizedBox(height: 4),
+                        Row(children: [
+                          const Icon(Icons.memory,
+                              size: 13, color: AppTheme.faint),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(s.model,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    fontSize: 12.5, color: AppTheme.muted)),
+                          ),
+                        ]),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right, color: AppTheme.faint),
+                ]),
+              ),
+            ),
+          ),
+        ),
+      );
 }
