@@ -16,7 +16,7 @@ from agent_cloud_backend.repositories.refresh_token import RefreshTokenRepositor
 from agent_cloud_backend.repositories.session import SessionRepository
 from agent_cloud_backend.repositories.skill import AgentSkillEnableRepository, SkillRepository
 from agent_cloud_backend.repositories.user import UserRepository
-from agent_cloud_backend.schemas.auth import LoginBody, RegisterBody, TokenResponse
+from agent_cloud_backend.schemas.auth import LoginBody, RefreshBody, RegisterBody, TokenResponse
 from agent_cloud_backend.schemas.user import UserRead
 from agent_cloud_backend.skills.deps import get_object_store, get_skill_registry_root
 from agent_cloud_backend.skills.service import enable_builtin_skills, ensure_builtin_skills
@@ -51,7 +51,9 @@ async def _issue(resp: Response, user: User, db: AsyncSession, settings: Setting
     access = security.create_access_token(
         str(user.id), secret=settings.auth_secret, ttl_seconds=settings.access_token_ttl_seconds
     )
-    return TokenResponse(access_token=access, user=UserRead.model_validate(user))
+    return TokenResponse(
+        access_token=access, refresh_token=plain, user=UserRead.model_validate(user)
+    )
 
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
@@ -104,10 +106,14 @@ async def login(
 async def refresh(
     request: Request,
     response: Response,
+    body: RefreshBody | None = None,
     db: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ):
-    plain = request.cookies.get(settings.auth_cookie_name)
+    # cookie 优先(Web);没有则取请求体里的 refresh(移动端,无 cookie)。
+    plain = request.cookies.get(settings.auth_cookie_name) or (
+        body.refresh_token if body else None
+    )
     if not plain:
         raise HTTPException(status_code=401, detail="no refresh token")
     repo = RefreshTokenRepository(db)
@@ -131,10 +137,14 @@ async def refresh(
 async def logout(
     request: Request,
     response: Response,
+    body: RefreshBody | None = None,
     db: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ):
-    plain = request.cookies.get(settings.auth_cookie_name)
+    # cookie 优先(Web);没有则取请求体里的 refresh(移动端)。
+    plain = request.cookies.get(settings.auth_cookie_name) or (
+        body.refresh_token if body else None
+    )
     if plain:
         repo = RefreshTokenRepository(db)
         row = await repo.get_by_hash(security.hash_refresh(plain))
