@@ -1,9 +1,11 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../core/theme/app_theme.dart';
 import '../files/files_repository.dart';
+import '../sessions/sessions_controller.dart';
 import 'chat_controller.dart';
 import 'model_picker.dart';
 import 'turn_blocks.dart';
@@ -58,6 +60,36 @@ class _ChatPageState extends ConsumerState<ChatPage> {
         .send(text, images: paths);
   }
 
+  String? _agentId() {
+    final sessions = ref.read(sessionsControllerProvider).asData?.value ?? [];
+    final m = sessions.where((s) => s.id == widget.sessionId);
+    return m.isEmpty ? null : m.first.agentConfigId;
+  }
+
+  void _onMenu(String v) {
+    // 文件/终端是工作区级,工具/技能是 agent 级
+    if (v == 'files') {
+      context.push('/files');
+      return;
+    }
+    if (v == 'terminal') {
+      context.push('/terminal');
+      return;
+    }
+    final aid = _agentId();
+    if (aid == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('会话信息未加载,请返回列表再进')));
+      return;
+    }
+    switch (v) {
+      case 'tools':
+        context.push('/agent/$aid/tools');
+      case 'skills':
+        context.push('/agent/$aid/skills');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(chatControllerProvider(widget.sessionId));
@@ -77,6 +109,36 @@ class _ChatPageState extends ConsumerState<ChatPage> {
             icon: const Icon(Icons.tune),
             tooltip: '切换模型',
             onPressed: () => showModelPicker(context, ref, widget.sessionId),
+          ),
+          PopupMenuButton<String>(
+            tooltip: '更多',
+            onSelected: _onMenu,
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                  value: 'tools',
+                  child: ListTile(
+                      leading: Icon(Icons.build_outlined),
+                      title: Text('工具'),
+                      contentPadding: EdgeInsets.zero)),
+              PopupMenuItem(
+                  value: 'skills',
+                  child: ListTile(
+                      leading: Icon(Icons.extension_outlined),
+                      title: Text('技能'),
+                      contentPadding: EdgeInsets.zero)),
+              PopupMenuItem(
+                  value: 'files',
+                  child: ListTile(
+                      leading: Icon(Icons.folder_outlined),
+                      title: Text('文件'),
+                      contentPadding: EdgeInsets.zero)),
+              PopupMenuItem(
+                  value: 'terminal',
+                  child: ListTile(
+                      leading: Icon(Icons.terminal),
+                      title: Text('终端'),
+                      contentPadding: EdgeInsets.zero)),
+            ],
           ),
         ],
       ),

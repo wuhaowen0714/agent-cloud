@@ -8,6 +8,10 @@ import '../../features/settings/settings_page.dart';
 import '../../features/settings/credentials_page.dart';
 import '../../features/settings/memory_page.dart';
 import '../../features/settings/skills_page.dart';
+import '../../features/agent/tools_page.dart';
+import '../../features/agent/skills_toggle_page.dart';
+import '../../features/files/files_browser_page.dart';
+import '../../features/terminal/terminal_page.dart';
 import '../../features/chat/chat_page.dart';
 
 /// router 作为 provider 缓存(稳定);监听登录态变化 → refresh 重新 redirect。
@@ -42,6 +46,14 @@ final routerProvider = Provider<GoRouter>((ref) {
           path: '/settings/memory', builder: (_, _) => const MemoryPage()),
       GoRoute(
           path: '/settings/skills', builder: (_, _) => const SkillsPage()),
+      GoRoute(
+          path: '/agent/:aid/tools',
+          builder: (_, st) => ToolsPage(st.pathParameters['aid']!)),
+      GoRoute(
+          path: '/agent/:aid/skills',
+          builder: (_, st) => SkillsTogglePage(st.pathParameters['aid']!)),
+      GoRoute(path: '/files', builder: (_, _) => const FilesPage()),
+      GoRoute(path: '/terminal', builder: (_, _) => const TerminalPage()),
     ],
   );
 });

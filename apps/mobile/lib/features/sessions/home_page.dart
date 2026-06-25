@@ -129,6 +129,16 @@ class _HomePageState extends ConsumerState<HomePage> {
         title: const Text('会话'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.folder_outlined),
+            tooltip: '文件',
+            onPressed: () => context.push('/files'),
+          ),
+          IconButton(
+            icon: const Icon(Icons.terminal),
+            tooltip: '终端',
+            onPressed: () => context.push('/terminal'),
+          ),
+          IconButton(
             icon: const Icon(Icons.settings_outlined),
             tooltip: '设置',
             onPressed: () => context.push('/settings'),
