@@ -57,6 +57,16 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
   http_mock_adapter: ^0.6.1
+  flutter_launcher_icons: ^0.14.4
+
+# 火花 logo:tool/gen_icon.py 生成素材,`dart run flutter_launcher_icons` 出各分辨率。
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icon/icon.png"
+  adaptive_icon_background: "assets/icon/background.png"
+  adaptive_icon_foreground: "assets/icon/foreground.png"
+  min_sdk_android: 21
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

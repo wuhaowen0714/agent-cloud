@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/brand_logo.dart';
 import 'auth_controller.dart';
 
 class LoginPage extends ConsumerStatefulWidget {
@@ -45,21 +46,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 // 品牌标识
-                Container(
-                  width: 60,
-                  height: 60,
-                  decoration: BoxDecoration(
-                    color: AppTheme.teal,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                          color: AppTheme.teal.withValues(alpha: 0.3),
-                          blurRadius: 16,
-                          offset: const Offset(0, 6)),
-                    ],
-                  ),
-                  child: const Icon(Icons.bolt, color: Colors.white, size: 32),
-                ),
+                const BrandLogo(size: 64),
                 const SizedBox(height: 16),
                 const Text('Agent Cloud',
                     style: TextStyle(
