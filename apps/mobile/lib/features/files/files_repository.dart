@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
@@ -27,7 +28,21 @@ class FilesRepository {
         .map((e) => (e as Map<String, dynamic>)['path'] as String)
         .toList();
   }
+
+  /// 取工作区图片字节(回显已发图;/files/raw 带 token,不能直接 <img src>)。
+  Future<Uint8List> fetchImage(String path) async {
+    final r = await _dio.get<List<int>>(
+      '/files/raw',
+      queryParameters: {'path': path},
+      options: Options(responseType: ResponseType.bytes),
+    );
+    return Uint8List.fromList(r.data!);
+  }
 }
 
 final filesRepoProvider =
     Provider<FilesRepository>((ref) => FilesRepository(ref.read(dioProvider)));
+
+/// 已发图缩略图字节,按 path 缓存(autoDispose 离开聊天页释放)。
+final sentImageProvider = FutureProvider.autoDispose.family<Uint8List, String>(
+    (ref, path) => ref.read(filesRepoProvider).fetchImage(path));

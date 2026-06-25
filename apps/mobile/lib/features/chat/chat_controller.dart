@@ -12,6 +12,7 @@ class ChatState {
   final List<Turn> turns; // 历史回合
   final List<Block> live; // 当前流式回合的 blocks
   final String liveUser; // 当前回合的用户消息(气泡显示)
+  final List<String> liveUserImages; // 当前回合用户发的图(工作区相对路径)
   final ChatStatus status;
   final String? error;
   final String? failedMessage; // 发起失败的消息(可重试)
@@ -20,6 +21,7 @@ class ChatState {
     this.turns = const [],
     this.live = const [],
     this.liveUser = '',
+    this.liveUserImages = const [],
     this.status = ChatStatus.loading,
     this.error,
     this.failedMessage,
@@ -29,6 +31,7 @@ class ChatState {
     List<Turn>? turns,
     List<Block>? live,
     String? liveUser,
+    List<String>? liveUserImages,
     ChatStatus? status,
     String? error,
     String? failedMessage,
@@ -38,9 +41,11 @@ class ChatState {
         turns: turns ?? this.turns,
         live: live ?? this.live,
         liveUser: liveUser ?? this.liveUser,
+        liveUserImages: liveUserImages ?? this.liveUserImages,
         status: status ?? this.status,
         error: error ?? this.error,
-        failedMessage: clearFailed ? null : (failedMessage ?? this.failedMessage),
+        failedMessage:
+            clearFailed ? null : (failedMessage ?? this.failedMessage),
       );
 }
 
@@ -74,6 +79,7 @@ class ChatController extends FamilyNotifier<ChatState, String> {
     state = state.copyWith(
         live: const [],
         liveUser: content,
+        liveUserImages: images,
         status: ChatStatus.streaming,
         clearFailed: true);
     _cancel = CancelToken();
@@ -85,7 +91,6 @@ class ChatController extends FamilyNotifier<ChatState, String> {
       await _finishTurn();
     } on DioException catch (err) {
       if (CancelToken.isCancel(err)) return; // 主动取消,不算失败
-      // 发起失败(连不上)→ 标记可重试;已发起后断流交给 resume(重进会话触发)。
       state = state.copyWith(status: ChatStatus.idle, failedMessage: content);
     }
   }
@@ -121,7 +126,8 @@ class ChatController extends FamilyNotifier<ChatState, String> {
         state = state.copyWith(
             live: startSubagent(state.live, subagentId, description, prompt));
       case SubagentDone(:final subagentId, :final ok):
-        state = state.copyWith(live: finishSubagent(state.live, subagentId, ok));
+        state =
+            state.copyWith(live: finishSubagent(state.live, subagentId, ok));
       case ResetEvent():
         state = state.copyWith(live: const []);
       case TurnDoneEvent():
@@ -151,6 +157,7 @@ class ChatController extends FamilyNotifier<ChatState, String> {
           turns: messagesToTurns(msgs),
           live: const [],
           liveUser: '',
+          liveUserImages: const [],
           status: ChatStatus.idle);
     } catch (_) {
       state = state.copyWith(status: ChatStatus.idle);

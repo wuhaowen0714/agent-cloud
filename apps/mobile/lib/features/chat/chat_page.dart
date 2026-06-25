@@ -93,12 +93,15 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       padding: const EdgeInsets.all(14),
       children: [
         for (final t in state.turns) ...[
+          if (t.userImages.isNotEmpty) _sentImages(t.userImages),
           if (t.userText != null && t.userText!.isNotEmpty)
             _userBubble(t.userText!),
           TurnBlocks(t.blocks),
           const SizedBox(height: 18),
         ],
         if (streaming || state.live.isNotEmpty) ...[
+          if (state.liveUserImages.isNotEmpty)
+            _sentImages(state.liveUserImages),
           if (state.liveUser.isNotEmpty) _userBubble(state.liveUser),
           TurnBlocks(state.live),
           if (streaming) _typing(),
@@ -140,6 +143,20 @@ class _ChatPageState extends ConsumerState<ChatPage> {
           child: Text(text,
               style: const TextStyle(
                   color: Colors.white, fontSize: 15, height: 1.4)),
+        ),
+      );
+
+  // 已发图:右对齐缩略图(气泡上方)
+  Widget _sentImages(List<String> paths) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Align(
+          alignment: Alignment.centerRight,
+          child: Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 6,
+            runSpacing: 6,
+            children: [for (final p in paths) _SentThumb(p)],
+          ),
         ),
       );
 
@@ -251,4 +268,36 @@ class _ChatPageState extends ConsumerState<ChatPage> {
           ]),
         ),
       );
+}
+
+/// 已发图缩略图:带 token 取字节后 Image.memory(sentImageProvider 缓存)。
+class _SentThumb extends ConsumerWidget {
+  final String path;
+  const _SentThumb(this.path);
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final img = ref.watch(sentImageProvider(path));
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: img.when(
+        data: (bytes) =>
+            Image.memory(bytes, width: 110, height: 110, fit: BoxFit.cover),
+        loading: () => Container(
+            width: 110,
+            height: 110,
+            color: AppTheme.borderSoft,
+            child: const Center(
+                child: SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2)))),
+        error: (_, _) => Container(
+            width: 110,
+            height: 110,
+            color: AppTheme.borderSoft,
+            child: const Icon(Icons.broken_image_outlined,
+                color: AppTheme.faint)),
+      ),
+    );
+  }
 }

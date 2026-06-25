@@ -101,8 +101,10 @@ List<Block> finishSubagent(List<Block> blocks, String id, bool ok) {
 class Turn {
   final String id;
   final String? userText;
+  final List<String> userImages; // 用户该回合发的图(工作区相对路径)
   final List<Block> blocks;
-  const Turn(this.id, this.userText, this.blocks);
+  const Turn(this.id, this.userText, this.blocks,
+      {this.userImages = const []});
 }
 
 /// 一组消息 → blocks;task 调用渲染成 subagent 卡(内部由 parentCallId 子消息递归重建)。
@@ -160,12 +162,15 @@ List<Turn> messagesToTurns(List<Message> messages) {
   final turns = <Turn>[];
   String? curId;
   String? curUser;
+  var curImages = <String>[];
   var curMsgs = <Message>[];
   void flush() {
     if (curId == null) return;
-    turns.add(Turn(curId!, curUser, rebuildBlocks(curMsgs, subByCall)));
+    turns.add(Turn(curId!, curUser, rebuildBlocks(curMsgs, subByCall),
+        userImages: curImages));
     curId = null;
     curUser = null;
+    curImages = [];
     curMsgs = [];
   }
 
@@ -174,6 +179,7 @@ List<Turn> messagesToTurns(List<Message> messages) {
       flush();
       curId = m.id;
       curUser = m.content.text;
+      curImages = m.content.images;
       curMsgs = [];
     } else {
       curId ??= m.id;

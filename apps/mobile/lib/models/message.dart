@@ -28,12 +28,14 @@ class ToolResult {
 
 class MessageContent {
   final String text;
+  final List<String> images; // 用户随消息上传的图片(工作区相对路径)
   final List<ToolCall> toolCalls;
   final List<ToolResult> toolResults;
   final String? parentCallId; // 非空 = 子 agent 消息
 
   const MessageContent({
     this.text = '',
+    this.images = const [],
     this.toolCalls = const [],
     this.toolResults = const [],
     this.parentCallId,
@@ -41,6 +43,7 @@ class MessageContent {
 
   factory MessageContent.fromJson(Map<String, dynamic> j) => MessageContent(
         text: j['text'] as String? ?? '',
+        images: ((j['images'] as List?) ?? const []).cast<String>(),
         toolCalls: ((j['tool_calls'] as List?) ?? const [])
             .map((e) => ToolCall.fromJson(e as Map<String, dynamic>))
             .toList(),
