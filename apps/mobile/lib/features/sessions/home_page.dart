@@ -1,27 +1,40 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../auth/auth_controller.dart';
+import '../update/update_service.dart';
 import 'sessions_controller.dart';
 
-class HomePage extends ConsumerWidget {
+class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
+  @override
+  ConsumerState<HomePage> createState() => _HomePageState();
+}
 
-  Future<void> _newSession(BuildContext ctx, WidgetRef ref) async {
+class _HomePageState extends ConsumerState<HomePage> {
+  @override
+  void initState() {
+    super.initState();
+    // 进入主页(已登录)后静默检查更新。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) checkUpdate(context, ref, silent: true);
+    });
+  }
+
+  Future<void> _newSession() async {
     final agents = ref.read(agentsProvider).asData?.value ?? [];
     if (agents.isEmpty) return;
     // 单 agent 直接建;多 agent 弹底部选择
     final agentId = agents.length == 1
         ? agents.first.id
         : await showModalBottomSheet<String>(
-            context: ctx,
+            context: context,
             builder: (_) => SafeArea(
               child: ListView(
                 shrinkWrap: true,
                 children: agents
                     .map((a) => ListTile(
                           title: Text(a.name),
-                          onTap: () => Navigator.pop(ctx, a.id),
+                          onTap: () => Navigator.pop(context, a.id),
                         ))
                     .toList(),
               ),
@@ -33,21 +46,21 @@ class HomePage extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final sessions = ref.watch(sessionsControllerProvider);
     return Scaffold(
       appBar: AppBar(
         title: const Text('会话'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: '登出',
-            onPressed: () => ref.read(authControllerProvider.notifier).logout(),
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: '设置',
+            onPressed: () => context.push('/settings'),
           ),
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => _newSession(context, ref),
+        onPressed: _newSession,
         child: const Icon(Icons.add),
       ),
       body: sessions.when(

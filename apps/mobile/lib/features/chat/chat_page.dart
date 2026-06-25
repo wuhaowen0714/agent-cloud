@@ -1,6 +1,10 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
+import '../files/files_repository.dart';
 import 'chat_controller.dart';
+import 'model_picker.dart';
 import 'turn_blocks.dart';
 
 class ChatPage extends ConsumerStatefulWidget {
@@ -13,6 +17,8 @@ class ChatPage extends ConsumerStatefulWidget {
 class _ChatPageState extends ConsumerState<ChatPage> {
   final _input = TextEditingController();
   final _scroll = ScrollController();
+  final List<XFile> _pending = []; // 待发图片
+  bool _uploading = false;
 
   @override
   void dispose() {
@@ -21,18 +27,50 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     super.dispose();
   }
 
-  void _send() {
+  Future<void> _pickImages() async {
+    final imgs = await ImagePicker().pickMultiImage();
+    if (imgs.isNotEmpty && mounted) setState(() => _pending.addAll(imgs));
+  }
+
+  Future<void> _send() async {
     final text = _input.text.trim();
-    if (text.isEmpty) return;
+    if (text.isEmpty && _pending.isEmpty) return;
+    var paths = <String>[];
+    if (_pending.isNotEmpty) {
+      setState(() => _uploading = true);
+      try {
+        paths = await ref.read(filesRepoProvider).uploadImages(_pending);
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _uploading = false);
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('图片上传失败: $e')));
+        return; // 保留待发图片,可重试
+      }
+      if (!mounted) return;
+      setState(() => _uploading = false);
+    }
     _input.clear();
-    ref.read(chatControllerProvider(widget.sessionId).notifier).send(text);
+    setState(() => _pending.clear());
+    ref
+        .read(chatControllerProvider(widget.sessionId).notifier)
+        .send(text, images: paths);
   }
 
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(chatControllerProvider(widget.sessionId));
     return Scaffold(
-      appBar: AppBar(title: const Text('对话')),
+      appBar: AppBar(
+        title: const Text('对话'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.tune),
+            tooltip: '切换模型',
+            onPressed: () => showModelPicker(context, ref, widget.sessionId),
+          ),
+        ],
+      ),
       body: Column(children: [
         Expanded(child: _body(state)),
         if (state.failedMessage != null) _failedBanner(),
@@ -99,25 +137,71 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       );
 
   Widget _composer(ChatState state) {
-    final busy = state.status == ChatStatus.streaming;
+    final busy = state.status == ChatStatus.streaming || _uploading;
     return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(8),
-        child: Row(children: [
-          Expanded(
-            child: TextField(
-              controller: _input,
-              minLines: 1,
-              maxLines: 4,
-              decoration: const InputDecoration(
-                  hintText: '说点什么…', border: OutlineInputBorder()),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        if (_pending.isNotEmpty) _previewRow(),
+        Padding(
+          padding: const EdgeInsets.all(8),
+          child: Row(children: [
+            IconButton(
+              onPressed: busy ? null : _pickImages,
+              icon: const Icon(Icons.image_outlined),
+              tooltip: '添加图片',
             ),
-          ),
-          const SizedBox(width: 8),
-          IconButton.filled(
-              onPressed: busy ? null : _send, icon: const Icon(Icons.send)),
-        ]),
-      ),
+            Expanded(
+              child: TextField(
+                controller: _input,
+                minLines: 1,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                    hintText: '说点什么…', border: OutlineInputBorder()),
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton.filled(
+              onPressed: busy ? null : _send,
+              icon: _uploading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.send),
+            ),
+          ]),
+        ),
+      ]),
     );
   }
+
+  Widget _previewRow() => Container(
+        height: 76,
+        alignment: Alignment.centerLeft,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          itemCount: _pending.length,
+          separatorBuilder: (_, _) => const SizedBox(width: 8),
+          itemBuilder: (_, i) => Stack(children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.file(File(_pending[i].path),
+                  width: 64, height: 64, fit: BoxFit.cover),
+            ),
+            Positioned(
+              right: 2,
+              top: 2,
+              child: GestureDetector(
+                onTap: () => setState(() => _pending.removeAt(i)),
+                child: Container(
+                  decoration: const BoxDecoration(
+                      color: Colors.black54, shape: BoxShape.circle),
+                  padding: const EdgeInsets.all(2),
+                  child: const Icon(Icons.close, size: 14, color: Colors.white),
+                ),
+              ),
+            ),
+          ]),
+        ),
+      );
 }

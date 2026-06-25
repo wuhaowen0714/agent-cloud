@@ -26,5 +26,13 @@ class SessionsRepository {
     return Session.fromJson(r.data as Map<String, dynamic>);
   }
 
+  Future<Session> patchSession(String id, {String? model, String? title}) async {
+    final r = await _dio.patch('/sessions/$id', data: {
+      'model': ?model,
+      'title': ?title,
+    });
+    return Session.fromJson(r.data as Map<String, dynamic>);
+  }
+
   Future<void> deleteSession(String id) => _dio.delete('/sessions/$id');
 }

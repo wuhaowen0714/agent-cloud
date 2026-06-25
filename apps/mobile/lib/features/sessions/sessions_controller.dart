@@ -29,6 +29,16 @@ class SessionsController extends AsyncNotifier<List<Session>> {
         [...?state.asData?.value.where((s) => s.id != id)]);
   }
 
+  /// 切换会话模型(PATCH session),就地替换列表中对应项。
+  Future<void> patchModel(String id, String model) async {
+    final s =
+        await ref.read(sessionsRepoProvider).patchSession(id, model: model);
+    state = AsyncValue.data([
+      for (final x in (state.asData?.value ?? <Session>[]))
+        x.id == id ? s : x,
+    ]);
+  }
+
   Future<void> refresh() async {
     state = await AsyncValue.guard(
         () => ref.read(sessionsRepoProvider).listSessions());
