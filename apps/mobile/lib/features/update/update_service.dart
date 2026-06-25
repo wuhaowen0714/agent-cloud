@@ -38,9 +38,11 @@ Future<void> checkUpdate(BuildContext context, WidgetRef ref,
     final info = await PackageInfo.fromPlatform();
     current = int.tryParse(info.buildNumber) ?? 0;
   } catch (e) {
+    // /app/version 未部署(404)→ 暂无 OTA 服务,当作无更新,不报错打扰
+    final notFound = e is DioException && e.response?.statusCode == 404;
     if (!silent && context.mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('检查更新失败: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(notFound ? '已是最新版本' : '检查更新失败,请稍后重试')));
     }
     return;
   }

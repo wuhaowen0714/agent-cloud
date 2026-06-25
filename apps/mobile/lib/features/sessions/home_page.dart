@@ -2,9 +2,31 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/util/time_group.dart';
+import '../../models/agent_config.dart';
 import '../../models/session.dart';
 import '../update/update_service.dart';
 import 'sessions_controller.dart';
+
+// 列表项:agent 大标题 / 天小标题 / 会话卡
+sealed class _Item {
+  const _Item();
+}
+
+class _AgentHeader extends _Item {
+  final String name;
+  const _AgentHeader(this.name);
+}
+
+class _DateHeader extends _Item {
+  final String label;
+  const _DateHeader(this.label);
+}
+
+class _SessionItem extends _Item {
+  final Session session;
+  const _SessionItem(this.session);
+}
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -22,17 +44,32 @@ class _HomePageState extends ConsumerState<HomePage> {
     });
   }
 
+  void _toast(String m) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+    }
+  }
+
   Future<void> _newSession() async {
-    final agents = ref.read(agentsProvider).asData?.value ?? [];
-    if (agents.isEmpty) return;
-    // 单 agent 直接建;多 agent 弹底部选择
+    // 关键:await future 确保 agents 已加载(此前用 .asData 在首次点击时拿到空 → 静默失败)
+    List<AgentConfig> agents;
+    try {
+      agents = await ref.read(agentsProvider.future);
+    } catch (e) {
+      _toast('加载智能体失败: $e');
+      return;
+    }
+    if (!mounted) return;
+    if (agents.isEmpty) {
+      _toast('没有可用的智能体');
+      return;
+    }
     final agentId = agents.length == 1
         ? agents.first.id
         : await showModalBottomSheet<String>(
             context: context,
             shape: const RoundedRectangleBorder(
-                borderRadius:
-                    BorderRadius.vertical(top: Radius.circular(20))),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
             builder: (_) => SafeArea(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -58,8 +95,13 @@ class _HomePageState extends ConsumerState<HomePage> {
               ),
             ),
           );
-    if (agentId != null) {
-      await ref.read(sessionsControllerProvider.notifier).create(agentId);
+    if (agentId == null) return;
+    try {
+      final s =
+          await ref.read(sessionsControllerProvider.notifier).create(agentId);
+      if (mounted) context.go('/chat/${s.id}'); // 建完直接进会话
+    } catch (e) {
+      _toast('创建会话失败: $e');
     }
   }
 
@@ -121,9 +163,44 @@ class _HomePageState extends ConsumerState<HomePage> {
     }
   }
 
+  /// 会话 → 两级分组(agent → 天)的扁平列表。
+  List<_Item> _buildItems(List<Session> sessions, Map<String, String> names) {
+    final epoch = DateTime.fromMillisecondsSinceEpoch(0);
+    final byAgent = <String, List<Session>>{};
+    for (final s in sessions) {
+      (byAgent[s.agentConfigId] ??= []).add(s);
+    }
+    DateTime latest(List<Session> ss) => ss
+        .map((s) => s.lastActiveAt ?? epoch)
+        .reduce((a, b) => a.isAfter(b) ? a : b);
+    // agent 组按各自最近活跃降序
+    final agentIds = byAgent.keys.toList()
+      ..sort((a, b) => latest(byAgent[b]!).compareTo(latest(byAgent[a]!)));
+
+    final items = <_Item>[];
+    for (final aid in agentIds) {
+      items.add(_AgentHeader(names[aid] ?? '智能体'));
+      final ss = byAgent[aid]!
+        ..sort((a, b) =>
+            (b.lastActiveAt ?? epoch).compareTo(a.lastActiveAt ?? epoch));
+      String? cur;
+      for (final s in ss) {
+        final lbl = timeGroupLabel(s.lastActiveAt);
+        if (lbl != cur) {
+          items.add(_DateHeader(lbl));
+          cur = lbl;
+        }
+        items.add(_SessionItem(s));
+      }
+    }
+    return items;
+  }
+
   @override
   Widget build(BuildContext context) {
     final sessions = ref.watch(sessionsControllerProvider);
+    final agents = ref.watch(agentsProvider).asData?.value ?? [];
+    final names = {for (final a in agents) a.id: a.name};
     return Scaffold(
       appBar: AppBar(
         title: const Text('会话'),
@@ -153,20 +230,48 @@ class _HomePageState extends ConsumerState<HomePage> {
       body: sessions.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('加载失败: $e')),
-        data: (list) => list.isEmpty
-            ? _emptyState()
-            : RefreshIndicator(
-                onRefresh: () =>
-                    ref.read(sessionsControllerProvider.notifier).refresh(),
-                child: ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
-                  itemCount: list.length,
-                  itemBuilder: (_, i) => _sessionCard(list[i]),
-                ),
-              ),
+        data: (list) {
+          if (list.isEmpty) return _emptyState();
+          final items = _buildItems(list, names);
+          return RefreshIndicator(
+            onRefresh: () =>
+                ref.read(sessionsControllerProvider.notifier).refresh(),
+            child: ListView.builder(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 88),
+              itemCount: items.length,
+              itemBuilder: (_, i) => switch (items[i]) {
+                _AgentHeader(:final name) => _agentHeader(name),
+                _DateHeader(:final label) => _dateHeader(label),
+                _SessionItem(:final session) => _sessionCard(session),
+              },
+            ),
+          );
+        },
       ),
     );
   }
+
+  Widget _agentHeader(String name) => Padding(
+        padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
+        child: Row(children: [
+          const Icon(Icons.smart_toy_outlined, size: 17, color: AppTheme.teal),
+          const SizedBox(width: 6),
+          Text(name,
+              style: const TextStyle(
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.ink)),
+        ]),
+      );
+
+  Widget _dateHeader(String label) => Padding(
+        padding: const EdgeInsets.fromLTRB(6, 10, 6, 6),
+        child: Text(label,
+            style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.muted)),
+      );
 
   Widget _emptyState() => Center(
         child: Column(
@@ -197,7 +302,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         key: ValueKey(s.id),
         direction: DismissDirection.endToStart,
         background: Container(
-          margin: const EdgeInsets.only(bottom: 10),
+          margin: const EdgeInsets.only(bottom: 8),
           alignment: Alignment.centerRight,
           padding: const EdgeInsets.only(right: 20),
           decoration: BoxDecoration(
@@ -209,7 +314,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         onDismissed: (_) =>
             ref.read(sessionsControllerProvider.notifier).remove(s.id),
         child: Container(
-          margin: const EdgeInsets.only(bottom: 10),
+          margin: const EdgeInsets.only(bottom: 8),
           decoration: BoxDecoration(
             color: AppTheme.surface,
             borderRadius: BorderRadius.circular(AppTheme.rCard),
@@ -225,14 +330,14 @@ class _HomePageState extends ConsumerState<HomePage> {
                 padding: const EdgeInsets.all(14),
                 child: Row(children: [
                   Container(
-                    width: 42,
-                    height: 42,
+                    width: 40,
+                    height: 40,
                     decoration: BoxDecoration(
                       color: AppTheme.tealSoft,
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(11),
                     ),
                     child: const Icon(Icons.forum_outlined,
-                        color: AppTheme.teal, size: 22),
+                        color: AppTheme.teal, size: 20),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
