@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../auth/auth_controller.dart';
 import 'sessions_controller.dart';
 
@@ -77,9 +78,7 @@ class HomePage extends ConsumerWidget {
                       child: ListTile(
                         title: Text(s.displayTitle),
                         subtitle: Text(s.model),
-                        onTap: () {
-                          // ④ 聊天页实现后:context.go('/chat/${s.id}')
-                        },
+                        onTap: () => context.go('/chat/${s.id}'),
                       ),
                     );
                   },

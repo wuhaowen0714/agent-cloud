@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../features/auth/auth_controller.dart';
 import '../../features/auth/login_page.dart';
 import '../../features/sessions/home_page.dart';
+import '../../features/chat/chat_page.dart';
 
 /// router 作为 provider 缓存(稳定);监听登录态变化 → refresh 重新 redirect。
 final routerProvider = Provider<GoRouter>((ref) {
@@ -25,6 +26,10 @@ final routerProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(path: '/login', builder: (_, _) => const LoginPage()),
       GoRoute(path: '/home', builder: (_, _) => const HomePage()),
+      GoRoute(
+        path: '/chat/:sid',
+        builder: (_, st) => ChatPage(st.pathParameters['sid']!),
+      ),
     ],
   );
 });
