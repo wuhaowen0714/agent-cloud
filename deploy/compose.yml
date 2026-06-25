@@ -64,8 +64,12 @@ services:
     build: { context: .., dockerfile: deploy/frontend.Dockerfile }
     image: agent-cloud-web:latest
     ports:
-      # 唯一公开端口,主机侧端口按机器在 .env 设(ali 8080;st-e 18080=网关放通口)
-      - "${AGENT_CLOUD_WEB_PORT:-8080}:80"
+      # 唯一公开端口,主机侧端口按机器在 .env 设(ali 8080;st-e 18080=网关放通口)。
+      # 容器内 nginx 跑 443 SSL(证书见下方 volume),宿主 18080 → 容器 443。
+      - "${AGENT_CLOUD_WEB_PORT:-8080}:443"
+    volumes:
+      # Let's Encrypt 证书:certbot 在宿主签发/自动续期,只读挂进 nginx 用(含 live/ 软链指向的 archive/)。
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       - backend
     restart: unless-stopped
