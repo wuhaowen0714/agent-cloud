@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from agent_cloud_backend.api import (
     agent_configs,
     agent_skills,
+    app_version,
     auth,
     context_documents,
     credentials,
@@ -100,6 +101,7 @@ def create_app() -> FastAPI:
 
     for module in (
         auth,
+        app_version,
         agent_configs,
         sessions,
         platform,

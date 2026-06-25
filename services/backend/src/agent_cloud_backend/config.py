@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     # 文件管理:单文件上传上限(字节)。超出 → 413。
     file_upload_max_bytes: int = 100 * 1024 * 1024
 
+    # 移动端 OTA:发布信息 JSON 路径(发版时写 version/build/url/force/notes)。
+    # 空或文件不存在 → /app/version 返回 build 0(等于"无更新")。
+    app_release_file: str = ""
+
     # 会话压缩(spec §11):回合后用模型返回的真实 context_tokens 判阈值,超此则折叠历史。
     compaction_token_threshold: int = 128000  # 全局默认(未配置窗口/覆盖的模型用它)
     # 按模型显式覆盖阈值(模型名 → 阈值);优先级最高。
