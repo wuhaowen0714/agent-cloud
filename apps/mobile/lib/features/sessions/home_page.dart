@@ -229,13 +229,21 @@ class _HomePageState extends ConsumerState<HomePage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(s.displayTitle,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w600,
-                                color: AppTheme.ink)),
+                        Row(children: [
+                          Expanded(
+                            child: Text(s.displayTitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppTheme.ink)),
+                          ),
+                          if (s.relativeTime.isNotEmpty)
+                            Text(s.relativeTime,
+                                style: const TextStyle(
+                                    fontSize: 11.5, color: AppTheme.faint)),
+                        ]),
                         const SizedBox(height: 4),
                         Row(children: [
                           const Icon(Icons.memory,

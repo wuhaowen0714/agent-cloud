@@ -61,6 +61,14 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(chatControllerProvider(widget.sessionId));
+    // 新内容到达时滚到底部(跟随生成 / 进会话定位到最新)
+    ref.listen(chatControllerProvider(widget.sessionId), (_, _) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scroll.hasClients) {
+          _scroll.jumpTo(_scroll.position.maxScrollExtent);
+        }
+      });
+    });
     return Scaffold(
       appBar: AppBar(
         title: const Text('对话'),
