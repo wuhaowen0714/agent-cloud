@@ -135,6 +135,7 @@ async def stream_turn_endpoint(
                 exclude_message_id=user_msg.id,
                 enabled_skills=enabled_skills,
                 work_subdir=req_work_subdir,
+                client_platform=body.client,
             )
         except Exception:
             await db.rollback()
@@ -160,6 +161,7 @@ async def stream_turn_endpoint(
                 exclude_message_id=user_msg.id,
                 enabled_skills=rskills,
                 work_subdir=req_work_subdir,
+                client_platform=body.client,
             )
 
     # DB 已关闭。起独立 Runner(asyncio.create_task,断连不取消)+ 返回订阅流(补播+实时)。
