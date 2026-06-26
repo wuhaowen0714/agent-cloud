@@ -70,4 +70,30 @@ void main() {
     expect(list.firstWhere((s) => s.id == 's1').model, 'B'); // 切过的保留本地
     expect(list.firstWhere((s) => s.id == 's2').model, 'C'); // 没切的保持服务器值
   });
+
+  // 同源竞态收口:rename 整行响应也不能覆盖本地 model(与并发 patchModel 乱序落库时)。
+  test('rename 保留本地 model,只更标题', () async {
+    final dio = Dio(BaseOptions(baseUrl: 'http://x/api'));
+    final adapter = DioAdapter(dio: dio);
+    adapter.onGet('/sessions', (s) => s.reply(200, [_session('s1', 'A')]));
+    adapter.onPatch('/sessions/s1',
+        (s) => s.reply(200, _session('s1', 'B')), data: {'model': 'B'});
+    // rename 的 PATCH 响应带旧 model=A(模拟乱序落库),title=新名。
+    adapter.onPatch('/sessions/s1',
+        (s) => s.reply(200, _session('s1', 'A', title: '新名')),
+        data: {'title': '新名'});
+
+    final container = ProviderContainer(
+        overrides: [dioProvider.overrideWithValue(dio)]);
+    addTearDown(container.dispose);
+
+    await container.read(sessionsControllerProvider.future);
+    final ctrl = container.read(sessionsControllerProvider.notifier);
+    await ctrl.patchModel('s1', 'B'); // 本地切到 B
+    await ctrl.rename('s1', '新名'); // 改名,响应带旧 model=A
+
+    final s1 = container.read(sessionsControllerProvider).asData!.value.first;
+    expect(s1.model, 'B'); // 保留本地,不被 rename 响应的旧 A 盖回
+    expect(s1.title, '新名'); // 标题正常更新
+  });
 }

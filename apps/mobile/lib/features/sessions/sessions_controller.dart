@@ -39,13 +39,14 @@ class SessionsController extends AsyncNotifier<List<Session>> {
     ]);
   }
 
-  /// 重命名会话(PATCH title),就地替换。
+  /// 重命名会话(PATCH title),就地替换。⚠️ 同 refresh:model 保留本地(前端权威) —— rename 的
+  /// 整行响应若与并发 patchModel 乱序落库,其 s.model 可能是旧值,直接整行替换会把 model 盖回。
   Future<void> rename(String id, String title) async {
     final s =
         await ref.read(sessionsRepoProvider).patchSession(id, title: title);
     state = AsyncValue.data([
       for (final x in (state.asData?.value ?? <Session>[]))
-        x.id == id ? s : x,
+        x.id == id ? s.copyWith(model: x.model) : x,
     ]);
   }
 
