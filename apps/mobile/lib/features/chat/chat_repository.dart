@@ -49,7 +49,9 @@ class ChatRepository {
       ),
       cancelToken: cancel,
     );
-    if (r.statusCode == 204) return null;
+    // 仅 200 才是真正的回合事件流;204(无进行中回合)及任何 4xx(鉴权失败/会话不存在等,
+    // validateStatus 放行了 <500)都返回 null,避免把错误响应体当 SSE 解析、静默吞成"回合正常结束"。
+    if (r.statusCode != 200 || r.data == null) return null;
     return parseSse((r.data as ResponseBody).stream);
   }
 }

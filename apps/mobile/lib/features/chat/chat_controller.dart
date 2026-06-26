@@ -54,6 +54,7 @@ class ChatController extends FamilyNotifier<ChatState, String> {
   late final ChatRepository _repo;
   late final String _sid;
   CancelToken? _cancel;
+  bool _resuming = false; // resume 在途守卫:回前台可能连续触发,只允许一条 resume 流
   final Set<String> _execedClientCalls = {}; // 已执行的客户端动作 call_id(去重防 resume 重放)
 
   @override
@@ -107,10 +108,22 @@ class ChatController extends FamilyNotifier<ChatState, String> {
   Future<void> retryResume() => _tryResume();
 
   Future<void> _tryResume() async {
+    if (_resuming) return; // 防重入:回前台连续切换/重复调用只跑一条 resume,避免自掐健康流
+    _resuming = true;
+    // 取消可能还半开卡着的旧 send 流(切后台前的 await-for 未结束),避免新旧两条流竞争状态
+    // (旧流稍后抛 cancel → send 的 isCancel 分支静默返回,不污染状态)。注:即使旧流其实健康
+    // 也会重连——宁可多一次 resume(后端支持续看),不可卡死。
+    _cancel?.cancel();
     try {
       _cancel = CancelToken();
       final stream = await _repo.resumeTurn(_sid, cancel: _cancel);
-      if (stream == null) return; // 没有进行中回合
+      if (stream == null) {
+        // 没有进行中回合:若本地仍卡在 streaming(典型:客户端动作工具把 app 切后台、漏收了
+        // turn_done,而回合其实已在服务端跑完),刷历史拿最终结果并清掉"生成中";否则(正常
+        // 进会话)无需动作。
+        if (state.status == ChatStatus.streaming) await _finishTurn();
+        return;
+      }
       state = state.copyWith(status: ChatStatus.streaming);
       await for (final e in stream) {
         _feed(e);
@@ -119,6 +132,8 @@ class ChatController extends FamilyNotifier<ChatState, String> {
     } on DioException catch (err) {
       if (CancelToken.isCancel(err)) return;
       state = state.copyWith(status: ChatStatus.idle);
+    } finally {
+      _resuming = false;
     }
   }
 
