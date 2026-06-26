@@ -78,10 +78,18 @@ async def build_run_turn_request(
     ]
     history = strip_unanswered_user_messages(history)
 
+    settings = get_settings()
     # BYO-Key:按 session.credential_id 取本人凭据解密;None/不属本人 → ("",""),worker 回退平台。
     api_key, base_url = await resolve_session_key(
-        db, session.credential_id, session.user_id, get_settings()
+        db, session.credential_id, session.user_id, settings
     )
+    # 当前模型不支持图片输入时,绝不能发图片 vision params —— sophnet 返回 400 "model X do not
+    # support image params"、整回合崩(切回文本模型后发任何消息都中招,哪怕只是"你好":历史活跃图
+    # 会被 active_images 回灌成当前回合的 vision 输入)。turn_images 是图片送达 worker 的唯一通道
+    # (worker 读成 data_uri 注入 content;history 消息的 proto 不带 images),故置空即彻底不发图。
+    # 仅平台模型(credential_id None)能用 is_vision_model 权威判定;BYOK 的 vision 后端无标记
+    # (credential 不存 visionModels),保守不动、避免误清 BYOK vision 模型。
+    strip_images = session.credential_id is None and not settings.is_vision_model(session.model)
 
     return worker_pb2.RunTurnRequest(
         session_id=str(session.id),
@@ -115,7 +123,7 @@ async def build_run_turn_request(
         ],
         messages=[msg_to_proto(orm_to_common(m)) for m in history],
         user_message=user_message,
-        turn_images=active_images(history, images or []),
+        turn_images=([] if strip_images else active_images(history, images or [])),
         sandbox_endpoint=sandbox_endpoint,
         work_subdir=work_subdir if work_subdir is not None else session.work_subdir,
         history_summary=session.summary,

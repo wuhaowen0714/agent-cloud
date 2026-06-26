@@ -147,6 +147,75 @@ async def test_build_request_excludes_current_user_message(session):
     assert req.messages == []  # the only message was excluded
 
 
+async def test_non_vision_platform_model_strips_all_images(session):
+    # 根因回归:平台文本模型(非 vision)切回后,历史/活跃图片都不能作 image params 发出 —— 否则
+    # sophnet 400 "model X do not support image params"、整回合崩(连发"你好"都没响应)。
+    user = await UserRepository(session).create(User(email="txt@example.com"))
+    await session.flush()
+    agent = await AgentConfigRepository(session).create(AgentConfig(user_id=user.id, name="a"))
+    await session.flush()
+    # 平台模型(credential_id None) + 非 vision(DeepSeek-V4-Pro 不在 vision_models)
+    s = await SessionRepository(session).create_for(
+        user.id, agent.id, None, model="DeepSeek-V4-Pro"
+    )
+    await session.flush()
+    await MessageRepository(session).append(
+        s.id,
+        OrmMessage(
+            session_id=s.id, seq=0, role="user",
+            content={"text": "看图", "images": ["uploads/a.jpg"]},
+        ),
+    )
+    await MessageRepository(session).append(
+        s.id,
+        OrmMessage(
+            session_id=s.id, seq=0, role="assistant",
+            content={"text": "是猫", "tool_calls": [], "tool_results": []},
+        ),
+    )
+    await session.commit()
+
+    req = await build_run_turn_request(
+        session, s, sandbox_endpoint="x", user_message="你好",
+        exclude_message_id=None, images=["uploads/b.jpg"],
+    )
+    # turn_images 是图片送达 worker 的唯一通道,文本模型下置空 → 彻底不发图、不会 400。
+    assert list(req.turn_images) == []
+    assert [m.text for m in req.messages] == ["看图", "是猫"]  # 文本历史照常保留
+
+
+async def test_vision_platform_model_keeps_images(session):
+    # 对照:平台 vision 模型照常发图(历史 images 保留 + active_images 回灌当前回合)。
+    user = await UserRepository(session).create(User(email="vis@example.com"))
+    await session.flush()
+    agent = await AgentConfigRepository(session).create(AgentConfig(user_id=user.id, name="a"))
+    await session.flush()
+    s = await SessionRepository(session).create_for(
+        user.id, agent.id, None, model="Kimi-K2.6"  # 平台 vision 模型
+    )
+    await session.flush()
+    await MessageRepository(session).append(
+        s.id,
+        OrmMessage(
+            session_id=s.id, seq=0, role="user",
+            content={"text": "看图", "images": ["uploads/a.jpg"]},
+        ),
+    )
+    await MessageRepository(session).append(
+        s.id,
+        OrmMessage(
+            session_id=s.id, seq=0, role="assistant",
+            content={"text": "是猫", "tool_calls": [], "tool_results": []},
+        ),
+    )
+    await session.commit()
+
+    req = await build_run_turn_request(
+        session, s, sandbox_endpoint="x", user_message="再看", exclude_message_id=None,
+    )
+    assert list(req.turn_images) == ["uploads/a.jpg"]  # vision 模型:回灌历史活跃图照常发
+
+
 async def test_build_request_includes_enabled_skills(session):
     user = await UserRepository(session).create(User(email="sk@example.com"))
     await session.flush()
