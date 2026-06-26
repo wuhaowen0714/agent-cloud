@@ -1,3 +1,6 @@
+// set_alarm / add_calendar_event 不在此列:它们是 mobile App 固有能力(web 没有系统闹钟/
+// 日历的执行通道),web 工具开关不显示;后端按客户端平台过滤(web 回合不把它们暴露给 LLM)。
+// mobile App 的工具列表(apps/mobile agent_tools.dart)里仍有这俩。
 export const BUILTIN_TOOLS: { name: string; desc: string }[] = [
   { name: "bash", desc: "运行 shell 命令" },
   { name: "write_file", desc: "写文件" },
@@ -9,8 +12,6 @@ export const BUILTIN_TOOLS: { name: string; desc: string }[] = [
   { name: "web_search", desc: "联网搜索(获取实时网页信息)" },
   { name: "generate_image", desc: "文生图(按文字描述生成图片)" },
   { name: "edit_image", desc: "图片编辑(按文字描述修改图片)" },
-  { name: "set_alarm", desc: "设置手机闹钟(仅移动 App 生效)" },
-  { name: "add_calendar_event", desc: "添加手机日历事件(仅移动 App 生效)" },
 ]
 const ALL = BUILTIN_TOOLS.map((t) => t.name)
 
