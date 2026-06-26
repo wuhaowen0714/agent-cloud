@@ -1,6 +1,7 @@
 import 'package:go_router/go_router.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../widgets/splash_page.dart';
 import '../../features/auth/auth_controller.dart';
 import '../../features/auth/login_page.dart';
 import '../../features/sessions/home_page.dart';
@@ -14,6 +15,21 @@ import '../../features/files/files_browser_page.dart';
 import '../../features/terminal/terminal_page.dart';
 import '../../features/chat/chat_page.dart';
 
+/// 路由守卫(纯函数,便于单测)。
+/// 关键:bootstrap(isLoading)期间去 /splash —— **绝不能停在 /home**,否则 home 会在
+/// 登录前就 build 并发出无 token 的 GET /sessions → 401(新装首登 401 的真因)。
+String? authRedirect({
+  required bool isLoading,
+  required bool loggedIn,
+  required String location,
+}) {
+  if (isLoading) return location == '/splash' ? null : '/splash';
+  if (loggedIn) {
+    return (location == '/splash' || location == '/login') ? '/home' : null;
+  }
+  return location == '/login' ? null : '/login';
+}
+
 /// router 作为 provider 缓存(稳定);监听登录态变化 → refresh 重新 redirect。
 final routerProvider = Provider<GoRouter>((ref) {
   final refresh = ValueNotifier(0);
@@ -21,17 +37,17 @@ final routerProvider = Provider<GoRouter>((ref) {
   ref.onDispose(refresh.dispose);
   return GoRouter(
     refreshListenable: refresh,
-    initialLocation: '/home',
+    initialLocation: '/splash',
     redirect: (ctx, state) {
       final auth = ref.read(authControllerProvider);
-      if (auth.isLoading) return null; // bootstrap 中,先不跳
-      final loggedIn = auth.asData?.value != null;
-      final atLogin = state.matchedLocation == '/login';
-      if (!loggedIn) return atLogin ? null : '/login';
-      if (atLogin) return '/home';
-      return null;
+      return authRedirect(
+        isLoading: auth.isLoading,
+        loggedIn: auth.asData?.value != null,
+        location: state.matchedLocation,
+      );
     },
     routes: [
+      GoRoute(path: '/splash', builder: (_, _) => const SplashPage()),
       GoRoute(path: '/login', builder: (_, _) => const LoginPage()),
       GoRoute(path: '/home', builder: (_, _) => const HomePage()),
       GoRoute(
