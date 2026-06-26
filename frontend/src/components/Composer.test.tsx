@@ -453,17 +453,37 @@ describe("图片上传(附件)", () => {
     expect(sent).toContain("upload/cat.png")
   })
 
-  it("带图但当前模型不支持图片 → 不发送,提示切换", async () => {
+  it("带图但没有任何 vision 模型可用 → 提示,不发送", async () => {
     vi.spyOn(api, "uploadFiles").mockResolvedValue([
       { name: "cat.png", path: "upload/cat.png", size: 10, is_dir: false },
     ] as never)
     vi.spyOn(api, "previewUrl").mockResolvedValue("blob:fake")
-    const { onSend } = setup({ visionModels: [] }) // gpt-4o 不再标 vision
+    const { onSend } = setup({ visionModels: [] }) // 平台无 vision 模型,无处可切
     await pick()
     await screen.findByAltText("cat.png")
     fireEvent.click(screen.getByText("发送"))
-    expect(onSend).not.toHaveBeenCalled() // 被路由拦下,没发出
-    expect(await screen.findByText(/不支持图片/)).toBeInTheDocument()
+    expect(onSend).not.toHaveBeenCalled() // 无 vision 可切 → 拦下不发
+    expect(await screen.findByText(/没有支持图片的模型/)).toBeInTheDocument()
+  })
+
+  it("带图但当前模型不支持 → 自动切到 vision 模型并发送", async () => {
+    vi.spyOn(api, "uploadFiles").mockResolvedValue([
+      { name: "cat.png", path: "upload/cat.png", size: 10, is_dir: false },
+    ] as never)
+    vi.spyOn(api, "previewUrl").mockResolvedValue("blob:fake")
+    const patch = vi.spyOn(api, "patchSession").mockResolvedValue({} as never)
+    // 当前 session 模型 gpt-4o 不在 vision 列表;平台有 vision 模型 DeepSeek-V4-Flash 可切。
+    const { onSend } = setup({ visionModels: ["DeepSeek-V4-Flash"] })
+    await pick()
+    await screen.findByAltText("cat.png")
+    fireEvent.click(screen.getByText("发送"))
+    // 自动 PATCH 切到 vision 模型,提示已切换,并照常发送(带图)
+    expect(await screen.findByText(/已自动切换/)).toBeInTheDocument()
+    expect(patch).toHaveBeenCalledWith("s1", {
+      model: "DeepSeek-V4-Flash",
+      credential_id: null,
+    })
+    expect(onSend).toHaveBeenCalled()
   })
 
   it("拖拽任意文件到输入区上传(非图也行,路径在 upload/)", async () => {
