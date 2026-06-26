@@ -515,7 +515,10 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
                     # 起名不需要全文:截前 2000 字符,长提问不白烧 token
                     messages=[Message(role=Role.USER, text=text[:2000])],
                     tools=[],
-                    max_tokens=64,  # 几个字的产出,不给话痨模型烧输出的空间
+                    max_tokens=64,  # 关思考后几个字标题足够
+                    # 关思考:DeepSeek-V4-Pro 等思考型模型否则把 token 全烧在 reasoning、content
+                    # 空 → 标题恒空(实测)。标题任务不需要思考,enable_thinking=false 直接出结果。
+                    disable_thinking=True,
                 )
             )
         except Exception:
