@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -51,8 +52,8 @@ class FilesRepository {
     return (r.data as Map<String, dynamic>)['text'] as String? ?? '';
   }
 
-  /// 取工作区文件字节(图片预览 / 回显;/files/raw 带 token,不能直接 <img>)。
-  Future<Uint8List> fetchImage(String path) async {
+  /// 取工作区文件原始字节(图片预览 / 下载 / 文本预览;/files/raw 带 token,不能直接 <img>)。
+  Future<Uint8List> fetchBytes(String path) async {
     final r = await _dio.get<List<int>>(
       '/files/raw',
       queryParameters: {'path': path},
@@ -60,6 +61,10 @@ class FilesRepository {
     );
     return Uint8List.fromList(r.data!);
   }
+
+  /// 取文本类文件内容(代码/md/html/json…),UTF-8 解码(容错坏字节)。
+  Future<String> fetchText(String path) async =>
+      utf8.decode(await fetchBytes(path), allowMalformed: true);
 }
 
 final filesRepoProvider =
@@ -67,7 +72,7 @@ final filesRepoProvider =
 
 /// 已发图缩略图字节,按 path 缓存(autoDispose 离开页面释放)。
 final sentImageProvider = FutureProvider.autoDispose.family<Uint8List, String>(
-    (ref, path) => ref.read(filesRepoProvider).fetchImage(path));
+    (ref, path) => ref.read(filesRepoProvider).fetchBytes(path));
 
 /// 目录列表,按 path 缓存。
 final filesListProvider =

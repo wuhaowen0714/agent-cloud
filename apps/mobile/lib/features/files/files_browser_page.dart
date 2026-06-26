@@ -1,17 +1,66 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/file_entry.dart';
 import 'files_repository.dart';
 
-const _imgExt = {'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'};
-const _docExt = {
-  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
-  'csv', 'txt', 'md', 'json', 'log', 'yaml', 'yml'
+// 文本类:取原始字节 UTF-8 解码后预览(代码 / 标记 / 配置 / 数据)。
+const _textExt = {
+  'txt', 'md', 'markdown', 'html', 'htm', 'xml', 'css', 'scss', 'less',
+  'json', 'yaml', 'yml', 'toml', 'ini', 'csv', 'tsv', 'log', 'env',
+  'conf', 'cfg', 'properties', 'gradle', 'sh', 'bash', 'zsh', 'sql',
+  'py', 'js', 'mjs', 'ts', 'jsx', 'tsx', 'dart', 'go', 'rs', 'java',
+  'kt', 'swift', 'c', 'cc', 'cpp', 'h', 'hpp', 'rb', 'php', 'lua', 'r', 'pl', 'scala',
 };
+// office:走后端 extract 抽文本。
+const _officeExt = {'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'};
+const _imgExt = {'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'};
 
-/// 工作区文件浏览器:目录导航 + 预览 + 删除 + 新建文件夹 + 上传图片。
+String _extOf(String name) {
+  final i = name.lastIndexOf('.');
+  return i < 0 ? '' : name.substring(i + 1).toLowerCase();
+}
+
+/// 类型 → (圆角图标, 主色)。按类型上不同颜色,破"满屏绿文件夹"。
+(IconData, Color) _typeStyle(FileEntry e) {
+  if (e.isDir) return (Icons.folder_rounded, const Color(0xFFF59E0B)); // amber
+  final x = _extOf(e.name);
+  if (_imgExt.contains(x)) return (Icons.image_rounded, const Color(0xFF10B981)); // emerald
+  if (x == 'pdf') return (Icons.picture_as_pdf_rounded, const Color(0xFFEF4444)); // red
+  if (x == 'md' || x == 'markdown') {
+    return (Icons.article_rounded, const Color(0xFF3B82F6)); // blue
+  }
+  if (x == 'html' || x == 'htm') {
+    return (Icons.html_rounded, const Color(0xFFF97316)); // orange
+  }
+  if ({'json', 'yaml', 'yml', 'toml', 'xml', 'ini', 'env', 'conf', 'cfg', 'properties'}
+      .contains(x)) {
+    return (Icons.data_object_rounded, const Color(0xFF0EA5E9)); // sky
+  }
+  if ({'csv', 'tsv', 'xls', 'xlsx'}.contains(x)) {
+    return (Icons.table_chart_rounded, const Color(0xFF14B8A6)); // teal
+  }
+  if ({'doc', 'docx'}.contains(x)) {
+    return (Icons.description_rounded, const Color(0xFF2563EB)); // blue-600
+  }
+  if ({'ppt', 'pptx'}.contains(x)) {
+    return (Icons.slideshow_rounded, const Color(0xFFE11D48)); // rose
+  }
+  if ({'zip', 'tar', 'gz', 'tgz', 'rar', '7z'}.contains(x)) {
+    return (Icons.folder_zip_rounded, const Color(0xFFB45309)); // amber-700
+  }
+  if (_textExt.contains(x)) {
+    return (Icons.code_rounded, const Color(0xFF8B5CF6)); // violet 代码
+  }
+  return (Icons.insert_drive_file_rounded, AppTheme.faint);
+}
+
+/// 工作区文件浏览器:目录导航 + 多格式预览 + 下载 + 删除 + 新建文件夹 + 上传图片。
 class FilesPage extends ConsumerStatefulWidget {
   const FilesPage({super.key});
   @override
@@ -20,6 +69,7 @@ class FilesPage extends ConsumerStatefulWidget {
 
 class _FilesPageState extends ConsumerState<FilesPage> {
   String _path = ''; // 当前目录(根 = 空)
+  bool _showHidden = false; // 默认隐藏 . 开头文件/夹
 
   bool get _atRoot => _path.isEmpty;
   void _enter(String dir) => setState(() => _path = dir);
@@ -29,6 +79,12 @@ class _FilesPageState extends ConsumerState<FilesPage> {
   }
 
   void _refresh() => ref.invalidate(filesListProvider(_path));
+
+  void _toast(String m) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+    }
+  }
 
   Future<void> _upload() async {
     final imgs = await ImagePicker().pickMultiImage();
@@ -99,25 +155,71 @@ class _FilesPageState extends ConsumerState<FilesPage> {
     return false; // 靠 provider 刷新移除,不本地 dismiss
   }
 
+  // 下载:取字节落临时文件 → 系统分享(可保存到「文件」/Download、或发给其它 app)。
+  Future<void> _download(FileEntry e) async {
+    _toast('准备「${e.name}」…');
+    try {
+      final bytes = await ref.read(filesRepoProvider).fetchBytes(e.path);
+      final dir = await getTemporaryDirectory();
+      final f = File('${dir.path}/${e.name}');
+      await f.writeAsBytes(bytes);
+      await SharePlus.instance
+          .share(ShareParams(files: [XFile(f.path)], text: e.name));
+    } catch (err) {
+      _toast('下载失败: $err');
+    }
+  }
+
   void _open(FileEntry e) {
     if (e.isDir) {
       _enter(e.path);
       return;
     }
-    final ext = e.name.toLowerCase().split('.').last;
-    if (_imgExt.contains(ext)) {
-      showDialog(context: context, builder: (_) => _ImagePreview(e));
-    } else if (_docExt.contains(ext)) {
-      showDialog(context: context, builder: (_) => _TextPreview(e));
+    final x = _extOf(e.name);
+    final repo = ref.read(filesRepoProvider);
+    Widget body;
+    if (_imgExt.contains(x)) {
+      body = _ImageBody(e);
+    } else if (x == 'md' || x == 'markdown') {
+      body = _AsyncTextBody(future: repo.fetchText(e.path), markdown: true);
+    } else if (_textExt.contains(x)) {
+      body = _AsyncTextBody(future: repo.fetchText(e.path));
+    } else if (_officeExt.contains(x)) {
+      body = _AsyncTextBody(future: repo.extractText(e.path));
     } else {
-      _toast('暂不支持预览 .$ext');
+      _notPreviewable(e);
+      return;
     }
+    showDialog(
+      context: context,
+      builder: (_) =>
+          _PreviewDialog(entry: e, onDownload: () => _download(e), child: body),
+    );
   }
 
-  void _toast(String m) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
-    }
+  void _notPreviewable(FileEntry e) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(height: 16),
+          Text('.${_extOf(e.name)} 格式暂不支持预览',
+              style: const TextStyle(color: AppTheme.muted)),
+          const SizedBox(height: 6),
+          ListTile(
+            leading: const Icon(Icons.download_rounded, color: AppTheme.teal),
+            title: const Text('下载 / 分享'),
+            onTap: () {
+              Navigator.pop(context);
+              _download(e);
+            },
+          ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
   }
 
   @override
@@ -130,6 +232,13 @@ class _FilesPageState extends ConsumerState<FilesPage> {
             ? null
             : IconButton(icon: const Icon(Icons.arrow_back), onPressed: _up),
         actions: [
+          IconButton(
+            icon: Icon(_showHidden
+                ? Icons.visibility_rounded
+                : Icons.visibility_off_rounded),
+            tooltip: _showHidden ? '隐藏「.」开头文件' : '显示隐藏文件',
+            onPressed: () => setState(() => _showHidden = !_showHidden),
+          ),
           IconButton(
               icon: const Icon(Icons.create_new_folder_outlined),
               tooltip: '新建文件夹',
@@ -144,24 +253,27 @@ class _FilesPageState extends ConsumerState<FilesPage> {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('加载失败: $e')),
         data: (list) {
-          final sorted = [...list]..sort((a, b) {
-              if (a.isDir != b.isDir) return a.isDir ? -1 : 1;
-              return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-            });
+          var items = [...list];
+          if (!_showHidden) {
+            items = items.where((e) => !e.name.startsWith('.')).toList();
+          }
+          items.sort((a, b) {
+            if (a.isDir != b.isDir) return a.isDir ? -1 : 1;
+            return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+          });
           return RefreshIndicator(
             onRefresh: () async => _refresh(),
-            child: sorted.isEmpty
+            child: items.isEmpty
                 ? ListView(children: const [
-                    SizedBox(height: 140),
+                    SizedBox(height: 160),
                     Center(
                         child: Text('空目录',
                             style: TextStyle(color: AppTheme.muted))),
                   ])
-                : ListView.separated(
-                    itemCount: sorted.length,
-                    separatorBuilder: (_, _) =>
-                        const Divider(height: 1, indent: 56),
-                    itemBuilder: (_, i) => _row(sorted[i]),
+                : ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 24),
+                    itemCount: items.length,
+                    itemBuilder: (_, i) => _row(items[i]),
                   ),
           );
         },
@@ -169,132 +281,179 @@ class _FilesPageState extends ConsumerState<FilesPage> {
     );
   }
 
-  Widget _row(FileEntry e) => Dismissible(
+  Widget _row(FileEntry e) {
+    final (icon, color) = _typeStyle(e);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Dismissible(
         key: ValueKey(e.path),
         direction: DismissDirection.endToStart,
         background: Container(
-          color: AppTheme.dangerSoft,
           alignment: Alignment.centerRight,
           padding: const EdgeInsets.only(right: 20),
+          decoration: BoxDecoration(
+              color: AppTheme.dangerSoft,
+              borderRadius: BorderRadius.circular(AppTheme.rCard)),
           child: const Icon(Icons.delete_outline, color: AppTheme.danger),
         ),
         confirmDismiss: (_) => _confirmDelete(e),
-        child: ListTile(
-          leading: Icon(e.isDir ? Icons.folder : _fileIcon(e.name),
-              color: e.isDir ? AppTheme.teal : AppTheme.faint),
-          title:
-              Text(e.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-          subtitle: e.isDir
-              ? null
-              : Text(e.prettySize,
-                  style: const TextStyle(fontSize: 12, color: AppTheme.faint)),
-          trailing: e.isDir
-              ? const Icon(Icons.chevron_right, color: AppTheme.faint)
-              : null,
-          onTap: () => _open(e),
-        ),
-      );
-
-  IconData _fileIcon(String name) {
-    final ext = name.toLowerCase().split('.').last;
-    if (_imgExt.contains(ext)) return Icons.image_outlined;
-    if (ext == 'pdf') return Icons.picture_as_pdf_outlined;
-    if (['doc', 'docx', 'txt', 'md'].contains(ext)) {
-      return Icons.description_outlined;
-    }
-    if (['xls', 'xlsx', 'csv'].contains(ext)) {
-      return Icons.table_chart_outlined;
-    }
-    return Icons.insert_drive_file_outlined;
-  }
-}
-
-/// 图片预览弹窗(带 token 取字节)。
-class _ImagePreview extends ConsumerWidget {
-  final FileEntry entry;
-  const _ImagePreview(this.entry);
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final img = ref.watch(sentImageProvider(entry.path));
-    return Dialog(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        AppBar(
-          title: Text(entry.name,
-              maxLines: 1, overflow: TextOverflow.ellipsis),
-          automaticallyImplyLeading: false,
-          actions: [
-            IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: () => Navigator.pop(context))
-          ],
-        ),
-        Flexible(
-          child: img.when(
-            loading: () => const Padding(
-                padding: EdgeInsets.all(40),
-                child: CircularProgressIndicator()),
-            error: (e, _) => Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text('加载失败: $e')),
-            data: (bytes) => InteractiveViewer(child: Image.memory(bytes)),
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(AppTheme.rCard),
+            border: Border.all(color: AppTheme.border),
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(AppTheme.rCard),
+              onTap: () => _open(e),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                child: Row(children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(11)),
+                    child: Icon(icon, color: color, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(e.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.w500,
+                                  color: AppTheme.ink)),
+                          if (!e.isDir) ...[
+                            const SizedBox(height: 2),
+                            Text(e.prettySize,
+                                style: const TextStyle(
+                                    fontSize: 12, color: AppTheme.faint)),
+                          ],
+                        ]),
+                  ),
+                  const SizedBox(width: 8),
+                  if (e.isDir)
+                    const Icon(Icons.chevron_right_rounded,
+                        color: AppTheme.faint)
+                  else
+                    IconButton(
+                      icon: const Icon(Icons.download_rounded,
+                          size: 20, color: AppTheme.muted),
+                      tooltip: '下载',
+                      onPressed: () => _download(e),
+                    ),
+                ]),
+              ),
+            ),
           ),
         ),
-      ]),
+      ),
     );
   }
 }
 
-/// 文档文本预览(抽取文本)。
-class _TextPreview extends ConsumerStatefulWidget {
+/// 统一预览弹窗:顶栏(文件名 + 下载 + 关闭)+ 内容区(定高 75%,内容自滚动)。
+class _PreviewDialog extends StatelessWidget {
   final FileEntry entry;
-  const _TextPreview(this.entry);
-  @override
-  ConsumerState<_TextPreview> createState() => _TextPreviewState();
-}
-
-class _TextPreviewState extends ConsumerState<_TextPreview> {
-  late final Future<String> _future =
-      ref.read(filesRepoProvider).extractText(widget.entry.path);
-
+  final VoidCallback onDownload;
+  final Widget child;
+  const _PreviewDialog(
+      {required this.entry, required this.onDownload, required this.child});
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        AppBar(
-          title: Text(widget.entry.name,
-              maxLines: 1, overflow: TextOverflow.ellipsis),
-          automaticallyImplyLeading: false,
-          actions: [
+      insetPadding: const EdgeInsets.all(16),
+      child: SizedBox(
+        height: MediaQuery.of(context).size.height * 0.75,
+        child: Column(children: [
+          Row(children: [
+            const SizedBox(width: 16),
+            Expanded(
+              child: Text(entry.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 15, fontWeight: FontWeight.w600)),
+            ),
+            IconButton(
+                icon: const Icon(Icons.download_rounded),
+                tooltip: '下载',
+                onPressed: onDownload),
             IconButton(
                 icon: const Icon(Icons.close),
-                onPressed: () => Navigator.pop(context))
-          ],
-        ),
-        Flexible(
-          child: FutureBuilder<String>(
-            future: _future,
-            builder: (_, snap) {
-              if (snap.connectionState != ConnectionState.done) {
-                return const Padding(
-                    padding: EdgeInsets.all(40),
-                    child: CircularProgressIndicator());
-              }
-              if (snap.hasError) {
-                return Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text('预览失败: ${snap.error}'));
-              }
-              return SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
-                child: SelectableText(
-                  snap.data!.isEmpty ? '(空)' : snap.data!,
-                  style: const TextStyle(fontSize: 13, height: 1.5),
-                ),
-              );
-            },
+                onPressed: () => Navigator.pop(context)),
+          ]),
+          const Divider(height: 1),
+          Expanded(child: child),
+        ]),
+      ),
+    );
+  }
+}
+
+/// 图片预览(带 token 取字节 + 可缩放)。
+class _ImageBody extends ConsumerWidget {
+  final FileEntry entry;
+  const _ImageBody(this.entry);
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final img = ref.watch(sentImageProvider(entry.path));
+    return img.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => Padding(
+          padding: const EdgeInsets.all(24), child: Text('加载失败: $e')),
+      data: (bytes) =>
+          Center(child: InteractiveViewer(child: Image.memory(bytes))),
+    );
+  }
+}
+
+/// 文本/代码/markdown/抽取文本统一异步内容。
+class _AsyncTextBody extends StatelessWidget {
+  final Future<String> future;
+  final bool markdown;
+  const _AsyncTextBody({required this.future, this.markdown = false});
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<String>(
+      future: future,
+      builder: (_, snap) {
+        if (snap.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snap.hasError) {
+          return Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text('预览失败: ${snap.error}'));
+        }
+        final text = snap.data ?? '';
+        if (text.isEmpty) {
+          return const Center(
+              child: Text('(空文件)', style: TextStyle(color: AppTheme.muted)));
+        }
+        if (markdown) {
+          return Markdown(data: text, padding: const EdgeInsets.all(16));
+        }
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(14),
+          child: SelectableText(
+            text,
+            style: const TextStyle(
+                fontSize: 12.5,
+                height: 1.5,
+                fontFamily: 'monospace',
+                color: AppTheme.ink),
           ),
-        ),
-      ]),
+        );
+      },
     );
   }
 }
