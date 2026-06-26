@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import uuid
 
 from agent_cloud.v1 import worker_pb2
@@ -36,6 +37,19 @@ _MOBILE_ENV_DOC = (
     "- schedule_task 是云端周期任务(到点让你再运行一次发应用内通知),不是系统闹钟;"
     "只在用户明确要「周期性 / 让 AI 到点替我做某事」时才用。"
 )
+
+# 文本模型(不可见图片)下,历史 user 文本里独占一行的【工作区图片路径】降级为 [图片] 占位 ——
+# 否则模型看到 composeUpload 拼的 "read with read_file" + jpg 路径,会去 read_file 读图(读图片
+# 二进制无意义、徒增一次工具往返,正是"切文本模型后怪怪的/又在读文件"的来源)。非图片路径
+# (文档等)不动,文本模型仍可 read_file 读它们。
+_IMAGE_PATH_LINE = re.compile(
+    r"^(?:uploads?|media)/[^\n]+?\.(?:png|jpe?g|gif|webp|bmp)$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _demote_image_paths(text: str) -> str:
+    return _IMAGE_PATH_LINE.sub("[图片]", text)
 
 
 async def build_run_turn_request(
@@ -91,6 +105,14 @@ async def build_run_turn_request(
     # (credential 不存 visionModels),保守不动、避免误清 BYOK vision 模型。
     strip_images = session.credential_id is None and not settings.is_vision_model(session.model)
 
+    def _to_proto(m):
+        c = orm_to_common(m)
+        # 文本模型:历史 user 文本里的图片路径降级为 [图片](仅清洗发给 LLM 的 transient 副本,
+        # 绝不动库里原文 —— 前端气泡渲染、切回 vision 模型恢复都依赖原文)。
+        if strip_images and m.role == "user" and c.text:
+            c.text = _demote_image_paths(c.text)
+        return msg_to_proto(c)
+
     return worker_pb2.RunTurnRequest(
         session_id=str(session.id),
         user_id=str(session.user_id),
@@ -121,7 +143,7 @@ async def build_run_turn_request(
             )
             for sk in (enabled_skills or [])
         ],
-        messages=[msg_to_proto(orm_to_common(m)) for m in history],
+        messages=[_to_proto(m) for m in history],
         user_message=user_message,
         turn_images=([] if strip_images else active_images(history, images or [])),
         sandbox_endpoint=sandbox_endpoint,
