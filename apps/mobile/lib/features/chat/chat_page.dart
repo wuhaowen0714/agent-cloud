@@ -37,7 +37,9 @@ class _ChatPageState extends ConsumerState<ChatPage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     if (widget.prefill != null && widget.prefill!.isNotEmpty) {
-      _input.text = widget.prefill!; // fork 出来的新会话:把被分叉的提问放回输入框
+      // fork 出来的新会话:把被分叉的提问放回输入框。剥掉附件 marker 只回填正文,否则
+      // 输入框会出现内部提示 + 裸路径,且重发会再拼一遍 marker。
+      _input.text = parseUserMessage(widget.prefill!).body;
     }
   }
 
@@ -297,17 +299,13 @@ class _ChatPageState extends ConsumerState<ChatPage>
       padding: const EdgeInsets.all(14),
       children: [
         for (final t in state.turns) ...[
-          if (t.userImages.isNotEmpty) _sentImages(t.userImages),
-          if (t.userText != null && t.userText!.isNotEmpty)
-            _userBubble(t.userText!, onLongPress: () => _copy(t.userText!)),
+          _userSection(t.userText, t.userImages),
           TurnBlocks(t.blocks),
           _turnActionBar(t, streaming), // 豆包式:回答下方常驻操作栏(复制/分叉/回到这里)
           const SizedBox(height: 18),
         ],
         if (streaming || state.live.isNotEmpty) ...[
-          if (state.liveUserImages.isNotEmpty)
-            _sentImages(state.liveUserImages),
-          if (state.liveUser.isNotEmpty) _userBubble(state.liveUser),
+          _userSection(state.liveUser, state.liveUserImages),
           TurnBlocks(state.live),
           if (streaming) _typing(),
         ],
@@ -353,6 +351,72 @@ class _ChatPageState extends ConsumerState<ChatPage>
           ),
         ),
       );
+
+  // 用户回合区:图片缩略图(上)+ 非图片附件 chip + 正文气泡。发送时拼进 content 的 marker/
+  // 路径由 parseUserMessage 摘掉,气泡只显示用户真正打的字(图片走缩略图、文件走 chip)。
+  Widget _userSection(String? rawText, List<String> userImages) {
+    final parsed =
+        (rawText == null || rawText.isEmpty) ? null : parseUserMessage(rawText);
+    final body = parsed?.body ?? '';
+    final files = (parsed?.attachments ?? const <String>[])
+        .where((p) => !isImagePath(p))
+        .toList();
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        if (userImages.isNotEmpty) _sentImages(userImages),
+        if (files.isNotEmpty) _fileChips(files),
+        if (body.isNotEmpty) _userBubble(body, onLongPress: () => _copy(body)),
+      ],
+    );
+  }
+
+  // 非图片附件:右对齐的文件名 chip(图片走缩略图,这里放文档/压缩包等)。
+  Widget _fileChips(List<String> paths) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Align(
+          alignment: Alignment.centerRight,
+          child: Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final p in paths)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F3F4),
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.insert_drive_file_outlined,
+                          size: 15, color: AppTheme.teal),
+                      const SizedBox(width: 6),
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                            maxWidth:
+                                MediaQuery.of(context).size.width * 0.5),
+                        child: Text(_fileName(p),
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                color: Colors.black87, fontSize: 13)),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+
+  // 上传文件展示名:去路径前缀,再去后端加的 <毫秒时间戳(13+位)>_<序号>_ 前缀还原原名。
+  // 时间戳锚 13+ 位,避免误剥用户原名里的 2024_01_ 这类短数字前缀。
+  String _fileName(String path) =>
+      path.split('/').last.replaceFirst(RegExp(r'^\d{13,}_\d+_'), '');
 
   // ── 消息级操作:复制 / 分叉 / 回到这里(对标 web)──
 
@@ -477,7 +541,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
           .rollback(t.id);
       await ref.read(sessionsControllerProvider.notifier).refresh();
       if (!mounted) return;
-      _input.text = text;
+      _input.text = parseUserMessage(text).body; // 同 prefill:回填正文,不带附件 marker
       _toast('已回到此处');
     } catch (e) {
       _toast(_errMsg(e, '回滚失败,请重试'));

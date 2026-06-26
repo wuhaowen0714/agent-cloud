@@ -21,15 +21,16 @@ export function stripWorkspaceImageMarkdown(text: string): string {
 // Composer 发送带附件的消息时,会在用户文本末尾追加一段【给 agent 看的提示 + 工作区路径】
 // (见 Composer.send)。渲染用户气泡时把它摘出来:正文只留用户真正打的字,附件改用缩略图/
 // 文件 chip 展示——而不是把内部提示和裸 upload/ 路径直接显示给用户(那既丑又暴露路径)。
-// 兼容当前 "Uploaded file(s)" 与早期 "Attached image(s)" 两种 marker。
+// 兼容三种 marker:当前 "Uploaded file(s)"、早期 "Attached image(s)"、app 端早期中文
+// 「已上传文件到工作区」(app 发的消息也会在 web 端渲染,故 web 也要能隐藏它)。
 //
 // ⚠️ marker 是【不可信的用户文本】:用户正文里可能恰好出现这串(贴报错、问这个功能本身),
 // 不能无脑当分隔符,否则会把 marker 之后的真实正文误吞成"附件"(对抗审查 H1)。故只有当
-// marker 之后【每一行都形如工作区路径】(upload//media/ 前缀,Composer 上传落 upload/、
-// 生图落 media/)时才剥离;混入其它文本则整体不解析、原样保留正文。
-const MARKER_RE = /\[(?:Uploaded file|Attached image)\(s\) in the workspace[^\]\n]*\]\n/
-const MARKER_LINE = /^\[(?:Uploaded file|Attached image)\(s\) in the workspace[^\]]*\]$/
-const WORKSPACE_PATH = /^(?:upload|media)\//
+// marker 之后【每一行都形如工作区路径】(upload//uploads//media/ 前缀:web 上传落 upload/、
+// app 落 uploads/、生图落 media/)时才剥离;混入其它文本则整体不解析、原样保留正文。
+const MARKER_RE = /\[(?:(?:Uploaded file|Attached image)\(s\) in the workspace|已上传文件到工作区)[^\]\n]*\]\n/
+const MARKER_LINE = /^\[(?:(?:Uploaded file|Attached image)\(s\) in the workspace|已上传文件到工作区)[^\]]*\]$/
+const WORKSPACE_PATH = /^(?:uploads?|media)\//
 // /skills 选中的技能,Composer 发送时每个技能追加【独占一行】的 [请使用技能:X];渲染时摘成 chip。
 // ⚠️ 整行锚定(^…$):marker 必须独占整行才剥离——用户在正文句中内联打 [请使用技能:x] 不会被
 // 误吞(对抗审查 High,与附件 marker 的 H1 防护同源)。每技能一行 → 技能名可含 、, 等任意字符。
