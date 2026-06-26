@@ -5,6 +5,7 @@ import '../../models/block.dart';
 import '../../models/turn_event.dart';
 import 'blocks.dart';
 import 'chat_repository.dart';
+import 'client_actions.dart';
 
 enum ChatStatus { loading, idle, streaming, error }
 
@@ -53,6 +54,7 @@ class ChatController extends FamilyNotifier<ChatState, String> {
   late final ChatRepository _repo;
   late final String _sid;
   CancelToken? _cancel;
+  final Set<String> _execedClientCalls = {}; // 已执行的客户端动作 call_id(去重防 resume 重放)
 
   @override
   ChatState build(String sessionId) {
@@ -133,6 +135,14 @@ class ChatController extends FamilyNotifier<ChatState, String> {
       case TurnDoneEvent():
         break; // 收尾在 _finishTurn
       default:
+        // 客户端动作工具(set_alarm/add_calendar_event):主 agent 的 tool_call 在设备本地
+        // 执行系统 Intent。call_id 去重 —— resume 重放同一事件时不重复设闹钟/加日程。
+        if (e is ToolCallStart &&
+            e.subagentId == null &&
+            kClientActionTools.contains(e.tool) &&
+            _execedClientCalls.add(e.callId)) {
+          handleClientToolCall(e.tool, e.args);
+        }
         final sid = _subagentId(e);
         state = state.copyWith(
             live: sid != null

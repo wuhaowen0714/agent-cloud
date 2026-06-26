@@ -9,6 +9,8 @@ export const BUILTIN_TOOLS: { name: string; desc: string }[] = [
   { name: "web_search", desc: "联网搜索(获取实时网页信息)" },
   { name: "generate_image", desc: "文生图(按文字描述生成图片)" },
   { name: "edit_image", desc: "图片编辑(按文字描述修改图片)" },
+  { name: "set_alarm", desc: "设置手机闹钟(仅移动 App 生效)" },
+  { name: "add_calendar_event", desc: "添加手机日历事件(仅移动 App 生效)" },
 ]
 const ALL = BUILTIN_TOOLS.map((t) => t.name)
 
