@@ -130,4 +130,21 @@ describe("parseUserMessage", () => {
     const t = `hi\n\n${MARKER}\nupload/ok.png\nrandom note here`
     expect(parseUserMessage(t)).toEqual({ body: t, attachments: [], skills: [] })
   })
+
+  // 跨端:app 端上传落 uploads/(复数)、早期还用中文 marker;web 渲染 app 发的消息时也要隐藏。
+  it("兼容 app 的 uploads/ 复数路径", () => {
+    const { body, attachments } = parseUserMessage(`看图\n\n${MARKER}\nuploads/a.png`)
+    expect(body).toBe("看图")
+    expect(attachments).toEqual(["uploads/a.png"])
+  })
+
+  it("兼容 app 早期中文 marker", () => {
+    const t =
+      "描述一下这个图片\n\n[已上传文件到工作区,可用 read_file 读取;图片可用 edit_image 编辑]\nuploads/shot.jpg"
+    expect(parseUserMessage(t)).toEqual({
+      body: "描述一下这个图片",
+      attachments: ["uploads/shot.jpg"],
+      skills: [],
+    })
+  })
 })
