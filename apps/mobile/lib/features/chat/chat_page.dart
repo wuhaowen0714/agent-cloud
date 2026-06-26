@@ -2,13 +2,15 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:file_selector/file_selector.dart';
 import '../../core/theme/app_theme.dart';
 import '../files/files_repository.dart';
 import '../sessions/sessions_controller.dart';
+import '../settings/platform_repository.dart';
 import 'chat_controller.dart';
 import 'model_picker.dart';
 import 'turn_blocks.dart';
+import 'upload_compose.dart';
 
 class ChatPage extends ConsumerStatefulWidget {
   final String sessionId;
@@ -21,7 +23,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
     with WidgetsBindingObserver {
   final _input = TextEditingController();
   final _scroll = ScrollController();
-  final List<XFile> _pending = []; // 待发图片
+  final List<XFile> _pending = []; // 待发附件(图片 + 任意文件)
   bool _uploading = false;
 
   @override
@@ -53,9 +55,17 @@ class _ChatPageState extends ConsumerState<ChatPage>
     super.dispose();
   }
 
-  Future<void> _pickImages() async {
-    final imgs = await ImagePicker().pickMultiImage();
-    if (imgs.isNotEmpty && mounted) setState(() => _pending.addAll(imgs));
+  Future<void> _pickFiles() async {
+    try {
+      final files = await openFiles();
+      if (files.isNotEmpty && mounted) setState(() => _pending.addAll(files));
+    } catch (e) {
+      // 系统选择器偶发 SecurityException / 路径解析失败 → 提示而非静默失败。
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('选择文件失败: $e')));
+      }
+    }
   }
 
   Future<void> _send() async {
@@ -65,22 +75,43 @@ class _ChatPageState extends ConsumerState<ChatPage>
     if (_pending.isNotEmpty) {
       setState(() => _uploading = true);
       try {
-        paths = await ref.read(filesRepoProvider).uploadImages(_pending);
+        paths = await ref.read(filesRepoProvider).uploadFiles(_pending);
       } catch (e) {
         if (!mounted) return;
         setState(() => _uploading = false);
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('图片上传失败: $e')));
-        return; // 保留待发图片,可重试
+            .showSnackBar(SnackBar(content: Text('文件上传失败: $e')));
+        return; // 保留待发文件,可重试
       }
       if (!mounted) return;
       setState(() => _uploading = false);
+    }
+    // 图片走多模态 vision,其余文件把路径作为文本引用拼进正文(对标 web)。
+    final sent = composeUpload(text, paths);
+    // vision 门控:有图但当前会话模型不支持图片 → 提示切模型,保留待发(对标 web)。
+    if (sent.images.isNotEmpty && !_modelSupportsVision()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('当前模型不支持图片,请点右上角切到带「图片」标记的模型')));
+      }
+      return;
     }
     _input.clear();
     setState(() => _pending.clear());
     ref
         .read(chatControllerProvider(widget.sessionId).notifier)
-        .send(text, images: paths);
+        .send(sent.content, images: sent.images);
+  }
+
+  // 当前会话模型是否支持图片输入。清单未加载/模型未知时保守不拦(返回 true,交后端)。
+  bool _modelSupportsVision() {
+    final pm = ref.read(platformModelsProvider).asData?.value;
+    if (pm == null) return true;
+    final sessions = ref.read(sessionsControllerProvider).asData?.value ?? [];
+    final m = sessions.where((s) => s.id == widget.sessionId);
+    final model = m.isEmpty ? null : m.first.model;
+    if (model == null) return true;
+    return pm.visionModels.contains(model);
   }
 
   String? _agentId() {
@@ -330,10 +361,10 @@ class _ChatPageState extends ConsumerState<ChatPage>
             padding: const EdgeInsets.all(8),
             child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
               IconButton(
-                onPressed: busy ? null : _pickImages,
-                icon: const Icon(Icons.add_photo_alternate_outlined),
+                onPressed: busy ? null : _pickFiles,
+                icon: const Icon(Icons.attach_file),
                 color: AppTheme.muted,
-                tooltip: '添加图片',
+                tooltip: '添加文件',
               ),
               Expanded(
                 child: TextField(
@@ -385,11 +416,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
           itemCount: _pending.length,
           separatorBuilder: (_, _) => const SizedBox(width: 8),
           itemBuilder: (_, i) => Stack(children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: Image.file(File(_pending[i].path),
-                  width: 64, height: 64, fit: BoxFit.cover),
-            ),
+            _pendingThumb(_pending[i]),
             Positioned(
               right: 2,
               top: 2,
@@ -406,6 +433,36 @@ class _ChatPageState extends ConsumerState<ChatPage>
           ]),
         ),
       );
+
+  // 待发预览:图片显缩略图,其它文件显图标 + 文件名。
+  Widget _pendingThumb(XFile f) {
+    if (isImagePath(f.name)) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Image.file(File(f.path),
+            width: 64, height: 64, fit: BoxFit.cover),
+      );
+    }
+    return Container(
+      width: 64,
+      height: 64,
+      padding: const EdgeInsets.symmetric(horizontal: 3),
+      decoration: BoxDecoration(
+        color: AppTheme.bg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        const Icon(Icons.insert_drive_file_outlined,
+            size: 22, color: AppTheme.muted),
+        const SizedBox(height: 2),
+        Text(f.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 9, color: AppTheme.muted)),
+      ]),
+    );
+  }
 }
 
 /// 已发图缩略图:带 token 取字节后 Image.memory(sentImageProvider 缓存)。
