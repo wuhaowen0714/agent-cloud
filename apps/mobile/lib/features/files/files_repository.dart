@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:file_selector/file_selector.dart'; // XFile
 import '../auth/auth_controller.dart'; // dioProvider
 import '../../models/file_entry.dart';
 
@@ -11,18 +11,19 @@ class FilesRepository {
   FilesRepository(this._dio);
   final Dio _dio;
 
-  /// 上传图片到工作区(默认 uploads/,文件管理可指定目录),返回相对路径。
-  Future<List<String>> uploadImages(List<XFile> images,
+  /// 上传任意文件到工作区(默认 uploads/,文件管理可指定目录),返回相对路径。
+  /// 优先 fromFile(走文件流、不全进内存,大文件不 OOM);无路径时回退 bytes。
+  Future<List<String>> uploadFiles(List<XFile> files,
       {String dir = 'uploads'}) async {
     final form = FormData();
-    for (var i = 0; i < images.length; i++) {
-      final img = images[i];
+    for (var i = 0; i < files.length; i++) {
+      final f = files[i];
       // 加时间戳前缀避免同名覆盖。
       final stamp = DateTime.now().microsecondsSinceEpoch;
       form.files.add(MapEntry(
         'files',
-        MultipartFile.fromBytes(await img.readAsBytes(),
-            filename: '${stamp}_${i}_${img.name}'),
+        await MultipartFile.fromFile(f.path,
+            filename: '${stamp}_${i}_${f.name}'),
       ));
     }
     final r = await _dio.post('/files/upload',

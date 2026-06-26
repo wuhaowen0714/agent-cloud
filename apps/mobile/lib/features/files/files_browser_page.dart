@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:file_selector/file_selector.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../core/theme/app_theme.dart';
@@ -89,10 +89,10 @@ class _FilesPageState extends ConsumerState<FilesPage> {
   }
 
   Future<void> _upload() async {
-    final imgs = await ImagePicker().pickMultiImage();
-    if (imgs.isEmpty) return;
     try {
-      await ref.read(filesRepoProvider).uploadImages(imgs, dir: _path);
+      final files = await openFiles(); // 纳入 try:选择器偶发异常也提示
+      if (files.isEmpty) return;
+      await ref.read(filesRepoProvider).uploadFiles(files, dir: _path);
       _refresh();
     } catch (e) {
       _toast('上传失败: $e');
@@ -259,8 +259,8 @@ class _FilesPageState extends ConsumerState<FilesPage> {
               tooltip: '新建文件夹',
               onPressed: _mkdir),
           IconButton(
-              icon: const Icon(Icons.add_photo_alternate_outlined),
-              tooltip: '上传图片',
+              icon: const Icon(Icons.upload_file_outlined),
+              tooltip: '上传文件',
               onPressed: _upload),
         ],
       ),
