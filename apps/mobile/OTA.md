@@ -51,6 +51,13 @@ cd apps/mobile
 推 main 上的统一版本;多 worktree 并行开发时各自 `flutter build apk` 本地测试、不走发版,
 从而不会撞号 / 互相覆盖 release.json。
 
+> ⚠️ **并发发版会互相覆盖 version 标签**:build 号靠 commit 数单调,但 **version 字符串 / notes
+> 是各自传的** —— 两个会话先后发版,后发的 release.json 覆盖先发的(version、notes 都被换掉),
+> 且 release.sh 的"清理旧 APK"会删掉对方那个非当前 build 的 APK。真实事故:发了 1.4.0/771,
+> 对方随后发 1.3.3/773,把线上标签冲成 1.3.3 并删了 771.apk(773 代码其实已含 771 的功能,只是
+> 标签被换)。**因 build-name 编译进 APK**,只改 release.json 的 version 不彻底(装上仍显示旧标签),
+> 得用目标 version 重打一个 build 号更高的包。发版前先 `git pull` 看清线上最新 build,多人发版需协调。
+
 脚本做三件事:构建 release APK(`--target-platform android-arm64`)→ 生成 `release.json`
 → scp 到 `st-e:/opt/agent-cloud/data/app-releases`(先传 APK 再切 json,避免指向尚未上传的包),
 并清理同目录的旧 APK。可用环境变量覆盖:`ST_SSH`(默认 `st`,部署到 st-e 用
