@@ -24,7 +24,7 @@ APK="agent-cloud-${BUILD}.apk"
 cd "$(dirname "$0")/.."
 
 echo "▶ 构建 APK: v${VERSION} (build ${BUILD}) force=${FORCE}"
-flutter build apk --release \
+flutter build apk --release --target-platform android-arm64 \
   --build-name="${VERSION}" --build-number="${BUILD}" \
   --dart-define=API_BASE="${BASE_URL}/api"
 
@@ -50,5 +50,5 @@ scp "$RELEASE_JSON" "${SSH}:${REMOTE_DIR}/release.json"
 rm -f "$RELEASE_JSON"
 
 echo "✓ 发版完成 v${VERSION} (build ${BUILD}) force=${FORCE}"
-echo "  下载: ${BASE_URL}/app/download/${APK}"
+echo "  下载: ${BASE_URL}/api/app/download/${APK}"
 echo "  App 下次启动或'设置→检查更新'即提示。"

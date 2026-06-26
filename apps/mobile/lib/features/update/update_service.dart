@@ -1,17 +1,19 @@
+import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:ota_update/ota_update.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../auth/auth_controller.dart'; // dioProvider
 
 /// 后端 /app/version 返回的最新版本信息。
 class AppVersion {
-  final String version; // 展示用语义版本,如 1.0.1
-  final int build; // 单调递增构建号,用于比对
-  final String url; // APK 下载地址
-  final bool force; // 强制更新:不可跳过
-  final String notes; // 更新说明
+  final String version;
+  final int build;
+  final String url;
+  final bool force;
+  final String notes;
 
   const AppVersion(this.version, this.build, this.url, this.force, this.notes);
 
@@ -24,9 +26,7 @@ class AppVersion {
       );
 }
 
-/// 检查更新:GET /app/version,build 比当前大则弹窗。
-/// - force=true:不可取消(无"稍后"、禁返回键、点外部不关)。
-/// - silent=true:无更新/失败时不打扰(启动自动检查用);false 会提示结果(手动检查用)。
+/// 检查更新:build 比当前大则弹窗。force=true 不可跳过;silent=true 无更新/失败不打扰。
 Future<void> checkUpdate(BuildContext context, WidgetRef ref,
     {bool silent = true}) async {
   final Dio dio = ref.read(dioProvider);
@@ -38,7 +38,7 @@ Future<void> checkUpdate(BuildContext context, WidgetRef ref,
     final info = await PackageInfo.fromPlatform();
     current = int.tryParse(info.buildNumber) ?? 0;
   } catch (e) {
-    // /app/version 未部署(404)→ 暂无 OTA 服务,当作无更新,不报错打扰
+    // /app/version 未部署(404)→ 当作无更新,不报错打扰
     final notFound = e is DioException && e.response?.statusCode == 404;
     if (!silent && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -67,10 +67,9 @@ Future<void> checkUpdate(BuildContext context, WidgetRef ref,
             TextButton(
                 onPressed: () => Navigator.pop(ctx), child: const Text('稍后')),
           FilledButton(
-            onPressed: () async {
-              await launchUrl(Uri.parse(latest.url),
-                  mode: LaunchMode.externalApplication);
-              if (!latest.force && ctx.mounted) Navigator.pop(ctx);
+            onPressed: () {
+              Navigator.pop(ctx); // 关版本提示
+              _runInAppUpdate(context, latest.url); // app 内下载 + 安装
             },
             child: const Text('立即更新'),
           ),
@@ -78,4 +77,109 @@ Future<void> checkUpdate(BuildContext context, WidgetRef ref,
       ),
     ),
   );
+}
+
+/// app 内下载 + 直接拉起系统安装器(ota_update),进度对话框。
+void _runInAppUpdate(BuildContext context, String url) {
+  showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => _OtaProgressDialog(url),
+  );
+}
+
+class _OtaProgressDialog extends StatefulWidget {
+  final String url;
+  const _OtaProgressDialog(this.url);
+  @override
+  State<_OtaProgressDialog> createState() => _OtaProgressDialogState();
+}
+
+class _OtaProgressDialogState extends State<_OtaProgressDialog> {
+  double _pct = 0;
+  String _msg = '准备下载…';
+  bool _ended = false; // 失败/已触发安装 → 可关闭
+  StreamSubscription<OtaEvent>? _sub;
+
+  @override
+  void initState() {
+    super.initState();
+    _start();
+  }
+
+  void _start() {
+    try {
+      _sub = OtaUpdate()
+          .execute(widget.url, destinationFilename: 'agent-cloud-update.apk')
+          .listen(
+        (e) {
+          if (!mounted) return;
+          switch (e.status) {
+            case OtaStatus.DOWNLOADING:
+              setState(() {
+                _pct = double.tryParse(e.value ?? '') ?? _pct;
+                _msg = '下载中 ${_pct.toStringAsFixed(0)}%';
+              });
+            case OtaStatus.INSTALLING:
+              setState(() {
+                _ended = true; // 安装界面已拉起,允许关对话框
+                _msg = '下载完成,正在拉起安装…';
+              });
+            default:
+              setState(() {
+                _ended = true;
+                _msg = '更新失败(${e.status.name}),可改用浏览器下载';
+              });
+          }
+        },
+        onError: (_) {
+          if (mounted) {
+            setState(() {
+              _ended = true;
+              _msg = '更新失败,可改用浏览器下载';
+            });
+          }
+        },
+      );
+    } catch (_) {
+      setState(() {
+        _ended = true;
+        _msg = '更新失败,可改用浏览器下载';
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: _ended, // 下载中禁止关
+      child: AlertDialog(
+        title: const Text('更新'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (!_ended)
+            LinearProgressIndicator(value: _pct > 0 ? _pct / 100 : null),
+          const SizedBox(height: 14),
+          Text(_msg),
+        ]),
+        actions: _ended
+            ? [
+                TextButton(
+                  onPressed: () => launchUrl(Uri.parse(widget.url),
+                      mode: LaunchMode.externalApplication),
+                  child: const Text('浏览器下载'),
+                ),
+                TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('关闭')),
+              ]
+            : null,
+      ),
+    );
+  }
 }

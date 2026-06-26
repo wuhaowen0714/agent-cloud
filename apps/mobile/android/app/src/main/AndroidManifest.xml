@@ -1,6 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- release 包需显式声明,否则 dio 网络请求被系统拦截 -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- ota_update:app 内下载 APK 后拉起系统安装器 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <application
         android:label="agent_cloud_mobile"
         android:name="${applicationName}"
