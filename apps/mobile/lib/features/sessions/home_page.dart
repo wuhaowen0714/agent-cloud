@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -8,25 +9,16 @@ import '../../models/session.dart';
 import '../update/update_service.dart';
 import 'sessions_controller.dart';
 
-// 列表项:agent 大标题 / 天小标题 / 会话卡(标题/天均可折叠)
+// 选中 agent 后,该 agent 的会话按天分组的列表项
 sealed class _Item {
   const _Item();
 }
 
-class _AgentHeader extends _Item {
-  final String name;
-  final String agentId;
-  final bool expanded;
-  final int count;
-  const _AgentHeader(this.name, this.agentId, this.expanded, this.count);
-}
-
 class _DateHeader extends _Item {
   final String label;
-  final String agentId;
   final bool expanded;
   final int count;
-  const _DateHeader(this.label, this.agentId, this.expanded, this.count);
+  const _DateHeader(this.label, this.expanded, this.count);
 }
 
 class _SessionItem extends _Item {
@@ -41,22 +33,17 @@ class HomePage extends ConsumerStatefulWidget {
 }
 
 class _HomePageState extends ConsumerState<HomePage> {
-  // 手动 toggle 过的分组 key。agent 默认展开;天默认仅「今天」展开,其它折叠。
-  final Set<String> _toggled = {};
+  String? _selectedAgentId;
+  final Set<String> _toggledDates = {}; // 手动 toggle 的天分组(今天默认开,其它默认折叠)
 
-  bool _agentExpanded(String aid) => !_toggled.contains('a:$aid');
-  bool _dateExpanded(String aid, String label) {
-    final t = _toggled.contains('d:$aid:$label');
-    return label == '今天' ? !t : t; // 今天默认开、其它默认折叠,toggle 反转
+  bool _dateExpanded(String label) {
+    final t = _toggledDates.contains(label);
+    return label == '今天' ? !t : t;
   }
-
-  void _toggle(String key) => setState(
-      () => _toggled.contains(key) ? _toggled.remove(key) : _toggled.add(key));
 
   @override
   void initState() {
     super.initState();
-    // 进入主页(已登录)后静默检查更新。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) checkUpdate(context, ref, silent: true);
     });
@@ -68,62 +55,49 @@ class _HomePageState extends ConsumerState<HomePage> {
     }
   }
 
-  Future<void> _newSession() async {
-    // 关键:await future 确保 agents 已加载(此前用 .asData 在首次点击时拿到空 → 静默失败)
-    List<AgentConfig> agents;
-    try {
-      agents = await ref.read(agentsProvider.future);
-    } catch (e) {
-      _toast('加载智能体失败: $e');
-      return;
-    }
-    if (!mounted) return;
-    if (agents.isEmpty) {
+  Future<void> _newSession(String? agentId) async {
+    if (agentId == null) {
       _toast('没有可用的智能体');
       return;
     }
-    final agentId = agents.length == 1
-        ? agents.first.id
-        : await showModalBottomSheet<String>(
-            context: context,
-            shape: const RoundedRectangleBorder(
-                borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-            builder: (_) => SafeArea(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(20, 18, 20, 8),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text('选择智能体',
-                          style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: AppTheme.ink)),
-                    ),
-                  ),
-                  ...agents.map((a) => ListTile(
-                        leading: const Icon(Icons.smart_toy_outlined),
-                        title: Text(a.name),
-                        onTap: () => Navigator.pop(context, a.id),
-                      )),
-                  const SizedBox(height: 8),
-                ],
-              ),
-            ),
-          );
-    if (agentId == null) return;
     try {
       final s =
           await ref.read(sessionsControllerProvider.notifier).create(agentId);
-      if (mounted) context.push('/chat/${s.id}'); // 建完直接进会话
+      if (mounted) context.push('/chat/${s.id}');
     } catch (e) {
       _toast('创建会话失败: $e');
     }
   }
 
-  /// 长按会话弹操作菜单:重命名 / 删除。
+  Future<void> _deleteAgent(AgentConfig a) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('删除「${a.name}」?'),
+        content: const Text('将连同该智能体的全部会话一起删除,不可恢复。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('删除',
+                  style: TextStyle(color: AppTheme.danger))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await ref.read(sessionsControllerProvider.notifier).deleteAgent(a.id);
+      if (mounted && _selectedAgentId == a.id) {
+        setState(() => _selectedAgentId = null); // 回退到默认(第一个)
+      }
+    } catch (e) {
+      final busy = e is DioException && e.response?.statusCode == 409;
+      _toast(busy ? '「${a.name}」有会话在运行,无法删除' : '删除失败: $e');
+    }
+  }
+
   void _showActions(Session s) {
     showModalBottomSheet(
       context: context,
@@ -181,39 +155,22 @@ class _HomePageState extends ConsumerState<HomePage> {
     }
   }
 
-  /// 会话 → 两级分组(agent → 天)的扁平列表,带折叠:折叠的分组只出 header。
-  List<_Item> _buildItems(List<Session> sessions, Map<String, String> names) {
+  List<_Item> _buildDateItems(List<Session> ss) {
     final epoch = DateTime.fromMillisecondsSinceEpoch(0);
-    final byAgent = <String, List<Session>>{};
-    for (final s in sessions) {
-      (byAgent[s.agentConfigId] ??= []).add(s);
+    final sorted = [...ss]
+      ..sort((a, b) =>
+          (b.lastActiveAt ?? epoch).compareTo(a.lastActiveAt ?? epoch));
+    final byLabel = <String, List<Session>>{};
+    for (final s in sorted) {
+      (byLabel[timeGroupLabel(s.lastActiveAt)] ??= []).add(s);
     }
-    DateTime latest(List<Session> ss) => ss
-        .map((s) => s.lastActiveAt ?? epoch)
-        .reduce((a, b) => a.isAfter(b) ? a : b);
-    final agentIds = byAgent.keys.toList()
-      ..sort((a, b) => latest(byAgent[b]!).compareTo(latest(byAgent[a]!)));
-
     final items = <_Item>[];
-    for (final aid in agentIds) {
-      final ss = byAgent[aid]!
-        ..sort((a, b) =>
-            (b.lastActiveAt ?? epoch).compareTo(a.lastActiveAt ?? epoch));
-      final agentOpen = _agentExpanded(aid);
-      items.add(_AgentHeader(names[aid] ?? '智能体', aid, agentOpen, ss.length));
-      if (!agentOpen) continue; // agent 折叠 → 不展开天分组
-      // 按天分组(ss 已降序 → label 自然有序;Map 保持插入序)
-      final byLabel = <String, List<Session>>{};
-      for (final s in ss) {
-        (byLabel[timeGroupLabel(s.lastActiveAt)] ??= []).add(s);
-      }
-      for (final e in byLabel.entries) {
-        final open = _dateExpanded(aid, e.key);
-        items.add(_DateHeader(e.key, aid, open, e.value.length));
-        if (open) {
-          for (final s in e.value) {
-            items.add(_SessionItem(s));
-          }
+    for (final e in byLabel.entries) {
+      final open = _dateExpanded(e.key);
+      items.add(_DateHeader(e.key, open, e.value.length));
+      if (open) {
+        for (final s in e.value) {
+          items.add(_SessionItem(s));
         }
       }
     }
@@ -222,55 +179,91 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final sessions = ref.watch(sessionsControllerProvider);
-    final agents = ref.watch(agentsProvider).asData?.value ?? [];
-    final names = {for (final a in agents) a.id: a.name};
+    final agents = ref.watch(agentsProvider).asData?.value ?? const [];
+    final sessionsAsync = ref.watch(sessionsControllerProvider);
+    final sessions = sessionsAsync.asData?.value ?? const [];
+    // 选中 agent:默认第一个;选中的被删了则回退第一个
+    var selectedId = _selectedAgentId;
+    if (selectedId == null || !agents.any((a) => a.id == selectedId)) {
+      selectedId = agents.isNotEmpty ? agents.first.id : null;
+    }
+    final countByAgent = <String, int>{};
+    for (final s in sessions) {
+      countByAgent.update(s.agentConfigId, (v) => v + 1, ifAbsent: () => 1);
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('会话'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.folder_outlined),
-            tooltip: '文件',
-            onPressed: () => context.push('/files'),
-          ),
+              icon: const Icon(Icons.folder_outlined),
+              tooltip: '文件',
+              onPressed: () => context.push('/files')),
           IconButton(
-            icon: const Icon(Icons.terminal),
-            tooltip: '终端',
-            onPressed: () => context.push('/terminal'),
-          ),
+              icon: const Icon(Icons.terminal),
+              tooltip: '终端',
+              onPressed: () => context.push('/terminal')),
           IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            tooltip: '设置',
-            onPressed: () => context.push('/settings'),
-          ),
+              icon: const Icon(Icons.settings_outlined),
+              tooltip: '设置',
+              onPressed: () => context.push('/settings')),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _newSession,
+        onPressed: () => _newSession(selectedId),
         icon: const Icon(Icons.add),
         label: const Text('新对话'),
       ),
-      body: sessions.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('加载失败: $e')),
-        data: (list) {
-          if (list.isEmpty) return _emptyState();
-          final items = _buildItems(list, names);
-          return RefreshIndicator(
-            onRefresh: () =>
-                ref.read(sessionsControllerProvider.notifier).refresh(),
-            child: ListView.builder(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 88),
-              itemCount: items.length,
-              itemBuilder: (_, i) {
-                final item = items[i];
-                return switch (item) {
-                  _AgentHeader() => _agentHeader(item),
-                  _DateHeader() => _dateHeader(item),
-                  _SessionItem(:final session) => _sessionCard(session),
-                };
-              },
+      body: Column(children: [
+        if (agents.isNotEmpty) _agentBar(agents, selectedId, countByAgent),
+        const Divider(height: 1),
+        Expanded(child: _sessionArea(sessionsAsync, selectedId)),
+      ]),
+    );
+  }
+
+  Widget _agentBar(
+      List<AgentConfig> agents, String? selectedId, Map<String, int> counts) {
+    return SizedBox(
+      height: 52,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        itemCount: agents.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final a = agents[i];
+          final sel = a.id == selectedId;
+          final c = counts[a.id] ?? 0;
+          return GestureDetector(
+            onTap: () => setState(() => _selectedAgentId = a.id),
+            onLongPress: () => _deleteAgent(a),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: sel ? AppTheme.teal : AppTheme.surface,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: sel ? AppTheme.teal : AppTheme.border),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.smart_toy_outlined,
+                    size: 15, color: sel ? Colors.white : AppTheme.muted),
+                const SizedBox(width: 5),
+                Text(a.name,
+                    style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                        color: sel ? Colors.white : AppTheme.ink)),
+                if (c > 0) ...[
+                  const SizedBox(width: 5),
+                  Text('$c',
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: sel ? Colors.white70 : AppTheme.faint)),
+                ],
+              ]),
             ),
           );
         },
@@ -278,85 +271,87 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
-  Widget _agentHeader(_AgentHeader h) => Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: () => _toggle('a:${h.agentId}'),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(4, 14, 4, 8),
-            child: Row(children: [
-              const Icon(Icons.smart_toy_outlined,
-                  size: 17, color: AppTheme.teal),
-              const SizedBox(width: 6),
-              Text(h.name,
-                  style: const TextStyle(
-                      fontSize: 14.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.ink)),
-              const SizedBox(width: 6),
-              Text('${h.count}',
-                  style: const TextStyle(fontSize: 12, color: AppTheme.faint)),
-              const Spacer(),
-              Icon(h.expanded ? Icons.expand_more : Icons.chevron_right,
-                  size: 18, color: AppTheme.faint),
-            ]),
+  Widget _sessionArea(AsyncValue<List<Session>> async, String? selectedId) {
+    return async.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => Center(child: Text('加载失败: $e')),
+      data: (all) {
+        if (selectedId == null) {
+          return _empty('还没有智能体', '在 web 端创建一个智能体后即可开始');
+        }
+        final mine =
+            all.where((s) => s.agentConfigId == selectedId).toList();
+        if (mine.isEmpty) {
+          return _empty('还没有会话', '点右下角「新对话」开始');
+        }
+        final items = _buildDateItems(mine);
+        return RefreshIndicator(
+          onRefresh: () =>
+              ref.read(sessionsControllerProvider.notifier).refresh(),
+          child: ListView.builder(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 88),
+            itemCount: items.length,
+            itemBuilder: (_, i) {
+              final item = items[i];
+              return switch (item) {
+                _DateHeader() => _dateHeader(item),
+                _SessionItem(:final session) => _sessionCard(session),
+              };
+            },
           ),
-        ),
-      );
+        );
+      },
+    );
+  }
 
   Widget _dateHeader(_DateHeader h) => Material(
         color: Colors.transparent,
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
-          onTap: () => _toggle('d:${h.agentId}:${h.label}'),
+          onTap: () => setState(() => _toggledDates.contains(h.label)
+              ? _toggledDates.remove(h.label)
+              : _toggledDates.add(h.label)),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(6, 8, 6, 6),
+            padding: const EdgeInsets.fromLTRB(4, 12, 4, 6),
             child: Row(children: [
               Icon(h.expanded ? Icons.expand_more : Icons.chevron_right,
-                  size: 15, color: AppTheme.muted),
+                  size: 16, color: AppTheme.muted),
               const SizedBox(width: 3),
               Text(h.label,
                   style: const TextStyle(
-                      fontSize: 12,
+                      fontSize: 12.5,
                       fontWeight: FontWeight.w600,
                       color: AppTheme.muted)),
-              if (!h.expanded) ...[
-                const SizedBox(width: 6),
-                Text('${h.count}',
-                    style:
-                        const TextStyle(fontSize: 11.5, color: AppTheme.faint)),
-              ],
+              const SizedBox(width: 6),
+              Text('${h.count}',
+                  style: const TextStyle(fontSize: 12, color: AppTheme.faint)),
             ]),
           ),
         ),
       );
 
-  Widget _emptyState() => Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: const BoxDecoration(
-                  color: AppTheme.tealSoft, shape: BoxShape.circle),
-              child: const Icon(Icons.forum_outlined,
-                  size: 34, color: AppTheme.teal),
-            ),
-            const SizedBox(height: 16),
-            const Text('还没有会话',
-                style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.ink)),
-            const SizedBox(height: 6),
-            const Text('点右下角「新对话」开始',
-                style: TextStyle(color: AppTheme.muted)),
-          ],
-        ),
+  Widget _empty(String title, String hint) => Center(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 64,
+            height: 64,
+            decoration: const BoxDecoration(
+                color: AppTheme.tealSoft, shape: BoxShape.circle),
+            child: const Icon(Icons.forum_outlined,
+                size: 30, color: AppTheme.teal),
+          ),
+          const SizedBox(height: 14),
+          Text(title,
+              style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.ink)),
+          const SizedBox(height: 6),
+          Text(hint, style: const TextStyle(color: AppTheme.muted)),
+        ]),
       );
 
+  // 紧凑会话卡:无大图标,标题 + 时间在一行,模型在副行。
   Widget _sessionCard(Session s) => Dismissible(
         key: ValueKey(s.id),
         direction: DismissDirection.endToStart,
@@ -386,19 +381,8 @@ class _HomePageState extends ConsumerState<HomePage> {
               onTap: () => context.push('/chat/${s.id}'),
               onLongPress: () => _showActions(s),
               child: Padding(
-                padding: const EdgeInsets.all(14),
+                padding: const EdgeInsets.fromLTRB(14, 11, 12, 11),
                 child: Row(children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: AppTheme.tealSoft,
-                      borderRadius: BorderRadius.circular(11),
-                    ),
-                    child: const Icon(Icons.forum_outlined,
-                        color: AppTheme.teal, size: 20),
-                  ),
-                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -418,23 +402,25 @@ class _HomePageState extends ConsumerState<HomePage> {
                                 style: const TextStyle(
                                     fontSize: 11.5, color: AppTheme.faint)),
                         ]),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 3),
                         Row(children: [
                           const Icon(Icons.memory,
-                              size: 13, color: AppTheme.faint),
+                              size: 12.5, color: AppTheme.faint),
                           const SizedBox(width: 4),
                           Flexible(
                             child: Text(s.model,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
-                                    fontSize: 12.5, color: AppTheme.muted)),
+                                    fontSize: 12, color: AppTheme.muted)),
                           ),
                         ]),
                       ],
                     ),
                   ),
-                  const Icon(Icons.chevron_right, color: AppTheme.faint),
+                  const SizedBox(width: 8),
+                  const Icon(Icons.chevron_right,
+                      size: 20, color: AppTheme.faint),
                 ]),
               ),
             ),
