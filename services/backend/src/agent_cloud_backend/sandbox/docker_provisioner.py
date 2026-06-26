@@ -75,10 +75,46 @@ class DockerProvisioner:
         """
         if self._network_mode == "network":
             name = endpoint.rsplit(":", 1)[0]  # acsbx-<id>:50051 → 容器名 acsbx-<id>
-            return await asyncio.to_thread(self._container_running, name)
+            running = await asyncio.to_thread(self._container_running, name)
+            if running:
+                # worker 单独重启会掉出 spawn 时一次性接入的沙箱专属网络;此后 endpoint 虽指向
+                # running 容器,worker 却 DNS 解析不到该容器名 → 永久 UNAVAILABLE(探活只看容器
+                # Running、一直复用陈旧 endpoint 不重建)。每次探活顺带幂等重连,worker 重启后下个
+                # 回合即自愈;worker 没重启时 worker 已在网内,检查命中直接返回、无额外动作。
+                net_name = f"acsbx-net-{name[len('acsbx-'):]}"
+                await asyncio.to_thread(self._ensure_worker_in_network, net_name)
+            return running
         from agent_cloud_backend.sandbox.health import grpc_endpoint_alive
 
         return await grpc_endpoint_alive(endpoint)
+
+    def _ensure_worker_in_network(self, net_name: str) -> None:
+        """确保 worker 容器接入沙箱专属网络(幂等)。worker 接入是 spawn 时一次性做的,worker
+        单独重启会掉出该网 → 连不上沙箱。best-effort:网络已不在 / 接入失败只记日志,不改探活
+        结论(容器 Running 仍算存活;接入失败下次探活再试)。"""
+        if not self._worker_container:
+            return
+        from docker.errors import APIError, NotFound
+
+        try:
+            net = self._docker().networks.get(net_name)
+        except NotFound:
+            return  # 专属网络已不在:沙箱也会被后续探活/清理收掉
+        try:
+            net.reload()
+            # 真实 SDK 的 net.containers 是 Container 对象(.name);测试 fake 直接存名字字符串。
+            names = {getattr(c, "name", c) for c in net.containers}
+            if self._worker_container in names:
+                return  # 已接入,无需重连
+            net.connect(self._worker_container)
+            logger.info(
+                "reconnected worker %s to %s (worker-restart recovery)",
+                self._worker_container,
+                net_name,
+            )
+        except APIError:
+            # 并发重连撞 409 already-connected 等:无害,下次探活会看到已接入
+            logger.exception("failed to reconnect worker to %s", net_name)
 
     def _container_running(self, name: str) -> bool:
         from docker.errors import NotFound

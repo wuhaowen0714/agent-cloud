@@ -137,6 +137,27 @@ async def test_alive_network_mode_checks_container_running(tmp_path):
     assert await prov.alive(endpoint) is False  # 容器停了 → 死(触发重建)
 
 
+async def test_alive_network_mode_reconnects_worker_after_restart(tmp_path):
+    # worker 单独重启会掉出沙箱专属网络;探活在容器 running 时应幂等把 worker 接回,否则
+    # endpoint 虽指向 running 容器、worker 仍 DNS 解析不到 → UNAVAILABLE 永不自愈。
+    client = _FakeClient()
+    prov = DockerProvisioner(
+        host_root=str(tmp_path),
+        image="img:1",
+        network_mode="network",
+        worker_container="w",
+        client=client,
+    )
+    _, endpoint, _ = await prov.spawn(uuid.uuid4())  # spawn 把 worker 接入专属网
+    net = next(iter(client.networks.by_name.values()))
+    net.containers.clear()  # 模拟 worker 重启:掉出专属网络
+    assert await prov.alive(endpoint) is True  # 容器仍 running → 活
+    assert "w" in net.containers  # 且把 worker 接回了网络
+    after_first = net.connected.count("w")
+    await prov.alive(endpoint)  # 再探活:worker 已在网内
+    assert net.connected.count("w") == after_first  # 幂等:不重复 connect
+
+
 async def test_alive_network_mode_false_when_container_gone(tmp_path):
     client = _FakeClient()
     prov = DockerProvisioner(
