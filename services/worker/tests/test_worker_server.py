@@ -983,3 +983,54 @@ def test_timezone_offset_actually_changes_injected_date():
     d1 = re.search(r"Today's date is (\d{4}-\d{2}-\d{2})", sys_plus14).group(1)
     d2 = re.search(r"Today's date is (\d{4}-\d{2}-\d{2})", sys_minus12).group(1)
     assert d1 != d2
+
+
+async def test_run_turn_exposes_client_actions_only_for_mobile():
+    # client=mobile → set_alarm/add_calendar_event 出现在传给模型的 tools 里(串联:create_server
+    # → servicer → _build_executor → ClientActionsExecutor(client=request.client).specs)。回归
+    # wiring:server 必须把 request.client 传给 ClientActionsExecutor,否则 mobile 也静默不暴露
+    # (同 web_search/image_gen 的漏传隐患)。模型直接收尾,无需真网络/沙箱。
+    provider = _CapturingProvider(_final("ok"))
+    worker_server, wport = await create_worker_server(provider_factory=lambda *a: provider, port=0)
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            await stub.RunTurn(
+                worker_pb2.RunTurnRequest(
+                    agent=worker_pb2.Agent(model="m", provider="fake"),
+                    messages=[],
+                    user_message="设个明早7点闹钟",
+                    sandbox_endpoint="localhost:1",
+                    work_subdir="s1",
+                    client="mobile",
+                )
+            )
+    finally:
+        await worker_server.stop(None)
+    tool_names = {t.name for t in provider.last_request.tools}
+    assert "set_alarm" in tool_names and "add_calendar_event" in tool_names
+
+
+async def test_run_turn_hides_client_actions_on_web():
+    # client=web(或不设)→ 不暴露 set_alarm/add_calendar_event(web 没有系统闹钟/日历执行通道,
+    # 暴露只会诱导模型调一个落不了地的工具)。其余 worker 原生工具不受影响。
+    provider = _CapturingProvider(_final("ok"))
+    worker_server, wport = await create_worker_server(provider_factory=lambda *a: provider, port=0)
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            await stub.RunTurn(
+                worker_pb2.RunTurnRequest(
+                    agent=worker_pb2.Agent(model="m", provider="fake"),
+                    messages=[],
+                    user_message="设个明早7点闹钟",
+                    sandbox_endpoint="localhost:1",
+                    work_subdir="s1",
+                    client="web",
+                )
+            )
+    finally:
+        await worker_server.stop(None)
+    tool_names = {t.name for t in provider.last_request.tools}
+    assert "set_alarm" not in tool_names and "add_calendar_event" not in tool_names
+    assert "remember" in tool_names  # 其余 worker 原生工具不受影响

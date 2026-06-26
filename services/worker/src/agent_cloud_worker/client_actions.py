@@ -59,12 +59,20 @@ def add_calendar_enabled(enabled_tools: list[str]) -> bool:
 class ClientActionsExecutor:
     """装饰 ToolExecutor:加客户端动作工具 set_alarm / add_calendar_event。worker 本地校验 +
     合成确认,**不碰 DB、不转沙箱**;真正的副作用在用户设备上由 App 执行(收到 tool_call 后调
-    系统 Intent)。其余工具委托内层。"""
+    系统 Intent)。其余工具委托内层。
 
-    def __init__(self, inner: ToolExecutor, *, enabled_tools: list[str]) -> None:
+    按 client 平台门控:这两个工具只有 mobile App 能落到系统闹钟/日历,故仅 client=="mobile"
+    时暴露;web/未知端不暴露(暴露只会诱导 LLM 调一个落不了地的工具)。再叠加 enabled_tools。"""
+
+    def __init__(
+        self, inner: ToolExecutor, *, enabled_tools: list[str], client: str = ""
+    ) -> None:
         self._inner = inner
-        self._alarm = set_alarm_enabled(enabled_tools)
-        self._cal = add_calendar_enabled(enabled_tools)
+        # 仅 mobile 暴露:web 没有系统闹钟/日历的执行通道;空 client(未知/旧客户端)按非 mobile
+        # 保守处理。仍叠加 enabled_tools 门控(per-agent 工具开关)。
+        is_mobile = client == "mobile"
+        self._alarm = is_mobile and set_alarm_enabled(enabled_tools)
+        self._cal = is_mobile and add_calendar_enabled(enabled_tools)
 
     def specs(self) -> list[ToolSpec]:
         specs = list(self._inner.specs())

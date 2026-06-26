@@ -169,7 +169,10 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
         # notify 不按 is_scheduled_run 关闭——定时任务到点提醒正是主用例。
         executor = NotifyingExecutor(executor, enabled=notify_enabled(enabled_tools))
         # set_alarm / add_calendar_event:worker 合成确认,真正副作用在用户设备上由 App 执行。
-        executor = ClientActionsExecutor(executor, enabled_tools=enabled_tools)
+        # 按 client 过滤:仅 mobile 暴露(web 没有系统闹钟/日历执行通道,见 ClientActionsExecutor)。
+        executor = ClientActionsExecutor(
+            executor, enabled_tools=enabled_tools, client=request.client
+        )
         if self._web_search_available():
             searcher = make_sophnet_searcher(
                 endpoint=self._web_search_endpoint,

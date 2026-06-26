@@ -119,4 +119,5 @@ async def build_run_turn_request(
         history_summary=session.summary,
         sandbox_token=sandbox_token,
         is_scheduled_run=is_scheduled_run,
+        client=client_platform,  # worker 据此过滤仅 mobile 可执行的工具(set_alarm/add_calendar)
     )
