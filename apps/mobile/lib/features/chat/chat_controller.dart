@@ -107,6 +107,20 @@ class ChatController extends FamilyNotifier<ChatState, String> {
     if (msg != null) await send(msg);
   }
 
+  /// 回到某条用户消息「之前」:后端删它及之后的消息,本地刷历史拿最新 turns;返回该消息文本
+  /// 供页面回填输入框。失败(如 409 会话忙)抛给调用方提示。仅在非 streaming 时可调(页面已禁)。
+  Future<String> rollback(String messageId) async {
+    final text = await _repo.rollback(_sid, messageId);
+    final msgs = await _repo.history(_sid);
+    state = state.copyWith(
+        turns: messagesToTurns(msgs), status: ChatStatus.idle);
+    return text;
+  }
+
+  /// 从某条用户消息「之前」分叉新会话(原会话不变)。返回新会话 id 与该消息文本。
+  Future<({String newSessionId, String userText})> fork(String messageId) =>
+      _repo.fork(_sid, messageId);
+
   // 首回合标题:后端在 user 消息落库后即时生成(不等回答),这里轮询刷 sessions 直到拿到 title
   // (或到上限)——让 chat 顶栏 / 会话列表尽快显示标题,不必等回合结束。
   Future<void> _pollTitle() async {

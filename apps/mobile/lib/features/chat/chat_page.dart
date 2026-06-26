@@ -1,18 +1,23 @@
 import 'dart:io';
+import 'package:dio/dio.dart'; // DioException(区分 409/422 错误文案)
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // Clipboard
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../core/theme/app_theme.dart';
+import '../../models/block.dart'; // TextBlock(提取「复制回答」文本)
 import '../files/files_repository.dart';
 import '../sessions/sessions_controller.dart';
+import 'blocks.dart'; // Turn
 import 'chat_controller.dart';
 import 'model_picker.dart';
 import 'turn_blocks.dart';
 
 class ChatPage extends ConsumerStatefulWidget {
   final String sessionId;
-  const ChatPage(this.sessionId, {super.key});
+  final String? prefill; // fork 跳转后回填到输入框的提问文本
+  const ChatPage(this.sessionId, {super.key, this.prefill});
   @override
   ConsumerState<ChatPage> createState() => _ChatPageState();
 }
@@ -23,11 +28,15 @@ class _ChatPageState extends ConsumerState<ChatPage>
   final _scroll = ScrollController();
   final List<XFile> _pending = []; // 待发图片
   bool _uploading = false;
+  bool _actionBusy = false; // fork/rewind 在途互斥:防双触发(第二次会撞已删消息 409/422)
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    if (widget.prefill != null && widget.prefill!.isNotEmpty) {
+      _input.text = widget.prefill!; // fork 出来的新会话:把被分叉的提问放回输入框
+    }
   }
 
   // 客户端动作工具(set_alarm/add_calendar_event)会拉起系统闹钟/日历 App,把本 app 切到后台
@@ -233,8 +242,12 @@ class _ChatPageState extends ConsumerState<ChatPage>
         for (final t in state.turns) ...[
           if (t.userImages.isNotEmpty) _sentImages(t.userImages),
           if (t.userText != null && t.userText!.isNotEmpty)
-            _userBubble(t.userText!),
-          TurnBlocks(t.blocks),
+            _userBubble(t.userText!, onLongPress: () => _showTurnActions(t)),
+          // 长按回答区也弹同一菜单(不抢工具卡的点按:长按/点按是不同手势)
+          GestureDetector(
+            onLongPress: () => _showTurnActions(t),
+            child: TurnBlocks(t.blocks),
+          ),
           const SizedBox(height: 18),
         ],
         if (streaming || state.live.isNotEmpty) ...[
@@ -262,27 +275,189 @@ class _ChatPageState extends ConsumerState<ChatPage>
         ]),
       );
 
-  Widget _userBubble(String text) => Align(
+  Widget _userBubble(String text, {VoidCallback? onLongPress}) => Align(
         alignment: Alignment.centerRight,
-        child: Container(
-          margin: const EdgeInsets.symmetric(vertical: 6),
-          constraints: BoxConstraints(
-              maxWidth: MediaQuery.of(context).size.width * 0.78),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: const BoxDecoration(
-            color: AppTheme.teal,
-            borderRadius: BorderRadius.only(
-              topLeft: Radius.circular(16),
-              topRight: Radius.circular(16),
-              bottomLeft: Radius.circular(16),
-              bottomRight: Radius.circular(4),
+        child: GestureDetector(
+          onLongPress: onLongPress,
+          child: Container(
+            margin: const EdgeInsets.symmetric(vertical: 6),
+            constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.78),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: const BoxDecoration(
+              color: AppTheme.teal,
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(16),
+                topRight: Radius.circular(16),
+                bottomLeft: Radius.circular(16),
+                bottomRight: Radius.circular(4),
+              ),
             ),
+            child: Text(text,
+                style: const TextStyle(
+                    color: Colors.white, fontSize: 15, height: 1.4)),
           ),
-          child: Text(text,
-              style: const TextStyle(
-                  color: Colors.white, fontSize: 15, height: 1.4)),
         ),
       );
+
+  // ── 消息级操作:复制 / 分叉 / 回到这里(对标 web)──
+
+  /// 该回合 assistant 的可见正文(拼接所有 TextBlock;思考/工具输出不计入「复制回答」)。
+  String _assistantText(Turn t) => t.blocks
+      .whereType<TextBlock>()
+      .map((b) => b.text.trim())
+      .where((s) => s.isNotEmpty)
+      .join('\n\n');
+
+  /// 长按某历史回合 → 底部菜单:复制提问 / 复制回答 / 从这里分叉 / 回到这里。
+  void _showTurnActions(Turn t) {
+    final question = t.userText ?? '';
+    final answer = _assistantText(t);
+    // 回滚是销毁性写、与回合同锁;本会话正在生成时禁用(后端也会 409)。fork 只读,始终可用。
+    final streaming = ref.read(chatControllerProvider(widget.sessionId)).status ==
+        ChatStatus.streaming;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetCtx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            if (question.isNotEmpty)
+              _actionTile(sheetCtx, Icons.content_copy_outlined, '复制提问',
+                  () => _copy(question)),
+            if (answer.isNotEmpty)
+              _actionTile(sheetCtx, Icons.notes_outlined, '复制回答',
+                  () => _copy(answer)),
+            _actionTile(sheetCtx, Icons.call_split, '从这里分叉新会话',
+                () => _fork(t.id)),
+            _actionTile(
+              sheetCtx,
+              Icons.history,
+              '回到这里(删除其后)',
+              () => _rewind(t),
+              enabled: !streaming,
+              subtitle: streaming ? '回合进行中,无法回到此处' : null,
+              danger: true,
+            ),
+            const SizedBox(height: 4),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _actionTile(
+    BuildContext sheetCtx,
+    IconData icon,
+    String label,
+    VoidCallback onTap, {
+    bool enabled = true,
+    String? subtitle,
+    bool danger = false,
+  }) {
+    final color = !enabled
+        ? Colors.black26
+        : (danger ? Colors.red.shade600 : AppTheme.teal);
+    return ListTile(
+      enabled: enabled,
+      leading: Icon(icon, color: color),
+      title: Text(label,
+          style: TextStyle(
+              color: enabled ? Colors.black87 : Colors.black38,
+              fontSize: 15)),
+      subtitle: subtitle == null
+          ? null
+          : Text(subtitle, style: const TextStyle(fontSize: 12)),
+      onTap: enabled
+          ? () {
+              Navigator.pop(sheetCtx);
+              onTap();
+            }
+          : null,
+    );
+  }
+
+  void _copy(String text) {
+    Clipboard.setData(ClipboardData(text: text));
+    _toast('已复制');
+  }
+
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), duration: const Duration(seconds: 1)),
+    );
+  }
+
+  /// 把 fork/rollback 的异常转成短提示。409=会话忙(rollback 与回合同锁的高频预期路径),
+  /// 422=消息已被删/不可操作(多为重复触发),其余给静态兜底——别把 DioException 原串塞进 toast。
+  String _errMsg(Object e, String fallback) {
+    if (e is DioException) {
+      final code = e.response?.statusCode;
+      if (code == 409) return '会话正忙,请稍候再试';
+      if (code == 422) return '该消息已不可操作';
+    }
+    return fallback;
+  }
+
+  /// 从某条提问分叉新会话:复制其之前的历史到新会话,跳转过去并把该提问回填输入框。
+  Future<void> _fork(String messageId) async {
+    if (_actionBusy) return; // 防双触发:在途时第二次会撞已建/已删,弹假错误
+    _actionBusy = true;
+    try {
+      final r = await ref
+          .read(chatControllerProvider(widget.sessionId).notifier)
+          .fork(messageId);
+      await ref.read(sessionsControllerProvider.notifier).refresh();
+      if (!mounted) return;
+      context.push('/chat/${r.newSessionId}', extra: r.userText);
+    } catch (e) {
+      _toast(_errMsg(e, '分叉失败,请重试'));
+    } finally {
+      _actionBusy = false;
+    }
+  }
+
+  /// 回到某条提问之前:确认后删它及其后的全部消息,把该提问放回输入框可重问。
+  Future<void> _rewind(Turn t) async {
+    if (_actionBusy) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('回到这里'),
+        content: const Text('将删除这条提问及其之后的所有消息,提问内容会放回输入框。此操作不可撤销。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: Text('删除', style: TextStyle(color: Colors.red.shade600)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    _actionBusy = true;
+    try {
+      final text = await ref
+          .read(chatControllerProvider(widget.sessionId).notifier)
+          .rollback(t.id);
+      await ref.read(sessionsControllerProvider.notifier).refresh();
+      if (!mounted) return;
+      _input.text = text;
+      _toast('已回到此处');
+    } catch (e) {
+      _toast(_errMsg(e, '回滚失败,请重试'));
+    } finally {
+      _actionBusy = false;
+    }
+  }
 
   // 已发图:右对齐缩略图(气泡上方)
   Widget _sentImages(List<String> paths) => Padding(
