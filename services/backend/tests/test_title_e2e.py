@@ -35,11 +35,12 @@ def _patch_global_sessionmaker(monkeypatch, engine):
     )
 
 
-def _make_stack(engine, tmp_path, scripted):
-    """带定制 FakeProvider 脚本的全栈(真 worker + ASGI backend)。"""
+def _make_stack(engine, tmp_path, scripted, *, title=None):
+    """带定制 FakeProvider 脚本的全栈(真 worker + ASGI backend)。
+    title:GenerateTitle 专用响应(标题首问即生成、与回合并发,走独立响应不消费回合队列)。"""
 
     async def _build():
-        provider = FakeProvider(scripted)
+        provider = FakeProvider(scripted, title=title)
         worker_server, wport = await create_worker_server(
             provider_factory=lambda *a: provider, port=0
         )
@@ -65,8 +66,10 @@ def _make_stack(engine, tmp_path, scripted):
 @pytest_asyncio.fixture
 async def title_stack(engine, tmp_path, monkeypatch):
     _patch_global_sessionmaker(monkeypatch, engine)
-    # 脚本:回合收尾文本 + 标题调用;第二个用例的会话已有标题,不消费标题脚本
-    build = _make_stack(engine, tmp_path, [_say("收到,这就写"), _say("「快排实现」")])
+    # 回合脚本 + 独立标题响应(title 与回合并发,走 FakeProvider 的 title 专用、不竞争队列)
+    build = _make_stack(
+        engine, tmp_path, [_say("收到,这就写")], title=_say("「快排实现」")
+    )
     app, worker_server, provisioner = await build()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
@@ -136,7 +139,9 @@ async def test_renamed_session_untouched(title_stack):
 @pytest_asyncio.fixture
 async def stream_title_stack(engine, tmp_path, monkeypatch):
     _patch_global_sessionmaker(monkeypatch, engine)
-    build = _make_stack(engine, tmp_path, [_say("流式收到"), _say("流式标题")])
+    build = _make_stack(
+        engine, tmp_path, [_say("流式收到")], title=_say("流式标题")
+    )
     app, worker_server, provisioner = await build()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:

@@ -634,7 +634,9 @@ async def test_run_turn_stream_midstream_failure_returns_internal(sandbox):
 
 
 async def test_generate_title_cleans_output():
-    provider = FakeProvider([_final("「快排实现」\n")])
+    # 标题响应走 FakeProvider 的 title 专用槽(GenerateTitle 用 system==TITLE_SYSTEM 识别),
+    # 不放回合 scripted 队列——与「标题首问即生成、和回合并发」的新行为一致。
+    provider = FakeProvider([], title=_final("「快排实现」\n"))
     worker_server, wport = await create_worker_server(provider_factory=lambda *a: provider, port=0)
     try:
         async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
