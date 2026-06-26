@@ -49,6 +49,9 @@ scp "${LOCAL_APK}" "${SSH}:${REMOTE_DIR}/${APK}"
 scp "$RELEASE_JSON" "${SSH}:${REMOTE_DIR}/release.json"
 rm -f "$RELEASE_JSON"
 
+# 清理旧 APK:release.json 已切到新版,同目录其它 agent-cloud-*.apk 无用,删掉只留当前包
+ssh "${SSH}" "find '${REMOTE_DIR}' -maxdepth 1 -name 'agent-cloud-*.apk' ! -name '${APK}' -delete" 2>/dev/null || true
+
 echo "✓ 发版完成 v${VERSION} (build ${BUILD}) force=${FORCE}"
 echo "  下载: ${BASE_URL}/api/app/download/${APK}"
 echo "  App 下次启动或'设置→检查更新'即提示。"
