@@ -42,10 +42,13 @@ services:
       AGENT_CLOUD_SANDBOX_BASE_ROOT: /opt/agent-cloud/data/workspaces
       AGENT_CLOUD_SANDBOX_HOST_ROOT: /opt/agent-cloud/data/workspaces
       AGENT_CLOUD_OBJECT_STORE_ROOT: /data/objstore
+      # 移动端 OTA:发布信息 + APK 目录(宿主 release.sh 上传到此,backend 只读挂载托管)
+      AGENT_CLOUD_APP_RELEASE_FILE: /data/app-releases/release.json
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock # DooD:经宿主 daemon 起沙箱兄弟容器
       - /opt/agent-cloud/data/workspaces:/opt/agent-cloud/data/workspaces
       - objstore:/data/objstore
+      - /opt/agent-cloud/data/app-releases:/data/app-releases:ro # OTA:APK + release.json
     depends_on:
       db:
         condition: service_healthy

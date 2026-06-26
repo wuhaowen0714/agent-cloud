@@ -45,3 +45,9 @@ async def test_app_version_endpoint_default(client):
     r = await client.get("/app/version")
     assert r.status_code == 200
     assert r.json()["build"] == 0
+
+
+async def test_download_no_release_404(client):
+    # 未配置 app_release_file → 下载端点 404(不会暴露任意文件)
+    r = await client.get("/app/download/app.apk")
+    assert r.status_code == 404
