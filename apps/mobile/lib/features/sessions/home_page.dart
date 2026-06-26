@@ -98,6 +98,72 @@ class _HomePageState extends ConsumerState<HomePage> {
     }
   }
 
+  void _agentActions(AgentConfig a) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.settings_outlined),
+            title: const Text('设置'),
+            onTap: () {
+              Navigator.pop(context);
+              context.push('/agent/${a.id}/settings');
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete_outline, color: AppTheme.danger),
+            title:
+                const Text('删除', style: TextStyle(color: AppTheme.danger)),
+            onTap: () {
+              Navigator.pop(context);
+              _deleteAgent(a);
+            },
+          ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _createAgent() async {
+    final ctrl = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('新建智能体'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: '智能体名称'),
+          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: const Text('创建')),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (name == null || name.isEmpty) return;
+    try {
+      final a = await ref
+          .read(sessionsControllerProvider.notifier)
+          .createAgent(name);
+      if (mounted) {
+        setState(() => _selectedAgentId = a.id);
+        context.push('/agent/${a.id}/settings');
+      }
+    } catch (e) {
+      _toast('创建失败: $e');
+    }
+  }
+
   void _showActions(Session s) {
     showModalBottomSheet(
       context: context,
@@ -205,6 +271,10 @@ class _HomePageState extends ConsumerState<HomePage> {
               tooltip: '终端',
               onPressed: () => context.push('/terminal')),
           IconButton(
+              icon: const Icon(Icons.add),
+              tooltip: '新建智能体',
+              onPressed: _createAgent),
+          IconButton(
               icon: const Icon(Icons.settings_outlined),
               tooltip: '设置',
               onPressed: () => context.push('/settings')),
@@ -230,15 +300,30 @@ class _HomePageState extends ConsumerState<HomePage> {
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-        itemCount: agents.length,
+        itemCount: agents.length + 1,
         separatorBuilder: (_, _) => const SizedBox(width: 8),
         itemBuilder: (_, i) {
+          if (i == agents.length) {
+            return GestureDetector(
+              onTap: _createAgent,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppTheme.surface,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: AppTheme.border),
+                ),
+                child: const Icon(Icons.add, size: 18, color: AppTheme.muted),
+              ),
+            );
+          }
           final a = agents[i];
           final sel = a.id == selectedId;
           final c = counts[a.id] ?? 0;
           return GestureDetector(
             onTap: () => setState(() => _selectedAgentId = a.id),
-            onLongPress: () => _deleteAgent(a),
+            onLongPress: () => _agentActions(a),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14),
               alignment: Alignment.center,
@@ -277,7 +362,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       error: (e, _) => Center(child: Text('加载失败: $e')),
       data: (all) {
         if (selectedId == null) {
-          return _empty('还没有智能体', '在 web 端创建一个智能体后即可开始');
+          return _empty('还没有智能体', '点右上角 + 新建一个开始');
         }
         final mine =
             all.where((s) => s.agentConfigId == selectedId).toList();

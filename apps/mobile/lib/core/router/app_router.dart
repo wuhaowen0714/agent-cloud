@@ -11,6 +11,8 @@ import '../../features/settings/memory_page.dart';
 import '../../features/settings/skills_page.dart';
 import '../../features/agent/tools_page.dart';
 import '../../features/agent/skills_toggle_page.dart';
+import '../../features/agent/agent_settings_page.dart';
+import '../../features/agent/agent_memory_page.dart';
 import '../../features/files/files_browser_page.dart';
 import '../../features/terminal/terminal_page.dart';
 import '../../features/chat/chat_page.dart';
@@ -68,6 +70,12 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
           path: '/agent/:aid/skills',
           builder: (_, st) => SkillsTogglePage(st.pathParameters['aid']!)),
+      GoRoute(
+          path: '/agent/:aid/settings',
+          builder: (_, st) => AgentSettingsPage(st.pathParameters['aid']!)),
+      GoRoute(
+          path: '/agent/:aid/memory',
+          builder: (_, st) => AgentMemoryPage(st.pathParameters['aid']!)),
       GoRoute(path: '/files', builder: (_, _) => const FilesPage()),
       GoRoute(path: '/terminal', builder: (_, _) => const TerminalPage()),
     ],
