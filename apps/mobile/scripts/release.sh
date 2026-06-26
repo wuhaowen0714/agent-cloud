@@ -17,7 +17,7 @@ FORCE="false"
 [[ "${4:-}" == "--force" ]] && FORCE="true"
 
 SSH="${ST_SSH:-st}"                        # SSH host alias(~/.ssh/config,含 9022 端口)
-REMOTE_DIR="${ST_RELEASE_DIR:-/data/app-releases}"  # nginx 托管 + 后端挂载目录
+REMOTE_DIR="${ST_RELEASE_DIR:-/opt/agent-cloud/data/app-releases}"  # backend 只读挂载目录
 BASE_URL="${APP_BASE_URL:-https://app.sophclaw.icu:18080}"
 APK="agent-cloud-${BUILD}.apk"
 
@@ -37,7 +37,7 @@ cat > "$RELEASE_JSON" <<EOF
 {
   "version": "${VERSION}",
   "build": ${BUILD},
-  "url": "${BASE_URL}/app/download/${APK}",
+  "url": "${BASE_URL}/api/app/download/${APK}",
   "force": ${FORCE},
   "notes": "${NOTES}"
 }
