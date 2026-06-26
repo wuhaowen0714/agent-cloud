@@ -46,6 +46,31 @@ ADD_CALENDAR_SPEC = ToolSpec(
     },
 )
 
+NAVIGATE_SPEC = ToolSpec(
+    name="start_navigation",
+    description=(
+        "Start map navigation to a destination on the user's phone (opens the Amap/Baidu map app). "
+        "Use when the user asks to navigate / drive / go to a place. destination is a place name or "
+        "address in Chinese or English — the map app searches it itself, NO coordinates needed. mode "
+        "is the travel mode, default driving. Navigation starts on the user's own device."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "destination": {
+                "type": "string",
+                "description": "Destination place name or address, e.g. 北京南站 / 人民广场 / Shanghai Tower.",
+            },
+            "mode": {
+                "type": "string",
+                "enum": ["driving", "walking", "transit", "riding"],
+                "description": "Travel mode; default driving.",
+            },
+        },
+        "required": ["destination"],
+    },
+)
+
 
 def set_alarm_enabled(enabled_tools: list[str]) -> bool:
     """空 enabled_tools = 全部(含 set_alarm);否则需显式列出。"""
@@ -54,6 +79,10 @@ def set_alarm_enabled(enabled_tools: list[str]) -> bool:
 
 def add_calendar_enabled(enabled_tools: list[str]) -> bool:
     return not enabled_tools or "add_calendar_event" in enabled_tools
+
+
+def start_navigation_enabled(enabled_tools: list[str]) -> bool:
+    return not enabled_tools or "start_navigation" in enabled_tools
 
 
 class ClientActionsExecutor:
@@ -73,6 +102,7 @@ class ClientActionsExecutor:
         is_mobile = client == "mobile"
         self._alarm = is_mobile and set_alarm_enabled(enabled_tools)
         self._cal = is_mobile and add_calendar_enabled(enabled_tools)
+        self._nav = is_mobile and start_navigation_enabled(enabled_tools)
 
     def specs(self) -> list[ToolSpec]:
         specs = list(self._inner.specs())
@@ -80,6 +110,8 @@ class ClientActionsExecutor:
             specs.append(SET_ALARM_SPEC)
         if self._cal:
             specs.append(ADD_CALENDAR_SPEC)
+        if self._nav:
+            specs.append(NAVIGATE_SPEC)
         return specs
 
     async def execute(self, call: ToolCall) -> ToolResult:
@@ -95,6 +127,12 @@ class ClientActionsExecutor:
                     call_id=call.id, content="tool not enabled: add_calendar_event", is_error=True
                 )
             return self._add_calendar(call)
+        if call.name == "start_navigation":
+            if not self._nav:
+                return ToolResult(
+                    call_id=call.id, content="tool not enabled: start_navigation", is_error=True
+                )
+            return self._navigate(call)
         return await self._inner.execute(call)
 
     def _set_alarm(self, call: ToolCall) -> ToolResult:
@@ -138,5 +176,28 @@ class ClientActionsExecutor:
         return ToolResult(
             call_id=call.id,
             content=f"已在用户设备日历上发起事件创建:「{title}」({start})。",
+            is_error=False,
+        )
+
+    def _navigate(self, call: ToolCall) -> ToolResult:
+        args = call.arguments or {}
+        dest = args.get("destination")
+        if not (isinstance(dest, str) and dest.strip()):
+            return ToolResult(
+                call_id=call.id,
+                content="start_navigation: destination (place name or address) required",
+                is_error=True,
+            )
+        mode = args.get("mode")
+        mode_cn = {
+            "driving": "驾车",
+            "walking": "步行",
+            "transit": "公交",
+            "riding": "骑行",
+        }.get(mode if isinstance(mode, str) else "", "")
+        suffix = f"({mode_cn})" if mode_cn else ""
+        return ToolResult(
+            call_id=call.id,
+            content=f"已在用户设备上发起导航{suffix}:前往「{dest.strip()}」。",
             is_error=False,
         )

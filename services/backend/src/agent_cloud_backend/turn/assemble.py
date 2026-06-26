@@ -22,15 +22,17 @@ from agent_cloud_backend.turn.messages import (
     strip_unanswered_user_messages,
 )
 
-# 手机 App 运行环境提示:注入 system prompt 引导优先用 set_alarm/add_calendar_event
-# (直接设手机系统闹钟/日历)而非 schedule_task(云端周期任务)。web 端不注入。
+# 手机 App 运行环境提示:注入 system prompt 引导优先用 set_alarm/add_calendar_event/
+# start_navigation(直接操作手机系统闹钟/日历/地图)而非 schedule_task(云端周期任务)。web 端不注入。
 _MOBILE_ENV_DOC = (
     "【运行环境】你正运行在用户的 Android 手机 App 上,可以直接操作手机系统。\n"
     "- 用户要「设闹钟 / 在某个时刻响铃提醒」→ 优先用 set_alarm 直接设手机系统闹钟,"
     "不要用 schedule_task。\n"
     "- 用户要「加日程 / 日历事件 / 会议安排」→ 优先用 add_calendar_event,"
     "直接加手机系统日历。\n"
-    "- 这两个工具会在手机上弹出系统闹钟 / 日历应用预填,由用户确认保存。\n"
+    "- 用户要「导航 / 带我去 / 怎么走 / 开车去某地」→ 用 start_navigation 唤起手机地图"
+    "(高德/百度)开始导航,destination 传地点名即可、无需坐标。\n"
+    "- 这些工具会在手机上弹出系统应用 / 地图预填,由用户确认。\n"
     "- schedule_task 是云端周期任务(到点让你再运行一次发应用内通知),不是系统闹钟;"
     "只在用户明确要「周期性 / 让 AI 到点替我做某事」时才用。"
 )

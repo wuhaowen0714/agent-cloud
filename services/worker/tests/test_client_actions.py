@@ -5,6 +5,7 @@ from agent_cloud_worker.client_actions import (
     ClientActionsExecutor,
     add_calendar_enabled,
     set_alarm_enabled,
+    start_navigation_enabled,
 )
 
 
@@ -87,6 +88,55 @@ async def test_add_calendar_missing_title():
     ex = ClientActionsExecutor(_Inner(), enabled_tools=[], client="mobile")
     r = await ex.execute(
         ToolCall(id="1", name="add_calendar_event", arguments={"start": "2026-06-27T09:00"})
+    )
+    assert r.is_error
+
+
+def test_navigate_enabled_and_gating():
+    assert start_navigation_enabled([])  # 空 = 全部
+    assert start_navigation_enabled(["start_navigation"])
+    assert not start_navigation_enabled(["bash"])
+    # 仅 mobile 暴露;web/空 client 不暴露(没有地图 App 执行通道)
+    mobile = {
+        s.name for s in ClientActionsExecutor(_Inner(), enabled_tools=[], client="mobile").specs()
+    }
+    assert "start_navigation" in mobile
+    web = {s.name for s in ClientActionsExecutor(_Inner(), enabled_tools=[], client="web").specs()}
+    assert "start_navigation" not in web
+
+
+async def test_navigate_ok():
+    ex = ClientActionsExecutor(_Inner(), enabled_tools=[], client="mobile")
+    r = await ex.execute(
+        ToolCall(
+            id="1",
+            name="start_navigation",
+            arguments={"destination": "北京南站", "mode": "driving"},
+        )
+    )
+    assert not r.is_error
+    assert "北京南站" in r.content and "驾车" in r.content
+
+
+async def test_navigate_no_mode_omits_suffix():
+    ex = ClientActionsExecutor(_Inner(), enabled_tools=[], client="mobile")
+    r = await ex.execute(
+        ToolCall(id="1", name="start_navigation", arguments={"destination": "人民广场"})
+    )
+    assert not r.is_error
+    assert "人民广场" in r.content and "()" not in r.content
+
+
+async def test_navigate_missing_destination():
+    ex = ClientActionsExecutor(_Inner(), enabled_tools=[], client="mobile")
+    r = await ex.execute(ToolCall(id="1", name="start_navigation", arguments={"mode": "driving"}))
+    assert r.is_error
+
+
+async def test_navigate_blocked_on_web():
+    ex = ClientActionsExecutor(_Inner(), enabled_tools=[], client="web")
+    r = await ex.execute(
+        ToolCall(id="1", name="start_navigation", arguments={"destination": "北京南站"})
     )
     assert r.is_error
 
