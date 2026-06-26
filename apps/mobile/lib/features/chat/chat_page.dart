@@ -97,13 +97,32 @@ class _ChatPageState extends ConsumerState<ChatPage>
     }
     // 图片走多模态 vision,其余文件把路径作为文本引用拼进正文(对标 web)。
     final sent = composeUpload(text, paths);
-    // vision 门控:有图但当前会话模型不支持图片 → 提示切模型,保留待发(对标 web)。
+    // 有图但当前模型不支持图片 → 自动切到平台 vision 模型(对标 web;后端从 session 读 model,
+    // 故先 await patchModel 落库再发)。无 vision 模型可切则提示、保留待发。
     if (sent.images.isNotEmpty && !_modelSupportsVision()) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('当前模型不支持图片,请点右上角切到带「图片」标记的模型')));
+      final target = _pickVisionModel();
+      if (target == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('当前没有支持图片的模型可用')));
+        }
+        return;
       }
-      return;
+      try {
+        await ref
+            .read(sessionsControllerProvider.notifier)
+            .patchModel(widget.sessionId, target);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('已自动切换到 $target(支持图片)')));
+        }
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('自动切换模型失败,请手动切到支持图片的模型')));
+        }
+        return;
+      }
     }
     _input.clear();
     setState(() => _pending.clear());
@@ -121,6 +140,13 @@ class _ChatPageState extends ConsumerState<ChatPage>
     final model = m.isEmpty ? null : m.first.model;
     if (model == null) return true;
     return pm.visionModels.contains(model);
+  }
+
+  // 选一个 vision 模型来自动切:平台 vision 列表第一个。无则 null。
+  String? _pickVisionModel() {
+    final pm = ref.read(platformModelsProvider).asData?.value;
+    if (pm == null || pm.visionModels.isEmpty) return null;
+    return pm.visionModels.first;
   }
 
   String? _agentId() {

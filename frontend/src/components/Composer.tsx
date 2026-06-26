@@ -124,6 +124,15 @@ export function Composer({
     await api.patchSession(sessionId, { model, credential_id: credentialId })
     await qc.invalidateQueries({ queryKey: ["sessions", userId] })
   }
+  // 选一个 vision 模型来自动切:优先当前 provider 的,否则全局第一个(平台 Kimi-K2.6 等)。
+  const pickVisionTarget = (): { model: string; credentialId: string | null } | null => {
+    const cur = currentSession ? findProvider(providers, currentSession.credential_id) : null
+    if (cur?.visionModels.length)
+      return { model: cur.visionModels[0], credentialId: cur.credentialId }
+    for (const p of providers)
+      if (p.visionModels.length) return { model: p.visionModels[0], credentialId: p.credentialId }
+    return null
+  }
 
   // @ 文件引用:光标所在 @ 词活跃才拉索引(staleTime 内打字不抖动,新文件最迟 30s 可见)。
   // retry 1:浮层场景要快速反馈;失败提示后,下个 @ 词重新激活 enabled 时会再拉。
@@ -252,7 +261,7 @@ export function Composer({
     }
   }
 
-  const send = () => {
+  const send = async () => {
     if (busy) return
     const t = text.trim()
     // 仅选了技能、没正文也没附件:技能只说明"用哪个工具"、本身不含需求,提示补充后再发(与 hint 一致)。
@@ -260,15 +269,22 @@ export function Composer({
       if (selectedSkills.length > 0) setNotice({ kind: "flash", flash: "补充需求后再发送" })
       return
     }
-    // 图片附件额外作为结构化 images 发出(走多模态直传);带图但当前模型不支持图片 → 提示切换、
-    // 不发(尊重会话级模型选择,不偷偷换)。图片路径仍随附件块走文本(气泡缩略图回显照旧)。
+    // 图片附件额外作为结构化 images 发出(走多模态直传)。带图但当前模型不支持图片 → 自动切到
+    // 一个 vision 模型(后端从 session 行读 model,故须先 await patchSession 落库再发)。
     const imagePaths = attachments.filter((a) => VISION_IMG.test(a.path)).map((a) => a.path)
     if (imagePaths.length > 0 && !sessionVision) {
-      setNotice({
-        kind: "flash",
-        flash: "当前模型不支持图片,请在左下把模型切到支持图片的(如 Kimi-K2.6)再发送",
-      })
-      return
+      const target = pickVisionTarget()
+      if (!target) {
+        setNotice({ kind: "flash", flash: "当前没有支持图片的模型可用,请检查模型配置" })
+        return
+      }
+      try {
+        await updateSessionModel(target.model, target.credentialId)
+        setNotice({ kind: "flash", flash: `已自动切换到 ${target.model}(支持图片)` })
+      } catch {
+        setNotice({ kind: "flash", flash: "自动切换模型失败,请手动切到支持图片的模型再发送" })
+        return
+      }
     }
     // 拼装:用户正文 + 选中技能(每技能独占一行,让 agent 调用)+ 附件路径,各段空行分隔。消息
     // 气泡渲染时 parseUserMessage 会把技能/附件这两段解析回 chip,不以裸文本示人。
@@ -407,7 +423,7 @@ export function Composer({
               setNotice(null)
             } else if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault()
-              send()
+              void send()
             }
           }}
         />
@@ -435,7 +451,7 @@ export function Composer({
             停止
           </Button>
         ) : (
-          <Button className="h-11" disabled={busy} onClick={send}>
+          <Button className="h-11" disabled={busy} onClick={() => void send()}>
             发送
           </Button>
         )}
