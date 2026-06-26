@@ -38,4 +38,16 @@ class SessionsRepository {
 
   // 删 agent:后端级联删其全部会话/记忆/文档;有会话在跑 → 409。
   Future<void> deleteAgent(String id) => _dio.delete('/agent-configs/$id');
+
+  // 创建 agent:后端只需 name,返回完整 AgentConfig。
+  Future<AgentConfig> createAgent(String name) async {
+    final r = await _dio.post('/agent-configs', data: {'name': name});
+    return AgentConfig.fromJson(r.data as Map<String, dynamic>);
+  }
+
+  // 重命名 agent(PATCH name)。
+  Future<AgentConfig> patchAgentName(String id, String name) async {
+    final r = await _dio.patch('/agent-configs/$id', data: {'name': name});
+    return AgentConfig.fromJson(r.data as Map<String, dynamic>);
+  }
 }

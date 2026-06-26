@@ -60,6 +60,19 @@ class SessionsController extends AsyncNotifier<List<Session>> {
     ref.invalidate(agentsProvider);
     await refresh();
   }
+
+  /// 创建 agent → 刷新 agent 列表 → 返回新 agent(供调用方选中 + 跳设置页)。
+  Future<AgentConfig> createAgent(String name) async {
+    final a = await ref.read(sessionsRepoProvider).createAgent(name);
+    ref.invalidate(agentsProvider);
+    return a;
+  }
+
+  /// 重命名 agent → 刷新 agent 列表。
+  Future<void> renameAgent(String id, String name) async {
+    await ref.read(sessionsRepoProvider).patchAgentName(id, name);
+    ref.invalidate(agentsProvider);
+  }
 }
 
 final sessionsControllerProvider =
