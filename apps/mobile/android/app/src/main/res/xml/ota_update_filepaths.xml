@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ota_update 下载落地路径:internal files-dir/ota_update/(与插件 default 一致)。
+     FileProvider 据此把下载的 APK 暴露为 content:// URI 供系统安装器读取。 -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <files-path name="internal_apk_storage" path="ota_update/"/>
+</paths>
