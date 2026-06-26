@@ -109,8 +109,15 @@ class _OtaProgressDialogState extends State<_OtaProgressDialog> {
 
   void _start() {
     try {
+      // 下载文件名带 build 号(取 url 末段),而非固定 'agent-cloud-update.apk'。
+      // 固定名在部分 ROM 上会被安装器/旧 session 缓存,装回设备上残留的旧包
+      // (现象:更新后版本号没变、提示"已安装相同版本")。唯一文件名确保装的是本次下载的新包。
+      final seg = Uri.parse(widget.url).pathSegments;
+      final apkName = (seg.isNotEmpty && seg.last.toLowerCase().endsWith('.apk'))
+          ? seg.last
+          : 'agent-cloud-update.apk';
       _sub = OtaUpdate()
-          .execute(widget.url, destinationFilename: 'agent-cloud-update.apk')
+          .execute(widget.url, destinationFilename: apkName)
           .listen(
         (e) {
           if (!mounted) return;
