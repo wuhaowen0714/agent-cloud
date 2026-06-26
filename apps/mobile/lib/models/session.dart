@@ -26,6 +26,21 @@ class Session {
             : null,
       );
 
+  Session copyWith({
+    String? model,
+    String? title,
+    String? status,
+    DateTime? lastActiveAt,
+  }) =>
+      Session(
+        id: id,
+        agentConfigId: agentConfigId,
+        model: model ?? this.model,
+        title: title ?? this.title,
+        status: status ?? this.status,
+        lastActiveAt: lastActiveAt ?? this.lastActiveAt,
+      );
+
   /// 列表展示标题:无 title 用"新会话"占位。
   String get displayTitle =>
       (title != null && title!.isNotEmpty) ? title! : '新会话';
