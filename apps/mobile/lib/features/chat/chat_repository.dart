@@ -54,4 +54,30 @@ class ChatRepository {
     if (r.statusCode != 200 || r.data == null) return null;
     return parseSse((r.data as ResponseBody).stream);
   }
+
+  /// 回滚到某条用户消息「之前」:删它及之后的全部消息(销毁性,与回合同一把会话锁:在跑 →
+  /// 409)。返回该用户消息的文本,供 UI 回填输入框重问。
+  Future<String> rollback(String sessionId, String messageId) async {
+    final r = await _dio.post(
+      '/sessions/$sessionId/rollback',
+      data: {'message_id': messageId},
+    );
+    final m = r.data as Map<String, dynamic>;
+    return m['user_text'] as String? ?? '';
+  }
+
+  /// 从某条用户消息「之前」分叉出新会话(原会话保留,只读、允许其在跑)。返回新会话 id 及
+  /// 该用户消息文本(回填到新会话输入框)。
+  Future<({String newSessionId, String userText})> fork(
+      String sessionId, String messageId) async {
+    final r = await _dio.post(
+      '/sessions/$sessionId/fork',
+      data: {'message_id': messageId},
+    );
+    final m = r.data as Map<String, dynamic>;
+    return (
+      newSessionId: m['new_session_id'] as String,
+      userText: m['user_text'] as String? ?? '',
+    );
+  }
 }

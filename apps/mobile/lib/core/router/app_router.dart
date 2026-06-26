@@ -54,7 +54,9 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/home', builder: (_, _) => const HomePage()),
       GoRoute(
         path: '/chat/:sid',
-        builder: (_, st) => ChatPage(st.pathParameters['sid']!),
+        // extra:fork 后跳转携带的输入框回填文本(被分叉的那条提问)。
+        builder: (_, st) => ChatPage(st.pathParameters['sid']!,
+            prefill: st.extra is String ? st.extra as String : null),
       ),
       GoRoute(path: '/settings', builder: (_, _) => const SettingsPage()),
       GoRoute(
