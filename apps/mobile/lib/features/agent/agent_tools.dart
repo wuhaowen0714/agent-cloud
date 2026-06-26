@@ -16,6 +16,8 @@ const kBuiltinTools = <ToolInfo>[
   ToolInfo('web_search', '联网搜索(获取实时网页信息)'),
   ToolInfo('generate_image', '文生图(按文字描述生成图片)'),
   ToolInfo('edit_image', '图片编辑(按文字描述修改图片)'),
+  ToolInfo('set_alarm', '设置手机闹钟(仅 App 生效)'),
+  ToolInfo('add_calendar_event', '添加手机日历事件(仅 App 生效)'),
 ];
 
 final _allToolNames = kBuiltinTools.map((t) => t.name).toList();

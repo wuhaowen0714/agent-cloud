@@ -3,6 +3,8 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <!-- ota_update:app 内下载 APK 后拉起系统安装器 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <!-- 客户端工具:设置系统闹钟(set_alarm)-->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM"/>
     <application
         android:label="agent_cloud_mobile"
         android:name="${applicationName}"
@@ -68,6 +70,14 @@
         <intent>
             <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="https"/>
+        </intent>
+        <!-- 客户端工具:设系统闹钟 / 加系统日历(Android 11+ 需声明 Intent 可见性)-->
+        <intent>
+            <action android:name="android.intent.action.SET_ALARM"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.INSERT"/>
+            <data android:mimeType="vnd.android.cursor.item/event"/>
         </intent>
     </queries>
 </manifest>

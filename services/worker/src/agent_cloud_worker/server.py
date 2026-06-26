@@ -21,6 +21,7 @@ from agent_cloud_common import (
 )
 from agent_cloud_common.codec import msg_from_proto, msg_to_proto, turn_event_to_proto
 
+from agent_cloud_worker.client_actions import ClientActionsExecutor
 from agent_cloud_worker.context import build_system_prompt
 from agent_cloud_worker.image_gen import (
     DEFAULT_IMAGE_EDIT_MODEL,
@@ -167,6 +168,8 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
         )
         # notify 不按 is_scheduled_run 关闭——定时任务到点提醒正是主用例。
         executor = NotifyingExecutor(executor, enabled=notify_enabled(enabled_tools))
+        # set_alarm / add_calendar_event:worker 合成确认,真正副作用在用户设备上由 App 执行。
+        executor = ClientActionsExecutor(executor, enabled_tools=enabled_tools)
         if self._web_search_available():
             searcher = make_sophnet_searcher(
                 endpoint=self._web_search_endpoint,
