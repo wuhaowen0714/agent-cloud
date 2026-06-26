@@ -273,12 +273,9 @@ class _ChatPageState extends ConsumerState<ChatPage>
         for (final t in state.turns) ...[
           if (t.userImages.isNotEmpty) _sentImages(t.userImages),
           if (t.userText != null && t.userText!.isNotEmpty)
-            _userBubble(t.userText!, onLongPress: () => _showTurnActions(t)),
-          // 长按回答区也弹同一菜单(不抢工具卡的点按:长按/点按是不同手势)
-          GestureDetector(
-            onLongPress: () => _showTurnActions(t),
-            child: TurnBlocks(t.blocks),
-          ),
+            _userBubble(t.userText!, onLongPress: () => _copy(t.userText!)),
+          TurnBlocks(t.blocks),
+          _turnActionBar(t, streaming), // 豆包式:回答下方常驻操作栏(复制/分叉/回到这里)
           const SizedBox(height: 18),
         ],
         if (streaming || state.live.isNotEmpty) ...[
@@ -340,76 +337,49 @@ class _ChatPageState extends ConsumerState<ChatPage>
       .where((s) => s.isNotEmpty)
       .join('\n\n');
 
-  /// 长按某历史回合 → 底部菜单:复制提问 / 复制回答 / 从这里分叉 / 回到这里。
-  void _showTurnActions(Turn t) {
-    final question = t.userText ?? '';
+  /// 回答下方常驻操作栏(仿豆包):复制回答 / 从这里分叉 / 回到这里。一行轻量按钮,
+  /// 直接可见可点,不再走长按弹窗。回滚销毁性、与回合同锁 → 本会话生成中禁用(后端也会 409);
+  /// 复制、分叉只读,始终可用。回答为空(纯工具回合)时不显示「复制」。
+  Widget _turnActionBar(Turn t, bool streaming) {
     final answer = _assistantText(t);
-    // 回滚是销毁性写、与回合同锁;本会话正在生成时禁用(后端也会 409)。fork 只读,始终可用。
-    final streaming = ref.read(chatControllerProvider(widget.sessionId)).status ==
-        ChatStatus.streaming;
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (sheetCtx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 8),
-            if (question.isNotEmpty)
-              _actionTile(sheetCtx, Icons.content_copy_outlined, '复制提问',
-                  () => _copy(question)),
-            if (answer.isNotEmpty)
-              _actionTile(sheetCtx, Icons.notes_outlined, '复制回答',
-                  () => _copy(answer)),
-            _actionTile(sheetCtx, Icons.call_split, '从这里分叉新会话',
-                () => _fork(t.id)),
-            _actionTile(
-              sheetCtx,
-              Icons.history,
-              '回到这里(删除其后)',
-              () => _rewind(t),
-              enabled: !streaming,
-              subtitle: streaming ? '回合进行中,无法回到此处' : null,
-              danger: true,
-            ),
-            const SizedBox(height: 4),
-          ],
-        ),
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, left: 2),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 6,
+        children: [
+          if (answer.isNotEmpty)
+            _actionChip(Icons.content_copy_outlined, '复制', () => _copy(answer)),
+          _actionChip(Icons.call_split, '分叉', () => _fork(t.id)),
+          _actionChip(
+              Icons.history, '回到这里', streaming ? null : () => _rewind(t)),
+        ],
       ),
     );
   }
 
-  Widget _actionTile(
-    BuildContext sheetCtx,
-    IconData icon,
-    String label,
-    VoidCallback onTap, {
-    bool enabled = true,
-    String? subtitle,
-    bool danger = false,
-  }) {
-    final color = !enabled
-        ? Colors.black26
-        : (danger ? Colors.red.shade600 : AppTheme.teal);
-    return ListTile(
-      enabled: enabled,
-      leading: Icon(icon, color: color),
-      title: Text(label,
-          style: TextStyle(
-              color: enabled ? Colors.black87 : Colors.black38,
-              fontSize: 15)),
-      subtitle: subtitle == null
-          ? null
-          : Text(subtitle, style: const TextStyle(fontSize: 12)),
-      onTap: enabled
-          ? () {
-              Navigator.pop(sheetCtx);
-              onTap();
-            }
-          : null,
+  /// 单个操作按钮(纯图标 + 浅底方块,仿豆包):长按弹 tooltip 文字辅助识别,兼顾可发现性。
+  /// onTap 为 null = 禁用(置灰)。
+  Widget _actionChip(IconData icon, String tooltip, VoidCallback? onTap) {
+    final enabled = onTap != null;
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(9),
+          child: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF1F3F4),
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: Icon(icon,
+                size: 18, color: enabled ? AppTheme.teal : Colors.black26),
+          ),
+        ),
+      ),
     );
   }
 
