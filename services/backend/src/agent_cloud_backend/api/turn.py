@@ -34,6 +34,7 @@ from agent_cloud_backend.turn.headless import (
 from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub, get_turn_hub, subscribe
 from agent_cloud_backend.turn.retry import classify
 from agent_cloud_backend.turn.runner import run_turn
+from agent_cloud_backend.turn.title import spawn_title_generation
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +112,11 @@ async def stream_turn_endpoint(
                 ),
             )
             await db.commit()
+            # 标题即时生成:首条 user 消息一落库就异步起名(基于问题本身、不等回合回答完)。
+            # fire-and-forget、不阻塞回合;generate_session_title 内部 WHERE title IS NULL
+            # 防与手动改名/重复 spawn 打架,且 title 非空即返回,后续回合不会重复起名。
+            if s.title is None:
+                spawn_title_generation(session_id, settings=settings)
             sandbox_conn = await manager.get_endpoint_for_user(s.user_id)
             sandbox_endpoint = sandbox_conn.endpoint
             sandbox_token = sandbox_conn.token
@@ -177,8 +183,8 @@ async def stream_turn_endpoint(
             session_id=session_id,
             heartbeat_interval=settings.session_heartbeat_seconds,
             settings=settings,
-            # 标题为空才在成功收尾后异步起名(钩子内还有权威复查)
-            spawn_title=s.title is None,
+            # 标题已在回合开始(user 消息落库后)即时起名,不再回合结束后 spawn。
+            spawn_title=False,
         )
     )
     return StreamingResponse(subscribe(active), media_type="text/event-stream")

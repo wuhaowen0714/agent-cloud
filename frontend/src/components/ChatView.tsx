@@ -167,12 +167,13 @@ export function ChatView() {
     // 该会话正在压缩(与回合同锁)→ 发出去必撞 409。拦在这里也覆盖来自错误气泡「重试」的
     // 路径(重试不经 Composer 的 busy 禁用,直接调 onSend)。
     if (useStore.getState().compactions[sid]?.phase === "running") return
-    const wasFirst = messages.length === 0 // 首回合:标题将在服务端异步生成
+    const wasFirst = messages.length === 0 // 首回合:标题服务端「首问即生成」
     startLive(text, sid)
+    // 首回合:后端在 user 消息落库后就即时起名(不等回答),故回合一开始即轮询刷 sessions
+    // 直到标题出现(单次延迟刷常赶不上 LLM),不必等回合结束。
+    if (wasFirst && userId) pollSessionTitle(qc, userId, sid)
     // 重试(onRetry)走 images=[]:错误兜底重发不重带图(活跃图片仍由后端从历史回灌)。
     await consume(sid, streamTurn(sid, text, (e) => feed(sid, e), images))
-    // 首回合标题在服务端异步生成:轮询刷 sessions 直到它出现(单次延迟刷常赶不上 LLM)
-    if (wasFirst && userId) pollSessionTitle(qc, userId, sid)
   }
 
   const onStop = () => {
