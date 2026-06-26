@@ -39,19 +39,36 @@ class SessionsController extends AsyncNotifier<List<Session>> {
     ]);
   }
 
-  /// 重命名会话(PATCH title),就地替换。
+  /// 重命名会话(PATCH title),就地替换。⚠️ 同 refresh:model 保留本地(前端权威) —— rename 的
+  /// 整行响应若与并发 patchModel 乱序落库,其 s.model 可能是旧值,直接整行替换会把 model 盖回。
   Future<void> rename(String id, String title) async {
     final s =
         await ref.read(sessionsRepoProvider).patchSession(id, title: title);
     state = AsyncValue.data([
       for (final x in (state.asData?.value ?? <Session>[]))
-        x.id == id ? s : x,
+        x.id == id ? s.copyWith(model: x.model) : x,
     ]);
   }
 
+  /// 刷新会话列表。⚠️ session.model 是【前端权威】(只由 patchModel 改并落库):全量刷新拉到的
+  /// DB 快照可能因 in-flight(与 patchModel 并发)而 stale,绝不能用它覆盖本地 model —— 否则会
+  /// 盖掉用户/自动切换刚选的模型。这正是首回合 _pollTitle 反复 refresh 时盖掉手动切换、导致
+  /// "切回文本后再发图不再自动切 vision、文本模型收图无法响应"的根因。故 model 一律保留本地,
+  /// 其余字段(title/status/活跃时间)用服务器值。
   Future<void> refresh() async {
-    state = await AsyncValue.guard(
-        () => ref.read(sessionsRepoProvider).listSessions());
+    state = await AsyncValue.guard(() async {
+      final fresh = await ref.read(sessionsRepoProvider).listSessions();
+      // 拿到服务器列表后再读本地 model 快照(含刷新期间可能发生的 patchModel),按 id 合并。
+      final localModel = {
+        for (final s in (state.asData?.value ?? const <Session>[])) s.id: s.model
+      };
+      return [
+        for (final s in fresh)
+          localModel.containsKey(s.id)
+              ? s.copyWith(model: localModel[s.id]!)
+              : s,
+      ];
+    });
   }
 
   /// 删除 agent(后端级联删其会话/记忆/文档);随后刷新 agent 列表与会话。
