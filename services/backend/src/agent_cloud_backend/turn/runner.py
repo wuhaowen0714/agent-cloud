@@ -124,32 +124,69 @@ async def run_turn(
             while True:
                 total_used += 1
                 try:
-                    async for proto_event in worker_client.stream_turn_via_worker(
-                        worker_endpoint, current
-                    ):
-                        event = turn_event_from_proto(proto_event)
-                        if isinstance(event, TurnDone):
-                            ctx_tokens = event.context_tokens
-                            message_ids = await _persist(
-                                session_id, event.new_messages, ctx_tokens, event.stop_reason
-                            )
-                            await active.emit(
-                                {
-                                    "type": "turn_done",
-                                    "usage": {
-                                        "input_tokens": event.usage.input_tokens,
-                                        "output_tokens": event.usage.output_tokens,
-                                    },
-                                    "message_ids": message_ids,
-                                    "stop_reason": event.stop_reason,
-                                }
-                            )
-                        else:
-                            # subagent_id 在 proto 外层(转 domain 时不带);从 proto_event 直接取,
-                            # 透传给 SSE 让前端把子 agent 事件分组。
-                            await active.emit(
-                                turn_event_to_sse(event, proto_event.subagent_id)
-                            )
+                    # 用 anext + wait_for 逐事件消费,给"相邻事件间隔"套空闲上限。worker 进程级
+                    # 僵死(看门狗够不到的事件循环卡死/假死)时 gRPC 连接没断却永不发事件,裸
+                    # async-for 会无界等待 → 回合永久挂、会话被心跳永久续租成 busy。空闲超时即跳
+                    # 出当瞬时错误退避重试;finally 关流不泄漏 channel。只把 wait_for 的超时算空转,
+                    # 不误吞 _persist/emit 内的 TimeoutError。
+                    stream = worker_client.stream_turn_via_worker(worker_endpoint, current)
+                    stalled = False
+                    try:
+                        while True:
+                            try:
+                                proto_event = await asyncio.wait_for(
+                                    anext(stream),
+                                    timeout=settings.turn_worker_idle_timeout_seconds,
+                                )
+                            except StopAsyncIteration:
+                                break
+                            except TimeoutError:
+                                stalled = True
+                                break
+                            event = turn_event_from_proto(proto_event)
+                            if isinstance(event, TurnDone):
+                                ctx_tokens = event.context_tokens
+                                message_ids = await _persist(
+                                    session_id, event.new_messages, ctx_tokens, event.stop_reason
+                                )
+                                await active.emit(
+                                    {
+                                        "type": "turn_done",
+                                        "usage": {
+                                            "input_tokens": event.usage.input_tokens,
+                                            "output_tokens": event.usage.output_tokens,
+                                        },
+                                        "message_ids": message_ids,
+                                        "stop_reason": event.stop_reason,
+                                    }
+                                )
+                            else:
+                                # subagent_id 在 proto 外层(转 domain 时不带);从 proto_event 直接
+                                # 取,透传给 SSE 让前端把子 agent 事件分组。
+                                await active.emit(
+                                    turn_event_to_sse(event, proto_event.subagent_id)
+                                )
+                    finally:
+                        # 关 generator → 退出其 async with channel(取消挂起的 gRPC 流);超时跳出
+                        # 或正常 break 都要关,绝不泄漏 channel。
+                        await stream.aclose()
+                    if stalled:
+                        # worker 进程级僵死兜底:等价瞬时错误退避重试,耗尽则报错。finally(下方)
+                        # 释放 session 锁,绝不把会话永久钉成 busy(否则用户重试该会话 409)。
+                        action = policy.decide(
+                            grpc.StatusCode.DEADLINE_EXCEEDED,
+                            overflow_used=overflow_used,
+                            transient_used=transient_used,
+                            total_used=total_used,
+                        )
+                        if action == RetryAction.BACKOFF_RETRY:
+                            await asyncio.sleep(policy.backoff_seconds(transient_used))
+                            transient_used += 1
+                            await active.emit({"type": "reset"})
+                            current = await reassemble()
+                            continue
+                        await active.emit(error_sse(grpc.StatusCode.DEADLINE_EXCEEDED))
+                        return
                     # 回合成功收尾 → 主动压缩(仍在心跳内续租)→ 异步起名 → 结束
                     await maybe_compact_after_turn(
                         session_id, ctx_tokens, model=current.agent.model, settings=settings
