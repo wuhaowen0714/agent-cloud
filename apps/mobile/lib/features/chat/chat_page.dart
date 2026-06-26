@@ -17,14 +17,37 @@ class ChatPage extends ConsumerStatefulWidget {
   ConsumerState<ChatPage> createState() => _ChatPageState();
 }
 
-class _ChatPageState extends ConsumerState<ChatPage> {
+class _ChatPageState extends ConsumerState<ChatPage>
+    with WidgetsBindingObserver {
   final _input = TextEditingController();
   final _scroll = ScrollController();
   final List<XFile> _pending = []; // 待发图片
   bool _uploading = false;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  // 客户端动作工具(set_alarm/add_calendar_event)会拉起系统闹钟/日历 App,把本 app 切到后台
+  // → SSE 流被系统中断;回前台时若回合仍"生成中",主动续看(resume)被中断的流,否则会永久卡
+  // 在"正在生成"(回合其实已在服务端跑完)。
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState lifecycle) {
+    if (lifecycle == AppLifecycleState.resumed && mounted) {
+      final chat = ref.read(chatControllerProvider(widget.sessionId));
+      if (chat.status == ChatStatus.streaming) {
+        ref
+            .read(chatControllerProvider(widget.sessionId).notifier)
+            .retryResume();
+      }
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _input.dispose();
     _scroll.dispose();
     super.dispose();
