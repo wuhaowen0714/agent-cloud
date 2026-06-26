@@ -18,6 +18,7 @@ const kBuiltinTools = <ToolInfo>[
   ToolInfo('edit_image', '图片编辑(按文字描述修改图片)'),
   ToolInfo('set_alarm', '设置手机闹钟(仅 App 生效)'),
   ToolInfo('add_calendar_event', '添加手机日历事件(仅 App 生效)'),
+  ToolInfo('start_navigation', '唤起地图导航(高德/百度,仅 App 生效)'),
 ];
 
 final _allToolNames = kBuiltinTools.map((t) => t.name).toList();
