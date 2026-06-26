@@ -349,6 +349,94 @@ async def test_runner_cancel_emits_cancelled_and_releases(engine, monkeypatch):
     assert hub.get(sid) is None
 
 
+async def test_runner_worker_idle_timeout_gives_up_and_releases(engine, monkeypatch):
+    # worker 进程级僵死(gRPC 连接没断却永不发事件):消费流空闲超时 → 退避重试,重试仍僵死 →
+    # 报错收尾。关键回归:释放锁(绝不把会话永久钉成 busy,否则用户重试该会话 409)。
+    from agent_cloud_backend.config import Settings
+    from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub
+    from agent_cloud_backend.turn.runner import run_turn
+
+    _patch_global_sessionmaker(monkeypatch, engine)
+    sid = await _make_session_row(engine)
+    await _acquire(engine, sid)
+
+    calls = 0
+
+    async def _stalled_gen(endpoint, request):
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(3600)  # 永久挂起、绝不 yield(模拟 worker 僵死)
+        yield  # 不可达;仅让函数成为 async generator
+
+    _fake_worker(monkeypatch, _stalled_gen)
+    settings = Settings(
+        turn_worker_idle_timeout_seconds=0.05,  # 极短空闲上限,快速触发
+        turn_retry_backoff_base_seconds=0.0,  # 不等退避,测试跑得快
+        turn_max_transient_retries=2,
+    )
+    hub = TurnHub()
+    active = ActiveTurn(session_id=sid)
+    hub.register(active)
+    await run_turn(
+        hub, active, worker_endpoint="x", request=_REQ, reassemble=_reassemble,
+        session_id=sid, heartbeat_interval=999, settings=settings,
+    )
+
+    assert calls >= 2  # 不是只发一次就卡死——确实退避重试了
+    assert active.events[-1]["type"] == "error"  # 重试耗尽 → 报错
+    assert await _status(engine, sid) == "idle"  # 关键:锁已释放,会话不永久 busy
+    assert hub.get(sid) is None  # 已从 hub 移除
+
+
+async def test_runner_worker_idle_timeout_recovers_on_retry(engine, monkeypatch):
+    # 空闲超时是可恢复瞬时错误:首发僵死 → 退避重试,worker 恢复 → 回合成功落库收尾。
+    from agent_cloud_backend.config import Settings
+    from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub
+    from agent_cloud_backend.turn.runner import run_turn
+
+    _patch_global_sessionmaker(monkeypatch, engine)
+    sid = await _make_session_row(engine)
+    await _acquire(engine, sid)
+
+    attempt = 0
+
+    async def _gen(endpoint, request):
+        nonlocal attempt
+        attempt += 1
+        if attempt == 1:
+            await asyncio.sleep(3600)  # 首发僵死
+            yield  # 不可达
+        else:
+            yield turn_event_to_proto(TextDelta(text="hi"))
+            yield turn_event_to_proto(
+                TurnDone(
+                    new_messages=[Message(role=Role.ASSISTANT, text="done")],
+                    usage=Usage(input_tokens=1, output_tokens=2),
+                    stop_reason="end_turn",
+                    context_tokens=7,
+                )
+            )
+
+    _fake_worker(monkeypatch, _gen)
+    settings = Settings(
+        turn_worker_idle_timeout_seconds=0.05,
+        turn_retry_backoff_base_seconds=0.0,
+    )
+    hub = TurnHub()
+    active = ActiveTurn(session_id=sid)
+    hub.register(active)
+    await run_turn(
+        hub, active, worker_endpoint="x", request=_REQ, reassemble=_reassemble,
+        session_id=sid, heartbeat_interval=999, settings=settings,
+    )
+
+    assert attempt == 2  # 首发僵死 + 重试一次
+    assert any(e["type"] == "reset" for e in active.events)  # 重试前发了清屏
+    assert any(e["type"] == "turn_done" for e in active.events)  # 重试成功收尾
+    assert await _roles(engine, sid) == ["assistant"]  # 已落库
+    assert await _status(engine, sid) == "idle"  # 锁已释放
+
+
 async def test_drain_hub_releases_stranded_lock_for_never_started_runner(engine, monkeypatch):
     # I3 兜底:runner 在首次运行前就被取消 → 其 finally 从未跑 → 锁残留;drain_hub 兜底释放。
     from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub

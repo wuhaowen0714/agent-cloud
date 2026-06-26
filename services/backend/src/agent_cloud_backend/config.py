@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     turn_max_transient_retries: int = 3  # 瞬时错误退避重试上限
     turn_max_total_attempts: int = 6  # 1 首发 + 两类上限之和;纯兜底
     turn_retry_backoff_base_seconds: float = 0.5  # 第 i 次重试等 base*2**i 秒,单步封顶 8s
+    # worker 流空闲兜底:消费 RunTurnStream 时相邻事件间隔超此即判 worker 进程级僵死
+    # (LLM 空转有 worker 看门狗 ~45s、单工具有沙箱 360s 各自兜底;这里兜看门狗够不到的事件
+    # 循环卡死/假死——gRPC 连接没断却永不发事件)→ 当瞬时错误退避重试 + 释放 session 锁,
+    # 否则僵死回合把会话永久钉成 busy(用户重试该会话 409)。必须 > 沙箱单工具上限 360s。
+    turn_worker_idle_timeout_seconds: float = 400.0
 
     # 鉴权(spec: auth-multitenancy)
     # HS256 签名密钥;prod 必须经 env 覆盖。默认 ≥32B 仅为消除 JWT 短密钥警告,非安全值。
