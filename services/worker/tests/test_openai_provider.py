@@ -546,6 +546,31 @@ async def test_stream_text_only_emits_no_progress():
     assert not any(isinstance(e, ProviderToolCallProgress) for e in events)
 
 
+def _fake_stall_clock(monkeypatch, times):
+    it = iter(times)
+    monkeypatch.setattr(op_mod, "_stall_monotonic", lambda: next(it))
+
+
+async def test_stream_raises_on_upstream_stall(monkeypatch):
+    # 上游持续发空 chunk(心跳/keep-alive)却不出 token:空转时钟跳过预算(ttft=None→60s 兜底)→
+    # fail-fast(经 server 收敛为 INTERNAL,后端瞬时退避重试)。修"正在生成一直转"的根因。
+    _fake_stall_clock(monkeypatch, [0.0, 1.0, 100.0])
+    chunks = [_delta(), _delta()]  # 两个空 chunk(无 content/reasoning/tool)
+    provider = OpenAIProvider(client=_stream_client(chunks), model="m", max_tokens=9)
+    with pytest.raises(RuntimeError, match="stalled"):
+        async for _ in provider.stream(_req()):
+            pass
+
+
+async def test_stream_no_stall_while_producing(monkeypatch):
+    # 即便空转时钟跳得很大,只要每个 chunk 有真实产出就刷新计时,正常长输出不被误杀。
+    _fake_stall_clock(monkeypatch, [0.0, 1.0, 2.0, 3.0, 4.0, 5.0])
+    chunks = [_delta(content="a"), _delta(content="b"), _usage_chunk(1, 1)]
+    provider = OpenAIProvider(client=_stream_client(chunks), model="m", max_tokens=9)
+    events = [e async for e in provider.stream(_req())]
+    assert [e.text for e in events if isinstance(e, ProviderTextDelta)] == ["a", "b"]
+
+
 # ---- 动态首字节(TTFT)超时:provider 按 payload 设 per-request timeout ----
 from agent_cloud_worker.ttft import TtftConfig  # noqa: E402
 
