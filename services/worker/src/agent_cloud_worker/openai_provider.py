@@ -237,6 +237,10 @@ class OpenAIProvider:
         }
         if request.tools:
             kwargs["tools"] = to_openai_tools(request.tools)
+        if request.disable_thinking:
+            # 关思考:思考型模型(DeepSeek-V4-Pro)默认把 token 烧在 reasoning、content 空。标题等
+            # 小任务走 extra_body enable_thinking=false 让它直接出结果(sophnet 支持,已实测)。
+            kwargs["extra_body"] = {"enable_thinking": False}
         return kwargs
 
     def _maybe_set_ttft_timeout(self, request: CompletionRequest, kwargs: dict) -> None:

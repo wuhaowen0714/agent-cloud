@@ -3,6 +3,7 @@ import json
 import uuid
 
 import grpc
+import pytest
 from agent_cloud_common import (
     Message,
     Role,
@@ -53,6 +54,19 @@ def _set_worker_stream(monkeypatch, gen):
     from agent_cloud_backend.turn import worker_client
 
     monkeypatch.setattr(worker_client, "stream_turn_via_worker", gen)
+
+
+@pytest.fixture(autouse=True)
+def _stub_title_worker(monkeypatch):
+    """本文件 test 不测标题。标题现在「回合开始即生成」(user 消息落库后 spawn),会调真实
+    GenerateTitle —— 这里没起真 worker,它连不上还抢事件循环、拖慢 run_turn 注册 active,
+    放大 resume 0.05s 时序断言的脆弱(test_get_resume_replays_active_turn)。stub 成空标题,
+    让标题不干扰回合时序。"""
+
+    async def _empty(*a, **k):
+        return ""
+
+    monkeypatch.setattr("agent_cloud_backend.turn.title.generate_title_via_worker", _empty)
 
 
 def _fake_stream(monkeypatch):
@@ -271,9 +285,15 @@ async def test_get_resume_replays_active_turn(client, engine, monkeypatch):
     _set_worker_stream(monkeypatch, _slow)
     sid = await _make_session(client)
     post = asyncio.create_task(client.post(f"/sessions/{sid}/turn/stream", json={"content": "x"}))
-    await asyncio.sleep(0.05)  # 让回合开始
-    g = await client.get(f"/sessions/{sid}/turn/stream")
-    assert g.status_code == 200
+    # condition-based 等待:run_turn 是 create_task,注册 active 的时刻不确定,固定 sleep(0.05)会
+    # 偶发在注册前就 GET 到 204。轮询 resume 直到拿到 active 续看流;_slow 回合 active 约 0.3s。
+    g = None
+    for _ in range(50):
+        await asyncio.sleep(0.02)
+        g = await client.get(f"/sessions/{sid}/turn/stream")
+        if g.status_code == 200:
+            break
+    assert g.status_code == 200, "resume 未在回合 active 期内拿到续看流"
     assert "text_delta" in g.text
     await post
 

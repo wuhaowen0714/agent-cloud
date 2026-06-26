@@ -62,6 +62,9 @@ class CompletionRequest:
     # 单次调用的输出上限覆盖(None = 用 provider 配置值)。小输出任务(如起标题)
     # 用它收紧,免得话痨/思考型模型为几个字烧大段输出。
     max_tokens: int | None = None
+    # 关闭思考(extra_body enable_thinking=false)。标题等小任务用:思考型模型(DeepSeek-V4-Pro)
+    # 默认把 token 全花在 reasoning、content 空 → 标题恒空;关思考让它直接出结果(sophnet 支持)。
+    disable_thinking: bool = False
 
 
 @dataclass
