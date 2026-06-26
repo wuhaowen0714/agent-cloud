@@ -25,8 +25,8 @@ void main() {
       child: const MaterialApp(home: HomePage()),
     ));
     await tester.pumpAndSettle();
-    // agent chip + 末位创建 + chip + AppBar + 新建 → 多个 add 图标
-    expect(find.byIcon(Icons.add), findsWidgets);
+    // 恰 3 个 add 图标:AppBar 新建 + FAB 新对话 + agent 栏末位创建入口
+    expect(find.byIcon(Icons.add), findsNWidgets(3));
     expect(find.text('main'), findsOneWidget);
   });
 }

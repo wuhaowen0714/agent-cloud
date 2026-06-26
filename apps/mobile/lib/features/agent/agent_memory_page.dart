@@ -15,6 +15,7 @@ class _AgentMemoryPageState extends ConsumerState<AgentMemoryPage> {
   final _ctrl = TextEditingController();
   bool _loading = true;
   bool _saving = false;
+  bool _loadFailed = false;
 
   @override
   void initState() {
@@ -32,8 +33,18 @@ class _AgentMemoryPageState extends ConsumerState<AgentMemoryPage> {
     try {
       _ctrl.text =
           await ref.read(agentRepoProvider).getAgentMemory(widget.agentId);
-    } catch (_) {}
+    } catch (_) {
+      _loadFailed = true; // 加载失败别让用户在空框上保存、覆盖真实记忆
+    }
     if (mounted) setState(() => _loading = false);
+  }
+
+  void _retry() {
+    setState(() {
+      _loading = true;
+      _loadFailed = false;
+    });
+    _load();
   }
 
   Future<void> _save() async {
@@ -76,8 +87,17 @@ class _AgentMemoryPageState extends ConsumerState<AgentMemoryPage> {
     try {
       await ref.read(agentRepoProvider).clearAgentMemory(widget.agentId);
       _ctrl.clear();
-      if (mounted) setState(() {});
-    } catch (_) {}
+      if (mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('已清除')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('清除失败: $e')));
+      }
+    }
   }
 
   @override
@@ -94,7 +114,17 @@ class _AgentMemoryPageState extends ConsumerState<AgentMemoryPage> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : Padding(
+          : _loadFailed
+              ? Center(
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    const Text('记忆加载失败',
+                        style: TextStyle(color: AppTheme.muted)),
+                    const SizedBox(height: 12),
+                    OutlinedButton(
+                        onPressed: _retry, child: const Text('重试')),
+                  ]),
+                )
+              : Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

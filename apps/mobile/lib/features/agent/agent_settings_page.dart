@@ -84,7 +84,9 @@ class _AgentSettingsPageState extends ConsumerState<AgentSettingsPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('删除「${_name.text.trim()}」?'),
+        title: Text(_name.text.trim().isEmpty
+            ? '删除此 Agent?'
+            : '删除「${_name.text.trim()}」?'),
         content: const Text('将连同该智能体的全部会话一起删除,不可恢复。'),
         actions: [
           TextButton(
