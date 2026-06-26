@@ -24,7 +24,7 @@ class ChatRepository {
   }) async* {
     final r = await _dio.post(
       '/sessions/$sessionId/turn/stream',
-      data: {'content': content, 'images': images},
+      data: {'content': content, 'images': images, 'client': 'mobile'},
       options: Options(responseType: ResponseType.stream),
       cancelToken: cancel,
     );

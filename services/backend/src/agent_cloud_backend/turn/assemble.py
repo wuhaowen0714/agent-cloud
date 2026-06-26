@@ -22,6 +22,19 @@ from agent_cloud_backend.turn.messages import (
     strip_unanswered_user_messages,
 )
 
+# 手机 App 运行环境提示:注入 system prompt 引导优先用 set_alarm/add_calendar_event
+# (直接设手机系统闹钟/日历)而非 schedule_task(云端周期任务)。web 端不注入。
+_MOBILE_ENV_DOC = (
+    "【运行环境】你正运行在用户的 Android 手机 App 上,可以直接操作手机系统。\n"
+    "- 用户要「设闹钟 / 在某个时刻响铃提醒」→ 优先用 set_alarm 直接设手机系统闹钟,"
+    "不要用 schedule_task。\n"
+    "- 用户要「加日程 / 日历事件 / 会议安排」→ 优先用 add_calendar_event,"
+    "直接加手机系统日历。\n"
+    "- 这两个工具会在手机上弹出系统闹钟 / 日历应用预填,由用户确认保存。\n"
+    "- schedule_task 是云端周期任务(到点让你再运行一次发应用内通知),不是系统闹钟;"
+    "只在用户明确要「周期性 / 让 AI 到点替我做某事」时才用。"
+)
+
 
 async def build_run_turn_request(
     db: AsyncSession,
@@ -35,6 +48,7 @@ async def build_run_turn_request(
     sandbox_token: str = "",
     is_scheduled_run: bool = False,
     images: list[str] | None = None,
+    client_platform: str = "web",
 ) -> worker_pb2.RunTurnRequest:
     agent = await AgentConfigRepository(db).get(session.agent_config_id)
     doc_repo = ContextDocumentRepository(db)
@@ -78,9 +92,17 @@ async def build_run_turn_request(
             base_url=base_url,
         ),
         documents=[
-            worker_pb2.Doc(scope=d.scope, type=d.type, content=d.content)
-            for d in [*user_docs, *agent_docs]
-            if d.content.strip()  # 跳过空文档(如被清空的 AGENTS),不往 prompt 里塞空段
+            # 手机 App 置顶注入运行环境提示,引导优先用 set_alarm/add_calendar_event
+            *(
+                [worker_pb2.Doc(scope="env", type="client", content=_MOBILE_ENV_DOC)]
+                if client_platform == "mobile"
+                else []
+            ),
+            *(
+                worker_pb2.Doc(scope=d.scope, type=d.type, content=d.content)
+                for d in [*user_docs, *agent_docs]
+                if d.content.strip()  # 跳过空文档(如被清空的 AGENTS),不往 prompt 里塞空段
+            ),
         ],
         memory=[worker_pb2.Mem(scope=b.scope, content=b.content) for b in mem_blocks],
         skills=[
