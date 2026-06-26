@@ -117,7 +117,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     try {
       final s =
           await ref.read(sessionsControllerProvider.notifier).create(agentId);
-      if (mounted) context.go('/chat/${s.id}'); // 建完直接进会话
+      if (mounted) context.push('/chat/${s.id}'); // 建完直接进会话
     } catch (e) {
       _toast('创建会话失败: $e');
     }
@@ -383,7 +383,7 @@ class _HomePageState extends ConsumerState<HomePage> {
             color: Colors.transparent,
             child: InkWell(
               borderRadius: BorderRadius.circular(AppTheme.rCard),
-              onTap: () => context.go('/chat/${s.id}'),
+              onTap: () => context.push('/chat/${s.id}'),
               onLongPress: () => _showActions(s),
               child: Padding(
                 padding: const EdgeInsets.all(14),

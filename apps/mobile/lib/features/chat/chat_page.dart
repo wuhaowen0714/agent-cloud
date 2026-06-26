@@ -90,9 +90,44 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     }
   }
 
+  Future<void> _renameSession(String current) async {
+    final ctrl = TextEditingController(
+        text: (current == '对话' || current == '新会话') ? '' : current);
+    final title = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('重命名会话'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: '会话标题'),
+          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: const Text('保存')),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (title != null && title.isNotEmpty) {
+      await ref
+          .read(sessionsControllerProvider.notifier)
+          .rename(widget.sessionId, title);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(chatControllerProvider(widget.sessionId));
+    // session 标题(可改):从会话列表取,rename 后自动更新
+    final sessions =
+        ref.watch(sessionsControllerProvider).asData?.value ?? const [];
+    final match = sessions.where((s) => s.id == widget.sessionId);
+    final title = match.isEmpty ? '对话' : match.first.displayTitle;
     // 新内容到达时滚到底部(跟随生成 / 进会话定位到最新)
     ref.listen(chatControllerProvider(widget.sessionId), (_, _) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -103,7 +138,17 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     });
     return Scaffold(
       appBar: AppBar(
-        title: const Text('对话'),
+        title: GestureDetector(
+          onTap: () => _renameSession(title),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Flexible(
+                child: Text(title,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 17))),
+            const SizedBox(width: 5),
+            const Icon(Icons.edit_outlined, size: 15, color: AppTheme.faint),
+          ]),
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.tune),

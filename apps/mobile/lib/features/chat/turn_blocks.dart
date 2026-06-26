@@ -1,7 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_theme.dart';
+import '../files/files_repository.dart'; // sentImageProvider(带 token 取图)
 import '../../models/block.dart';
+
+// generate_image/edit_image 成功结果文本里嵌着落盘路径(worker 回填 media/picture/..)
+final _imgPathRe = RegExp(
+    r'''(media/picture/[^\s"']+\.(?:png|jpe?g|webp|gif))''',
+    caseSensitive: false);
+
+String? _toolImagePath(ToolBlock b) {
+  final r = b.result;
+  if ((b.call.name == 'generate_image' || b.call.name == 'edit_image') &&
+      r != null &&
+      !r.isError) {
+    return _imgPathRe.firstMatch(r.content)?.group(1);
+  }
+  return null;
+}
 
 // 子 agent 用 indigo 区分于主 teal(表示"嵌套子任务")
 const _indigo = Color(0xFF6366F1);
@@ -138,7 +155,43 @@ class _ToolCard extends StatelessWidget {
                     height: 1.4)),
           ),
         ],
+        // generate_image/edit_image:把生成的图直接在卡片内渲染
+        if (_toolImagePath(block) case final p?) _GeneratedImage(p),
       ]),
+    );
+  }
+}
+
+/// generate_image/edit_image 生成的图:带 token 取字节后内嵌(复用 sentImageProvider 缓存)。
+class _GeneratedImage extends ConsumerWidget {
+  final String path;
+  const _GeneratedImage(this.path);
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final img = ref.watch(sentImageProvider(path));
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: img.when(
+          data: (bytes) =>
+              Image.memory(bytes, width: double.infinity, fit: BoxFit.fitWidth),
+          loading: () => Container(
+              height: 140,
+              color: AppTheme.bg,
+              child: const Center(
+                  child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2)))),
+          error: (_, _) => Container(
+              padding: const EdgeInsets.all(12),
+              color: AppTheme.bg,
+              child: Text('图片加载失败: $path',
+                  style:
+                      const TextStyle(fontSize: 11, color: AppTheme.faint))),
+        ),
+      ),
     );
   }
 }
