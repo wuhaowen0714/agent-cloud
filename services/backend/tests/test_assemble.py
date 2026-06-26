@@ -211,6 +211,28 @@ async def test_build_request_work_subdir_override(session):
     assert req2.work_subdir == "."
 
 
+async def test_build_request_passes_client_platform(session):
+    # wiring 回归:client_platform 必须落进 RunTurnRequest.client,worker 据此过滤仅 mobile 可
+    # 执行的工具(set_alarm/add_calendar)。漏传则 worker 收默认 "" → 连 mobile 也静默不暴露。
+    user = await UserRepository(session).create(User(email="cli@example.com"))
+    await session.flush()
+    agent = await AgentConfigRepository(session).create(AgentConfig(user_id=user.id, name="c"))
+    await session.flush()
+    s = await SessionRepository(session).create_for(user.id, agent.id, None, model="m")
+    await session.commit()
+    # 默认 web(web 前端不发 client → TurnRequest.client 默认 web → 这里默认 web)
+    req_web = await build_run_turn_request(
+        session, s, sandbox_endpoint="x", user_message="hi", exclude_message_id=None
+    )
+    assert req_web.client == "web"
+    # mobile 透传
+    req_mobile = await build_run_turn_request(
+        session, s, sandbox_endpoint="x", user_message="hi",
+        exclude_message_id=None, client_platform="mobile",
+    )
+    assert req_mobile.client == "mobile"
+
+
 async def test_build_request_drops_summarized_and_sends_history_summary(session):
     # 压缩后:seq <= summary_through_seq 的消息不再逐字发,改为发 history_summary;
     # 之后的消息(seq > 边界)仍逐字保留(spec §9)。

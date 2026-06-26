@@ -93,6 +93,10 @@ message RunTurnRequest {
   // 本回合要发给模型的图片(工作区相对路径)。backend 每轮算"活跃图片"填入(本轮新上传 or
   // 最近活跃图);worker 调 LLM 前经沙箱读成 data_uri 注入 content。详见 spec: image-understanding。
   repeated string turn_images = 14;
+  // 客户端平台(web/mobile,空=未知)。worker 据此过滤"仅特定端可执行"的工具:
+  // set_alarm/add_calendar_event 只有 mobile App 能落系统闹钟/日历,web 不暴露给 LLM
+  // (暴露只会诱导它调一个落不了地的工具;同 is_scheduled_run 按回合属性过滤工具的模式)。
+  string client = 15;
 }
 
 message RunTurnResponse {
