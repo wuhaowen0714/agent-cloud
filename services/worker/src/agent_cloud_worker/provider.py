@@ -4,7 +4,9 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from agent_cloud_common import CompletionRequest, CompletionResult, Message, Usage
+from agent_cloud_common import CompletionRequest, CompletionResult, Message, Role, Usage
+
+from agent_cloud_worker.title import TITLE_SYSTEM
 
 
 class ContextWindowExceeded(Exception):
@@ -74,13 +76,23 @@ class StreamingProvider(Protocol):
 class FakeProvider:
     """脚本化 provider:按顺序返回预设的 CompletionResult。同时支持一元 complete 与流式 stream。"""
 
-    def __init__(self, scripted: list[CompletionResult]) -> None:
+    def __init__(
+        self, scripted: list[CompletionResult], *, title: CompletionResult | None = None
+    ) -> None:
         self._scripted = list(scripted)
         self._index = 0
+        # GenerateTitle(system==TITLE_SYSTEM)专用响应:标题现在「首问即生成」、与回合并发,
+        # 不能再共享回合的顺序队列(否则两路竞争 _index)。title 调用恒走这里、不消费 scripted。
+        self._title = title
         self.requests: list[CompletionRequest] = []  # 测试断言 prompt 内容用
 
     async def complete(self, request: CompletionRequest) -> CompletionResult:
         self.requests.append(request)
+        if request.system == TITLE_SYSTEM:
+            return self._title or CompletionResult(
+                message=Message(role=Role.ASSISTANT, text=""),
+                usage=Usage(input_tokens=1, output_tokens=1),
+            )
         if self._index >= len(self._scripted):
             raise IndexError(f"FakeProvider script exhausted after {len(self._scripted)} calls")
         result = self._scripted[self._index]

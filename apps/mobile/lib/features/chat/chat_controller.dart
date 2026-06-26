@@ -6,6 +6,7 @@ import '../../models/turn_event.dart';
 import 'blocks.dart';
 import 'chat_repository.dart';
 import 'client_actions.dart';
+import '../sessions/sessions_controller.dart'; // sessionsControllerProvider:刷新拿即时标题
 
 enum ChatStatus { loading, idle, streaming, error }
 
@@ -79,6 +80,7 @@ class ChatController extends FamilyNotifier<ChatState, String> {
 
   /// 发消息:发起失败 → 可重试;已发起后中途断 → 由 retryResume() 走 resume。
   Future<void> send(String content, {List<String> images = const []}) async {
+    final wasFirst = state.turns.isEmpty; // 首回合:后端首问即生成标题,发完轮询刷出来
     state = state.copyWith(
         live: const [],
         liveUser: content,
@@ -86,6 +88,7 @@ class ChatController extends FamilyNotifier<ChatState, String> {
         status: ChatStatus.streaming,
         clearFailed: true);
     _cancel = CancelToken();
+    if (wasFirst) _pollTitle(); // 不 await:与回合并行(后端在 user 消息落库后即时起名)
     try {
       await for (final e in _repo.sendTurn(_sid, content,
           images: images, cancel: _cancel)) {
@@ -102,6 +105,23 @@ class ChatController extends FamilyNotifier<ChatState, String> {
   Future<void> retry() async {
     final msg = state.failedMessage;
     if (msg != null) await send(msg);
+  }
+
+  // 首回合标题:后端在 user 消息落库后即时生成(不等回答),这里轮询刷 sessions 直到拿到 title
+  // (或到上限)——让 chat 顶栏 / 会话列表尽快显示标题,不必等回合结束。
+  Future<void> _pollTitle() async {
+    for (var i = 0; i < 8; i++) {
+      await Future.delayed(const Duration(milliseconds: 1200));
+      try {
+        await ref.read(sessionsControllerProvider.notifier).refresh();
+        final sessions =
+            ref.read(sessionsControllerProvider).asData?.value ?? const [];
+        final m = sessions.where((s) => s.id == _sid);
+        if (m.isNotEmpty && (m.first.title?.isNotEmpty ?? false)) return;
+      } catch (_) {
+        return; // controller 已 dispose / 拉取失败 → 停
+      }
+    }
   }
 
   /// 断流后手动/自动续看进行中回合(GET resume)。
