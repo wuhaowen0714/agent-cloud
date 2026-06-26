@@ -25,7 +25,13 @@ class ChatRepository {
     final r = await _dio.post(
       '/sessions/$sessionId/turn/stream',
       data: {'content': content, 'images': images, 'client': 'mobile'},
-      options: Options(responseType: ResponseType.stream),
+      // 兜底:流超 8min 无任何数据(连接层卡:网络半开/后端死)→ 抛 receiveTimeout 终止
+      // "正在生成"而非永久转。8min > 后端单工具执行上限 360s,不误切正常长工具;worker 侧
+      // 空转看门狗(~45s)是主防线,这里只兜 worker 管不到的连接层卡,转 error 后可重试。
+      options: Options(
+        responseType: ResponseType.stream,
+        receiveTimeout: const Duration(minutes: 8),
+      ),
       cancelToken: cancel,
     );
     yield* parseSse((r.data as ResponseBody).stream);
@@ -39,6 +45,7 @@ class ChatRepository {
       options: Options(
         responseType: ResponseType.stream,
         validateStatus: (s) => s != null && s < 500,
+        receiveTimeout: const Duration(minutes: 8), // 同 sendTurn:连接层卡兜底
       ),
       cancelToken: cancel,
     );

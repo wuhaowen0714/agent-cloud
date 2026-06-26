@@ -34,7 +34,8 @@ logger = logging.getLogger(__name__)
 # 工具参数生成进度:最小发射间隔(秒)。全局单计时器——流里 call 串行到达,
 # 这同时也是整条流进度事件率的上界(回放缓冲量级随之有界)。
 _PROGRESS_INTERVAL = 0.3
-_monotonic = time.monotonic  # 测试可替换的时钟
+_monotonic = time.monotonic  # 进度节流用,测试可替换的时钟
+_stall_monotonic = time.monotonic  # 空转看门狗用,独立别名(与进度时钟各自 mock,互不干扰)
 _PATH_RE = re.compile(r'"path"\s*:\s*"((?:[^"\\]|\\.)*)"')
 
 
@@ -304,7 +305,19 @@ class OpenAIProvider:
         finish: str | None = None
         last_progress = 0.0  # 上次进度发射时刻(_monotonic);0 → 首个参数分片立即发
 
+        # 空转看门狗:上游持续发空 chunk(心跳/keep-alive)却不出 token 时,httpx chunk-read
+        # 超时不触发(流上一直有数据在动),这里按"距上次真实产出"的 wall-clock 兜底 fail-fast
+        # → 经 server 收敛为 INTERNAL → 后端瞬时退避重试(重试时 keepwarm 多半已焐热上游)。
+        # 预算复用 ttft.ceil(无 ttft 时 60s 兜底);正常 token 间隔远小于它,不误杀长输出。
+        stall_budget = self._ttft.ceil if self._ttft is not None else 60.0
+        last_output = _stall_monotonic()
+
         async for chunk in stream:
+            # 距上次真实产出已超预算 → 判上游空转(只发空 chunk/心跳却不出 token),fail-fast。
+            if _stall_monotonic() - last_output > stall_budget:
+                raise RuntimeError(
+                    f"upstream stream stalled: no token for {stall_budget:.0f}s"
+                )
             if chunk.usage is not None:
                 usage = Usage(
                     input_tokens=chunk.usage.prompt_tokens,
@@ -315,6 +328,9 @@ class OpenAIProvider:
             if chunk.choices[0].finish_reason:
                 finish = chunk.choices[0].finish_reason
             delta = chunk.choices[0].delta
+            # 任何真实产出(思考/正文/工具参数分片)都刷新空转计时。
+            if delta.content or getattr(delta, "reasoning_content", None) or delta.tool_calls:
+                last_output = _stall_monotonic()
             reasoning = getattr(delta, "reasoning_content", None)
             if reasoning:
                 reasoning_parts.append(reasoning)
