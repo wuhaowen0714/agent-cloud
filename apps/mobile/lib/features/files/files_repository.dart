@@ -65,6 +65,11 @@ class FilesRepository {
   /// 取文本类文件内容(代码/md/html/json…),UTF-8 解码(容错坏字节)。
   Future<String> fetchText(String path) async =>
       utf8.decode(await fetchBytes(path), allowMalformed: true);
+
+  /// 流式下载到本地文件(dio.download 分块写盘,不全进内存 → 大文件不 OOM)。
+  Future<void> downloadToFile(String path, String savePath) =>
+      _dio.download('/files/raw', savePath,
+          queryParameters: {'path': path, 'attachment': true});
 }
 
 final filesRepoProvider =

@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -20,6 +19,8 @@ const _textExt = {
 // office:走后端 extract 抽文本。
 const _officeExt = {'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'};
 const _imgExt = {'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'};
+// 文本/代码靠全量取字节解码预览,超此大小改走下载(防 OOM/渲染卡顿)。
+const _maxTextPreview = 2 * 1024 * 1024; // 2MB
 
 String _extOf(String name) {
   final i = name.lastIndexOf('.');
@@ -70,6 +71,7 @@ class FilesPage extends ConsumerStatefulWidget {
 class _FilesPageState extends ConsumerState<FilesPage> {
   String _path = ''; // 当前目录(根 = 空)
   bool _showHidden = false; // 默认隐藏 . 开头文件/夹
+  final Set<String> _downloading = {}; // 下载中的 path,防重复点 + 显示进度
 
   bool get _atRoot => _path.isEmpty;
   void _enter(String dir) => setState(() => _path = dir);
@@ -155,18 +157,25 @@ class _FilesPageState extends ConsumerState<FilesPage> {
     return false; // 靠 provider 刷新移除,不本地 dismiss
   }
 
-  // 下载:取字节落临时文件 → 系统分享(可保存到「文件」/Download、或发给其它 app)。
+  // 下载:流式落临时文件(dio.download 分块写盘,大文件不 OOM)→ 系统分享。
+  // temp 名加时间戳前缀防同名覆盖;接收方看到的名字靠 fileNameOverrides 还原成原名。
   Future<void> _download(FileEntry e) async {
-    _toast('准备「${e.name}」…');
+    if (_downloading.contains(e.path)) return; // 防重复点
+    setState(() => _downloading.add(e.path));
+    _toast('下载「${e.name}」…');
     try {
-      final bytes = await ref.read(filesRepoProvider).fetchBytes(e.path);
       final dir = await getTemporaryDirectory();
-      final f = File('${dir.path}/${e.name}');
-      await f.writeAsBytes(bytes);
-      await SharePlus.instance
-          .share(ShareParams(files: [XFile(f.path)], text: e.name));
+      final savePath =
+          '${dir.path}/${DateTime.now().microsecondsSinceEpoch}_${e.name}';
+      await ref.read(filesRepoProvider).downloadToFile(e.path, savePath);
+      await SharePlus.instance.share(ShareParams(
+        files: [XFile(savePath, name: e.name)],
+        fileNameOverrides: [e.name],
+      ));
     } catch (err) {
       _toast('下载失败: $err');
+    } finally {
+      if (mounted) setState(() => _downloading.remove(e.path));
     }
   }
 
@@ -176,6 +185,12 @@ class _FilesPageState extends ConsumerState<FilesPage> {
       return;
     }
     final x = _extOf(e.name);
+    final isText = _textExt.contains(x) || x == 'md' || x == 'markdown';
+    // 文本/代码靠全量取字节解码,过大易 OOM/卡顿 → 超限改走下载。
+    if (isText && e.size > _maxTextPreview) {
+      _downloadSheet(e, '文件较大(${e.prettySize}),不便直接预览');
+      return;
+    }
     final repo = ref.read(filesRepoProvider);
     Widget body;
     if (_imgExt.contains(x)) {
@@ -187,7 +202,7 @@ class _FilesPageState extends ConsumerState<FilesPage> {
     } else if (_officeExt.contains(x)) {
       body = _AsyncTextBody(future: repo.extractText(e.path));
     } else {
-      _notPreviewable(e);
+      _downloadSheet(e, '.$x 格式暂不支持预览');
       return;
     }
     showDialog(
@@ -197,7 +212,8 @@ class _FilesPageState extends ConsumerState<FilesPage> {
     );
   }
 
-  void _notPreviewable(FileEntry e) {
+  // 不可预览 / 文件太大 → 底部操作条:提示原因 + 下载入口。
+  void _downloadSheet(FileEntry e, String hint) {
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -205,8 +221,7 @@ class _FilesPageState extends ConsumerState<FilesPage> {
       builder: (_) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           const SizedBox(height: 16),
-          Text('.${_extOf(e.name)} 格式暂不支持预览',
-              style: const TextStyle(color: AppTheme.muted)),
+          Text(hint, style: const TextStyle(color: AppTheme.muted)),
           const SizedBox(height: 6),
           ListTile(
             leading: const Icon(Icons.download_rounded, color: AppTheme.teal),
@@ -343,6 +358,14 @@ class _FilesPageState extends ConsumerState<FilesPage> {
                   if (e.isDir)
                     const Icon(Icons.chevron_right_rounded,
                         color: AppTheme.faint)
+                  else if (_downloading.contains(e.path))
+                    const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2)),
+                    )
                   else
                     IconButton(
                       icon: const Icon(Icons.download_rounded,
