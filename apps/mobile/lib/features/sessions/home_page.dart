@@ -8,19 +8,25 @@ import '../../models/session.dart';
 import '../update/update_service.dart';
 import 'sessions_controller.dart';
 
-// 列表项:agent 大标题 / 天小标题 / 会话卡
+// 列表项:agent 大标题 / 天小标题 / 会话卡(标题/天均可折叠)
 sealed class _Item {
   const _Item();
 }
 
 class _AgentHeader extends _Item {
   final String name;
-  const _AgentHeader(this.name);
+  final String agentId;
+  final bool expanded;
+  final int count;
+  const _AgentHeader(this.name, this.agentId, this.expanded, this.count);
 }
 
 class _DateHeader extends _Item {
   final String label;
-  const _DateHeader(this.label);
+  final String agentId;
+  final bool expanded;
+  final int count;
+  const _DateHeader(this.label, this.agentId, this.expanded, this.count);
 }
 
 class _SessionItem extends _Item {
@@ -35,6 +41,18 @@ class HomePage extends ConsumerStatefulWidget {
 }
 
 class _HomePageState extends ConsumerState<HomePage> {
+  // 手动 toggle 过的分组 key。agent 默认展开;天默认仅「今天」展开,其它折叠。
+  final Set<String> _toggled = {};
+
+  bool _agentExpanded(String aid) => !_toggled.contains('a:$aid');
+  bool _dateExpanded(String aid, String label) {
+    final t = _toggled.contains('d:$aid:$label');
+    return label == '今天' ? !t : t; // 今天默认开、其它默认折叠,toggle 反转
+  }
+
+  void _toggle(String key) => setState(
+      () => _toggled.contains(key) ? _toggled.remove(key) : _toggled.add(key));
+
   @override
   void initState() {
     super.initState();
@@ -163,7 +181,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     }
   }
 
-  /// 会话 → 两级分组(agent → 天)的扁平列表。
+  /// 会话 → 两级分组(agent → 天)的扁平列表,带折叠:折叠的分组只出 header。
   List<_Item> _buildItems(List<Session> sessions, Map<String, String> names) {
     final epoch = DateTime.fromMillisecondsSinceEpoch(0);
     final byAgent = <String, List<Session>>{};
@@ -173,24 +191,30 @@ class _HomePageState extends ConsumerState<HomePage> {
     DateTime latest(List<Session> ss) => ss
         .map((s) => s.lastActiveAt ?? epoch)
         .reduce((a, b) => a.isAfter(b) ? a : b);
-    // agent 组按各自最近活跃降序
     final agentIds = byAgent.keys.toList()
       ..sort((a, b) => latest(byAgent[b]!).compareTo(latest(byAgent[a]!)));
 
     final items = <_Item>[];
     for (final aid in agentIds) {
-      items.add(_AgentHeader(names[aid] ?? '智能体'));
       final ss = byAgent[aid]!
         ..sort((a, b) =>
             (b.lastActiveAt ?? epoch).compareTo(a.lastActiveAt ?? epoch));
-      String? cur;
+      final agentOpen = _agentExpanded(aid);
+      items.add(_AgentHeader(names[aid] ?? '智能体', aid, agentOpen, ss.length));
+      if (!agentOpen) continue; // agent 折叠 → 不展开天分组
+      // 按天分组(ss 已降序 → label 自然有序;Map 保持插入序)
+      final byLabel = <String, List<Session>>{};
       for (final s in ss) {
-        final lbl = timeGroupLabel(s.lastActiveAt);
-        if (lbl != cur) {
-          items.add(_DateHeader(lbl));
-          cur = lbl;
+        (byLabel[timeGroupLabel(s.lastActiveAt)] ??= []).add(s);
+      }
+      for (final e in byLabel.entries) {
+        final open = _dateExpanded(aid, e.key);
+        items.add(_DateHeader(e.key, aid, open, e.value.length));
+        if (open) {
+          for (final s in e.value) {
+            items.add(_SessionItem(s));
+          }
         }
-        items.add(_SessionItem(s));
       }
     }
     return items;
@@ -239,10 +263,13 @@ class _HomePageState extends ConsumerState<HomePage> {
             child: ListView.builder(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 88),
               itemCount: items.length,
-              itemBuilder: (_, i) => switch (items[i]) {
-                _AgentHeader(:final name) => _agentHeader(name),
-                _DateHeader(:final label) => _dateHeader(label),
-                _SessionItem(:final session) => _sessionCard(session),
+              itemBuilder: (_, i) {
+                final item = items[i];
+                return switch (item) {
+                  _AgentHeader() => _agentHeader(item),
+                  _DateHeader() => _dateHeader(item),
+                  _SessionItem(:final session) => _sessionCard(session),
+                };
               },
             ),
           );
@@ -251,26 +278,58 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
-  Widget _agentHeader(String name) => Padding(
-        padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
-        child: Row(children: [
-          const Icon(Icons.smart_toy_outlined, size: 17, color: AppTheme.teal),
-          const SizedBox(width: 6),
-          Text(name,
-              style: const TextStyle(
-                  fontSize: 14.5,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.ink)),
-        ]),
+  Widget _agentHeader(_AgentHeader h) => Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => _toggle('a:${h.agentId}'),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(4, 14, 4, 8),
+            child: Row(children: [
+              const Icon(Icons.smart_toy_outlined,
+                  size: 17, color: AppTheme.teal),
+              const SizedBox(width: 6),
+              Text(h.name,
+                  style: const TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.ink)),
+              const SizedBox(width: 6),
+              Text('${h.count}',
+                  style: const TextStyle(fontSize: 12, color: AppTheme.faint)),
+              const Spacer(),
+              Icon(h.expanded ? Icons.expand_more : Icons.chevron_right,
+                  size: 18, color: AppTheme.faint),
+            ]),
+          ),
+        ),
       );
 
-  Widget _dateHeader(String label) => Padding(
-        padding: const EdgeInsets.fromLTRB(6, 10, 6, 6),
-        child: Text(label,
-            style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: AppTheme.muted)),
+  Widget _dateHeader(_DateHeader h) => Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => _toggle('d:${h.agentId}:${h.label}'),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(6, 8, 6, 6),
+            child: Row(children: [
+              Icon(h.expanded ? Icons.expand_more : Icons.chevron_right,
+                  size: 15, color: AppTheme.muted),
+              const SizedBox(width: 3),
+              Text(h.label,
+                  style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.muted)),
+              if (!h.expanded) ...[
+                const SizedBox(width: 6),
+                Text('${h.count}',
+                    style:
+                        const TextStyle(fontSize: 11.5, color: AppTheme.faint)),
+              ],
+            ]),
+          ),
+        ),
       );
 
   Widget _emptyState() => Center(
