@@ -53,6 +53,13 @@ class SessionsController extends AsyncNotifier<List<Session>> {
     state = await AsyncValue.guard(
         () => ref.read(sessionsRepoProvider).listSessions());
   }
+
+  /// 删除 agent(后端级联删其会话/记忆/文档);随后刷新 agent 列表与会话。
+  Future<void> deleteAgent(String id) async {
+    await ref.read(sessionsRepoProvider).deleteAgent(id);
+    ref.invalidate(agentsProvider);
+    await refresh();
+  }
 }
 
 final sessionsControllerProvider =

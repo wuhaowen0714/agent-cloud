@@ -35,4 +35,7 @@ class SessionsRepository {
   }
 
   Future<void> deleteSession(String id) => _dio.delete('/sessions/$id');
+
+  // 删 agent:后端级联删其全部会话/记忆/文档;有会话在跑 → 409。
+  Future<void> deleteAgent(String id) => _dio.delete('/agent-configs/$id');
 }
