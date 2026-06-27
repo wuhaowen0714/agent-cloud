@@ -21,6 +21,27 @@ def test_specs_gated():
     assert "notify" not in [s.name for s in NotifyingExecutor(_Inner(), enabled=False).specs()]
 
 
+def test_specs_gated_by_client():
+    # mobile 无 notifications 接收通道 → 不暴露 notify(与 client_actions 的 mobile-only 相反)。
+    assert "notify" not in [
+        s.name for s in NotifyingExecutor(_Inner(), enabled=True, client="mobile").specs()
+    ]
+    # web / 空 client(默认端)→ 暴露。
+    assert "notify" in [
+        s.name for s in NotifyingExecutor(_Inner(), enabled=True, client="web").specs()
+    ]
+    assert "notify" in [
+        s.name for s in NotifyingExecutor(_Inner(), enabled=True, client="").specs()
+    ]
+
+
+async def test_mobile_rejects_execute():
+    # specs 不暴露 + execute 门控双保险:mobile 即便 LLM 硬调 notify 也拒。
+    ex = NotifyingExecutor(_Inner(), enabled=True, client="mobile")
+    r = await ex.execute(ToolCall(id="1", name="notify", arguments={"title": "a", "body": "b"}))
+    assert r.is_error is True
+
+
 async def test_intercept_returns_confirmation_not_forwarded():
     ex = NotifyingExecutor(_Inner(), enabled=True)
     r = await ex.execute(

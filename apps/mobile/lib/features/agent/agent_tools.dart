@@ -12,7 +12,6 @@ const kBuiltinTools = <ToolInfo>[
   ToolInfo('edit', '改文件(精确替换)'),
   ToolInfo('remember', '主动记忆(把耐久事实写入长期记忆)'),
   ToolInfo('schedule_task', '定时任务(自助排期周期性运行)'),
-  ToolInfo('notify', '提醒用户(系统通知 + 网页弹窗)'),
   ToolInfo('web_search', '联网搜索(获取实时网页信息)'),
   ToolInfo('generate_image', '文生图(按文字描述生成图片)'),
   ToolInfo('edit_image', '图片编辑(按文字描述修改图片)'),
