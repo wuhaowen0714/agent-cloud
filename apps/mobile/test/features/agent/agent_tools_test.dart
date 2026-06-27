@@ -10,6 +10,10 @@ void main() {
     );
   });
 
+  test('notify 不在 app 工具清单(app 无通知接收通道;worker 也按 client=mobile 门控)', () {
+    expect(kBuiltinTools.map((t) => t.name).contains('notify'), isFalse);
+  });
+
   test('enabled_tools 空 → 全部勾选(含 start_navigation)', () {
     expect(enabledToChecked([]).contains('start_navigation'), isTrue);
   });
