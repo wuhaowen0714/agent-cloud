@@ -15,8 +15,20 @@
 
 ---
 
+## 在线体验与下载
+
+| | 入口 | 说明 |
+|---|---|---|
+| 🌐 **Web 在线体验** | **<https://app.sophclaw.icu:18080/>** | 浏览器打开,注册即用,体验完整功能(多 agent / 流式对话 / 文件 / 技能 / 定时任务) |
+| 📱 **Android App** | **[下载最新 APK](https://github.com/wuhaowen0714/agent-cloud/releases/latest)** | 对标 Web 的移动端(Flutter):内置终端 / 文件管理 / 多模态发图 / 应用内 OTA 自动更新 |
+
+> 体验站为公共演示环境,数据可能定期清理、**请勿存放重要信息**;BYO-Key 凭据虽加密存储,体验仍建议用临时 key。
+
+---
+
 ## 目录
 
+- [在线体验与下载](#在线体验与下载)
 - [它是什么](#它是什么)
 - [核心特性](#核心特性)
 - [架构](#架构)
@@ -126,6 +138,7 @@ agent-cloud/
 ├── protos/
 │   └── agent_cloud/v1/ # gRPC 契约:worker.proto · sandbox.proto
 ├── frontend/           # React + Vite SPA(Vite 代理 /api → :8000)
+├── apps/mobile/        # Flutter Android 客户端(对标 web:对话 / 文件 / 终端 / OTA 自动更新)
 ├── deploy/             # sandbox.Dockerfile + entrypoint
 ├── scripts/            # dev_up.sh(一键全栈) · gen_protos.sh · e2e_real_llm.py
 ├── docs/               # 架构 / 路线图 / 设计规格(docs/superpowers/specs)
