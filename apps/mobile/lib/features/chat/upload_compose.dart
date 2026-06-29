@@ -12,18 +12,28 @@ bool isImagePath(String path) => _imageExt.hasMatch(path);
 const _uploadMarker =
     '[Uploaded file(s) in the workspace — read with read_file, or edit images with edit_image]';
 
-/// 把正文 + 上传后的工作区路径组装成 (发给 vision 的图片路径, 最终正文)。
-/// 所有路径(含图片)追加 marker + 路径清单到正文;图片同时进 images[] 走多模态 vision。
-({List<String> images, String content}) composeUpload(
-    String text, List<String> uploadedPaths) {
-  final images = uploadedPaths.where(isImagePath).toList();
-  var content = text;
-  if (uploadedPaths.isNotEmpty) {
-    final refs = '$_uploadMarker\n${uploadedPaths.join('\n')}';
-    content = text.isEmpty ? refs : '$text\n\n$refs';
+/// 把正文 + 选中技能 + 上传附件组装成 (发给 vision 的图片路径, 最终正文)。三段【空行分隔】,
+/// 与 web Composer.send 逐字一致:① 用户正文(含 @路径原样保留,后端靠 read_file 理解)② 技能段
+/// (每技能独占一行 [请使用技能:X],半角冒号——与 parseUserMessage 的 _skillLine 同字符)③ 附件段
+/// (marker + 路径清单)。图片同时进 images[] 走多模态 vision;渲染气泡时 parseUserMessage 摘 chip。
+({List<String> images, String content}) composeMessage(
+    String text, List<String> skills, List<String> uploadedPaths) {
+  final parts = <String>[];
+  if (text.isNotEmpty) parts.add(text);
+  if (skills.isNotEmpty) {
+    parts.add(skills.map((s) => '[请使用技能:$s]').join('\n'));
   }
-  return (images: images, content: content);
+  if (uploadedPaths.isNotEmpty) {
+    parts.add('$_uploadMarker\n${uploadedPaths.join('\n')}');
+  }
+  final images = uploadedPaths.where(isImagePath).toList();
+  return (images: images, content: parts.join('\n\n'));
 }
+
+/// 仅附件(无技能)的便捷封装,保持既有调用点不变。
+({List<String> images, String content}) composeUpload(
+        String text, List<String> uploadedPaths) =>
+    composeMessage(text, const [], uploadedPaths);
 
 // ── 渲染用户气泡时把发送拼进去的「marker + 工作区路径」段摘出来,正文只留用户真正打的字 ──
 // (对标 web chatText.parseUserMessage)。图片已由消息 images 字段(缩略图)单独展示,非图片附件

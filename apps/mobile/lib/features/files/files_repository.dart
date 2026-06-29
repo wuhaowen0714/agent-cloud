@@ -41,6 +41,13 @@ class FilesRepository {
         .toList();
   }
 
+  /// 递归列工作区全部文件的相对路径(仅文件;后端 store.walk 剪掉点目录/node_modules 等)。
+  /// 供 @ 文件引用补全 —— 与单层目录列表 list() 不同。
+  Future<List<String>> indexFiles() async {
+    final r = await _dio.get('/files/index');
+    return (r.data as List).cast<String>();
+  }
+
   Future<void> mkdir(String path) =>
       _dio.post('/files/mkdir', data: {'path': path});
 
@@ -84,3 +91,7 @@ final sentImageProvider = FutureProvider.autoDispose.family<Uint8List, String>(
 final filesListProvider =
     FutureProvider.autoDispose.family<List<FileEntry>, String>(
         (ref, path) => ref.read(filesRepoProvider).list(path));
+
+/// @ 文件引用的工作区文件索引(递归全路径)。autoDispose:离开会话释放,下次进会话重拉。
+final fileIndexProvider = FutureProvider.autoDispose<List<String>>(
+    (ref) => ref.read(filesRepoProvider).indexFiles());

@@ -7,11 +7,15 @@ import 'package:go_router/go_router.dart';
 import 'package:file_selector/file_selector.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/block.dart'; // TextBlock(提取「复制回答」文本)
+import '../../models/skill.dart';
+import '../agent/agent_repository.dart'; // agentRepoProvider / agentSkillsProvider(/ 技能启用)
 import '../files/files_repository.dart';
 import '../sessions/sessions_controller.dart';
 import '../settings/platform_repository.dart';
+import '../settings/skills_page.dart'; // skillsProvider(全部技能池)
 import 'blocks.dart'; // Turn
 import 'chat_controller.dart';
+import 'file_ref.dart'; // atTokenAt / filterPaths(@ 文件引用)
 import 'model_picker.dart';
 import 'turn_blocks.dart';
 import 'upload_compose.dart';
@@ -31,15 +35,22 @@ class _ChatPageState extends ConsumerState<ChatPage>
   final List<XFile> _pending = []; // 待发附件(图片 + 任意文件)
   bool _uploading = false;
   bool _actionBusy = false; // fork/rewind 在途互斥:防双触发(第二次会撞已删消息 409/422)
+  final List<String> _selectedSkills = []; // / 选中的技能(发送拼 [请使用技能:X] marker,发后清)
+  AtToken? _atToken; // 当前 @ 文件引用词(null=无,光标离开 @ 词即消)
+  int? _atDismissed; // Esc 关闭浮层的 @ 词 start;同一词内不再弹,词换位/消失解除
+  bool _slashOpen = false; // / 技能浮层:输入框以 / 开头(单行)时打开
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _input.addListener(_onInputChanged); // / 命令 + @ 文件引用:跟踪文本/光标派生浮层
     if (widget.prefill != null && widget.prefill!.isNotEmpty) {
-      // fork 出来的新会话:把被分叉的提问放回输入框。剥掉附件 marker 只回填正文,否则
-      // 输入框会出现内部提示 + 裸路径,且重发会再拼一遍 marker。
-      _input.text = parseUserMessage(widget.prefill!).body;
+      // fork 出来的新会话:把被分叉的提问放回输入框。剥掉附件 marker 只回填正文(否则输入框
+      // 会出现内部提示 + 裸路径、重发会再拼 marker);技能回填成 chip(对齐 web,技能已启用过)。
+      final parsed = parseUserMessage(widget.prefill!);
+      _input.text = parsed.body;
+      _selectedSkills.addAll(parsed.skills);
     }
   }
 
@@ -79,9 +90,79 @@ class _ChatPageState extends ConsumerState<ChatPage>
     }
   }
 
+  // / 命令 + @ 文件引用:文本/光标变化时派生浮层状态(浮层渲染时才拉数据,这里不发请求)。
+  void _onInputChanged() {
+    final text = _input.text;
+    final sel = _input.selection;
+    final caret = sel.isValid ? sel.baseOffset : text.length;
+    // / 技能:输入框是「/ + 单个词」——无第二个 / 与空白,排除路径 /usr/bin、正则 /re/、多词
+    // 输入。[^/\s] 允许中文,故可 /文档 搜中文技能名(比 web 的 \w 更适配中文技能场景)。
+    final slash = RegExp(r'^/[^/\s]*$').hasMatch(text);
+    var at = atTokenAt(text, caret);
+    // 豁免:同一 @ 词内 Esc 过则不弹;光标离开该词(token 为空或换了 start)即解除豁免。
+    if (_atDismissed != null && (at == null || at.start != _atDismissed)) {
+      _atDismissed = null;
+    }
+    if (at != null && _atDismissed == at.start) at = null;
+    if (slash != _slashOpen || at != _atToken) {
+      setState(() {
+        _slashOpen = slash;
+        _atToken = at;
+      });
+    }
+  }
+
+  /// / 选中技能:先启用到当前 agent(assemble 只注入 enabled_skills——不启用 agent 看不到技能
+  /// 定义,marker 会让它调一个不认识的技能),再加成 chip;发送时拼 [请使用技能:X]。清 / 命令文本。
+  Future<void> _pickSkill(Skill s) async {
+    final aid = _agentId();
+    if (aid == null) {
+      _toast('会话信息未加载,请返回列表再进');
+      return;
+    }
+    try {
+      final enabled = await ref.read(agentSkillsProvider(aid).future);
+      if (!enabled.any((e) => e.id == s.id)) {
+        await ref
+            .read(agentRepoProvider)
+            .setAgentSkills(aid, [...enabled.map((e) => e.id), s.id]);
+        ref.invalidate(agentSkillsProvider(aid));
+      }
+    } catch (e) {
+      _toast('启用技能失败:$e');
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      if (!_selectedSkills.contains(s.name)) _selectedSkills.add(s.name);
+      _slashOpen = false;
+    });
+    _input.clear(); // 清掉 / 命令文本(对齐 web 选技能后清空输入)
+  }
+
+  /// @ 选中文件:把 [start, caret) 替换成「@路径 」,光标落到尾空格后(焦点保持)。
+  void _pickFile(String path) {
+    final at = _atToken;
+    if (at == null) return;
+    final text = _input.text;
+    final caret = _input.selection.baseOffset;
+    final end = (caret >= at.start && caret <= text.length) ? caret : text.length;
+    final insert = '@$path ';
+    final next = text.substring(0, at.start) + insert + text.substring(end);
+    _input.value = TextEditingValue(
+      text: next,
+      selection: TextSelection.collapsed(offset: at.start + insert.length),
+    );
+    setState(() => _atToken = null);
+  }
+
   Future<void> _send() async {
     final text = _input.text.trim();
-    if (text.isEmpty && _pending.isEmpty) return;
+    if (text.isEmpty && _pending.isEmpty) {
+      // 仅选了技能、没正文也没附件:技能只说明"用哪个工具",本身不含需求(对齐 web)。
+      if (_selectedSkills.isNotEmpty) _toast('补充你的需求后再发送');
+      return;
+    }
     var paths = <String>[];
     if (_pending.isNotEmpty) {
       setState(() => _uploading = true);
@@ -97,8 +178,8 @@ class _ChatPageState extends ConsumerState<ChatPage>
       if (!mounted) return;
       setState(() => _uploading = false);
     }
-    // 图片走多模态 vision,其余文件把路径作为文本引用拼进正文(对标 web)。
-    final sent = composeUpload(text, paths);
+    // 正文(含 @路径原样)+ 选中技能(拼 [请使用技能:X] marker)+ 附件,三段组装(对标 web)。
+    final sent = composeMessage(text, _selectedSkills, paths);
     // 有图但当前模型不支持图片 → 自动切到平台 vision 模型(对标 web;后端从 session 读 model,
     // 故先 await patchModel 落库再发)。无 vision 模型可切则提示、保留待发。
     if (sent.images.isNotEmpty && !_modelSupportsVision()) {
@@ -127,7 +208,12 @@ class _ChatPageState extends ConsumerState<ChatPage>
       }
     }
     _input.clear();
-    setState(() => _pending.clear());
+    setState(() {
+      _pending.clear();
+      _selectedSkills.clear();
+      _atToken = null;
+      _atDismissed = null; // 防 @ 豁免跨消息泄漏(对齐 web 审查 M1)
+    });
     ref
         .read(chatControllerProvider(widget.sessionId).notifier)
         .send(sent.content, images: sent.images);
@@ -361,12 +447,14 @@ class _ChatPageState extends ConsumerState<ChatPage>
     final files = (parsed?.attachments ?? const <String>[])
         .where((p) => !isImagePath(p))
         .toList();
+    final skills = parsed?.skills ?? const <String>[];
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         if (userImages.isNotEmpty) _sentImages(userImages),
         if (files.isNotEmpty) _fileChips(files),
+        if (skills.isNotEmpty) _skillChips(skills), // 只读:这条消息选用的技能
         if (body.isNotEmpty) _userBubble(body, onLongPress: () => _copy(body)),
       ],
     );
@@ -541,7 +629,13 @@ class _ChatPageState extends ConsumerState<ChatPage>
           .rollback(t.id);
       await ref.read(sessionsControllerProvider.notifier).refresh();
       if (!mounted) return;
-      _input.text = parseUserMessage(text).body; // 同 prefill:回填正文,不带附件 marker
+      final parsed = parseUserMessage(text);
+      _input.text = parsed.body; // 同 prefill:回填正文,不带附件 marker
+      setState(() {
+        _selectedSkills
+          ..clear()
+          ..addAll(parsed.skills); // 技能回填成 chip(对齐 web)
+      });
       _toast('已回到此处');
     } catch (e) {
       _toast(_errMsg(e, '回滚失败,请重试'));
@@ -591,6 +685,12 @@ class _ChatPageState extends ConsumerState<ChatPage>
       child: SafeArea(
         top: false,
         child: Column(mainAxisSize: MainAxisSize.min, children: [
+          _overlayPanel(), // / 技能 或 @ 文件 浮层(无则不占位)
+          if (_selectedSkills.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
+              child: _skillChips(_selectedSkills, onDelete: _removeSkill),
+            ),
           if (_pending.isNotEmpty) _previewRow(),
           Padding(
             padding: const EdgeInsets.all(8),
@@ -607,7 +707,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
                   minLines: 1,
                   maxLines: 5,
                   decoration: const InputDecoration(
-                    hintText: '说点什么…',
+                    hintText: '说点什么(/ 技能 · @ 文件)…',
                     contentPadding:
                         EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   ),
@@ -621,6 +721,179 @@ class _ChatPageState extends ConsumerState<ChatPage>
       ),
     );
   }
+
+  void _removeSkill(String s) => setState(() => _selectedSkills.remove(s));
+
+  /// 技能 chip:teal-50 底 + teal 边/字 + 🧩。onDelete 非空 = 发送区可删;空 = 气泡只读。
+  Widget _skillChips(List<String> skills, {void Function(String)? onDelete}) =>
+      Align(
+        alignment: Alignment.centerRight,
+        child: Wrap(
+          alignment: WrapAlignment.end,
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final s in skills)
+              Container(
+                padding: EdgeInsets.fromLTRB(9, 5, onDelete != null ? 5 : 9, 5),
+                decoration: BoxDecoration(
+                  color: AppTheme.tealSoft,
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(color: AppTheme.teal.withValues(alpha: 0.4)),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.extension, size: 13, color: AppTheme.tealDark),
+                  const SizedBox(width: 4),
+                  Text(s,
+                      style: const TextStyle(
+                          fontSize: 12.5, color: AppTheme.tealDark)),
+                  if (onDelete != null) ...[
+                    const SizedBox(width: 3),
+                    InkWell(
+                      onTap: () => onDelete(s),
+                      child: const Icon(Icons.close,
+                          size: 14, color: AppTheme.tealDark),
+                    ),
+                  ],
+                ]),
+              ),
+          ],
+        ),
+      );
+
+  // / 技能 或 @ 文件 浮层(输入框上方)。@ 词活跃时压过 / 面板(对齐 web)。
+  Widget _overlayPanel() {
+    if (_atToken != null) return _fileRefPanel(_atToken!);
+    if (_slashOpen) return _skillPanel();
+    return const SizedBox.shrink();
+  }
+
+  Widget _skillPanel() {
+    final query =
+        _input.text.startsWith('/') ? _input.text.substring(1).toLowerCase() : '';
+    void close() => setState(() => _slashOpen = false); // 关浮层(再输入会按 / 规则重判)
+    return ref.watch(skillsProvider).when(
+          loading: () => _panelShell([_panelHint('加载技能…')], onClose: close),
+          error: (_, _) => _panelShell([_panelHint('技能加载失败')], onClose: close),
+          data: (all) {
+            final matched = all
+                .where((s) => s.name.toLowerCase().contains(query))
+                .take(20)
+                .toList();
+            if (matched.isEmpty) {
+              return _panelShell([_panelHint('无匹配技能')], onClose: close);
+            }
+            return _panelShell([
+              for (final s in matched)
+                _panelItem(
+                  icon: Icons.extension,
+                  title: s.name,
+                  subtitle: s.description,
+                  onTap: () => _pickSkill(s),
+                ),
+            ], onClose: close);
+          },
+        );
+  }
+
+  Widget _fileRefPanel(AtToken at) {
+    // 关浮层:清 _atToken 立即收起 + 记 _atDismissed,让同一 @ 词内继续打字也不再弹。
+    void close() => setState(() {
+          _atToken = null;
+          _atDismissed = at.start;
+        });
+    return ref.watch(fileIndexProvider).when(
+          loading: () => _panelShell([_panelHint('索引文件…')], onClose: close),
+          error: (_, _) => _panelShell([_panelHint('文件索引失败')], onClose: close),
+          data: (index) {
+            final matched = filterPaths(index, at.query);
+            if (matched.isEmpty) {
+              return _panelShell([_panelHint('无匹配文件')], onClose: close);
+            }
+            return _panelShell([
+              for (final p in matched)
+                _panelItem(
+                  icon: Icons.insert_drive_file_outlined,
+                  title: _fileName(p),
+                  subtitle: p,
+                  onTap: () => _pickFile(p),
+                ),
+            ], onClose: close);
+          },
+        );
+  }
+
+  Widget _panelShell(List<Widget> children, {VoidCallback? onClose}) =>
+      Container(
+        constraints: const BoxConstraints(maxHeight: 240),
+        margin: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.border),
+        ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (onClose != null)
+            Align(
+              alignment: Alignment.centerRight,
+              child: InkWell(
+                onTap: onClose,
+                borderRadius: BorderRadius.circular(8),
+                child: const Padding(
+                  padding: EdgeInsets.all(6),
+                  child: Icon(Icons.close, size: 16, color: AppTheme.muted),
+                ),
+              ),
+            ),
+          Flexible(
+            child: ListView(
+              shrinkWrap: true,
+              padding: const EdgeInsets.only(bottom: 4),
+              children: children,
+            ),
+          ),
+        ]),
+      );
+
+  Widget _panelItem({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) =>
+      InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(children: [
+            Icon(icon, size: 16, color: AppTheme.teal),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 14, color: AppTheme.ink)),
+                  if (subtitle.isNotEmpty)
+                    Text(subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 11.5, color: AppTheme.muted)),
+                ],
+              ),
+            ),
+          ]),
+        ),
+      );
+
+  Widget _panelHint(String text) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Text(text,
+            style: const TextStyle(fontSize: 13, color: AppTheme.muted)),
+      );
 
   Widget _sendBtn(bool busy) => Material(
         color: busy ? AppTheme.faint : AppTheme.teal,

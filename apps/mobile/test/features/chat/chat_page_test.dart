@@ -109,4 +109,76 @@ void main() {
     expect(find.text('会话正忙,请稍候再试'), findsOneWidget);
     expect(find.textContaining('DioException'), findsNothing);
   });
+
+  testWidgets('输入 / → 弹技能浮层,选中 → 技能 chip + 输入框清空', (tester) async {
+    await _pump(tester, extra: (a) {
+      a.onGet('/skills', (s) => s.reply(200, [
+            {
+              'id': 'sk1',
+              'name': '文档整理',
+              'description': '整理文档',
+              'source': 'builtin',
+              'version': '1'
+            },
+          ]));
+      a.onGet('/agent-configs/a1/skills', (s) => s.reply(200, const []));
+      a.onPut('/agent-configs/a1/skills', (s) => s.reply(200, null),
+          data: {
+            'skill_ids': ['sk1']
+          });
+    });
+    await tester.enterText(find.byType(TextField), '/');
+    await tester.pumpAndSettle();
+    expect(find.text('文档整理'), findsOneWidget); // 技能浮层条目
+
+    await tester.tap(find.text('文档整理'));
+    await tester.pumpAndSettle();
+    // 选中后:输入框清空,技能成 chip(仍能找到「文档整理」——这次是 chip)
+    expect(tester.widget<TextField>(find.byType(TextField)).controller!.text, '');
+    expect(find.text('文档整理'), findsOneWidget);
+  });
+
+  testWidgets('输入 @词 → 弹文件浮层,选中 → 插入 @路径 到输入框', (tester) async {
+    await _pump(tester, extra: (a) {
+      a.onGet('/files/index',
+          (s) => s.reply(200, ['notes/plan.md', 'src/main.dart']));
+    });
+    await tester.enterText(find.byType(TextField), '@plan');
+    await tester.pumpAndSettle();
+    expect(find.text('plan.md'), findsOneWidget); // 浮层项 title=basename
+
+    await tester.tap(find.text('plan.md'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        '@notes/plan.md ');
+  });
+
+  testWidgets('正文以 / 开头但是路径(/usr/bin)→ 不误弹技能浮层', (tester) async {
+    await _pump(tester, extra: (a) {
+      a.onGet('/skills', (s) => s.reply(200, [
+            {
+              'id': 'sk1',
+              'name': '文档整理',
+              'description': 'x',
+              'source': 'b',
+              'version': '1'
+            },
+          ]));
+    });
+    await tester.enterText(find.byType(TextField), '/usr/bin');
+    await tester.pumpAndSettle();
+    expect(find.text('文档整理'), findsNothing); // 含第二个 / → 不触发技能浮层
+  });
+
+  testWidgets('@ 浮层点 ✕ → 关闭', (tester) async {
+    await _pump(tester, extra: (a) {
+      a.onGet('/files/index', (s) => s.reply(200, ['notes/plan.md']));
+    });
+    await tester.enterText(find.byType(TextField), '@plan');
+    await tester.pumpAndSettle();
+    expect(find.text('plan.md'), findsOneWidget); // 浮层在
+    await tester.tap(find.byIcon(Icons.close).first); // 点 ✕
+    await tester.pumpAndSettle();
+    expect(find.text('plan.md'), findsNothing); // 浮层已关闭
+  });
 }

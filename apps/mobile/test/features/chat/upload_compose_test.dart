@@ -56,6 +56,48 @@ void main() {
     expect(p.attachments, ['uploads/shot.jpg']);
   });
 
+  group('composeMessage(三段:正文 + 技能 + 附件)', () {
+    test('技能段:每技能独占一行 [请使用技能:X]', () {
+      final r = composeMessage('帮我整理报告', ['文档整理', '数据分析'], []);
+      expect(r.images, isEmpty);
+      expect(r.content, '帮我整理报告\n\n[请使用技能:文档整理]\n[请使用技能:数据分析]');
+    });
+
+    test('正文 + 技能 + 附件三段空行分隔', () {
+      final r = composeMessage('看这个', ['翻译'], ['uploads/a.pdf']);
+      expect(
+          r.content,
+          '看这个\n\n[请使用技能:翻译]\n\n'
+          '[Uploaded file(s) in the workspace — read with read_file, or edit images with edit_image]\n'
+          'uploads/a.pdf');
+    });
+
+    test('仅技能、无正文无附件 → 只有技能段', () {
+      expect(composeMessage('', ['整理'], []).content, '[请使用技能:整理]');
+    });
+
+    test('@路径原样留正文(@ 不拼任何 marker)', () {
+      expect(composeMessage('看 @uploads/x.txt 这个', [], []).content,
+          '看 @uploads/x.txt 这个');
+    });
+
+    // 关键往返:技能 marker 拼装必须能被 parseUserMessage 摘回(半角冒号字符两端一致才行)。
+    test('composeMessage → parseUserMessage 技能往返还原', () {
+      final c = composeMessage('整理一下', ['文档整理'], ['uploads/r.pdf']);
+      final p = parseUserMessage(c.content);
+      expect(p.body, '整理一下');
+      expect(p.skills, ['文档整理']);
+      expect(p.attachments, ['uploads/r.pdf']);
+    });
+
+    test('composeUpload 等价于无技能的 composeMessage', () {
+      final a = composeUpload('hi', ['uploads/x.png']);
+      final b = composeMessage('hi', const [], ['uploads/x.png']);
+      expect(a.content, b.content);
+      expect(a.images, b.images);
+    });
+  });
+
   group('parseUserMessage', () {
     const marker =
         '[Uploaded file(s) in the workspace — read with read_file, or edit images with edit_image]';
