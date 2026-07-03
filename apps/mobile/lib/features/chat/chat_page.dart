@@ -45,6 +45,13 @@ class _ChatPageState extends ConsumerState<ChatPage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _input.addListener(_onInputChanged); // / 命令 + @ 文件引用:跟踪文本/光标派生浮层
+    // 重进聊天页:controller(family,不随页面销毁)可能还压着排队消息且回合已在后台结束
+    // → 补一次队列续发触发(idle+非空才动作,幂等)。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        ref.read(chatControllerProvider(widget.sessionId).notifier).kickQueue();
+      }
+    });
     if (widget.prefill != null && widget.prefill!.isNotEmpty) {
       // fork 出来的新会话:把被分叉的提问放回输入框。剥掉附件 marker 只回填正文(否则输入框
       // 会出现内部提示 + 裸路径、重发会再拼 marker);技能回填成 chip(对齐 web,技能已启用过)。
@@ -676,7 +683,8 @@ class _ChatPageState extends ConsumerState<ChatPage>
       );
 
   Widget _composer(ChatState state) {
-    final busy = state.status == ChatStatus.streaming || _uploading;
+    // 生成中不再锁输入:发送=排队(对标 Claude Code),仅上传附件在途时短暂禁用。
+    final streaming = state.status == ChatStatus.streaming;
     return Container(
       decoration: const BoxDecoration(
         color: AppTheme.surface,
@@ -686,6 +694,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
         top: false,
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           _overlayPanel(), // / 技能 或 @ 文件 浮层(无则不占位)
+          if (state.queued.isNotEmpty) _queuedRow(state.queued),
           if (_selectedSkills.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
@@ -696,7 +705,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
             padding: const EdgeInsets.all(8),
             child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
               IconButton(
-                onPressed: busy ? null : _pickFiles,
+                onPressed: _uploading ? null : _pickFiles,
                 icon: const Icon(Icons.attach_file),
                 color: AppTheme.muted,
                 tooltip: '添加文件',
@@ -706,21 +715,86 @@ class _ChatPageState extends ConsumerState<ChatPage>
                   controller: _input,
                   minLines: 1,
                   maxLines: 5,
-                  decoration: const InputDecoration(
-                    hintText: '说点什么(/ 技能 · @ 文件)…',
-                    contentPadding:
-                        EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: InputDecoration(
+                    hintText: streaming
+                        ? '继续输入,发送将加入队列…'
+                        : '说点什么(/ 技能 · @ 文件)…',
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 10),
                   ),
                 ),
               ),
               const SizedBox(width: 8),
-              _sendBtn(busy),
+              if (streaming) ...[_stopBtn(), const SizedBox(width: 8)],
+              _sendBtn(streaming),
             ]),
           ),
         ]),
       ),
     );
   }
+
+  /// 排队消息行:生成中排队的消息(队首下一个发出),可单条删除。
+  Widget _queuedRow(List<QueuedMessage> queued) => Padding(
+        padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var i = 0; i < queued.length; i++)
+              Container(
+                margin: const EdgeInsets.only(bottom: 4),
+                padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF1F3F4),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Row(children: [
+                  const Icon(Icons.schedule, size: 14, color: AppTheme.muted),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Builder(builder: (_) {
+                      final body = parseUserMessage(queued[i].content).body;
+                      return Text(
+                        body.isEmpty ? '(附件)' : body,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 12.5, color: Colors.black54),
+                      );
+                    }),
+                  ),
+                  InkWell(
+                    onTap: () => ref
+                        .read(chatControllerProvider(widget.sessionId).notifier)
+                        .removeQueued(i),
+                    child: const Padding(
+                      padding: EdgeInsets.all(3),
+                      child:
+                          Icon(Icons.close, size: 14, color: AppTheme.muted),
+                    ),
+                  ),
+                ]),
+              ),
+          ],
+        ),
+      );
+
+  /// 停止按钮:取消当前回合(排队消息一并清除)。
+  Widget _stopBtn() => Material(
+        color: const Color(0xFFFEE2E2), // red-100
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => ref
+              .read(chatControllerProvider(widget.sessionId).notifier)
+              .stopTurn(),
+          child: Padding(
+            padding: const EdgeInsets.all(11),
+            child: Icon(Icons.stop_rounded,
+                color: Colors.red.shade600, size: 20),
+          ),
+        ),
+      );
 
   void _removeSkill(String s) => setState(() => _selectedSkills.remove(s));
 
@@ -895,12 +969,12 @@ class _ChatPageState extends ConsumerState<ChatPage>
             style: const TextStyle(fontSize: 13, color: AppTheme.muted)),
       );
 
-  Widget _sendBtn(bool busy) => Material(
-        color: busy ? AppTheme.faint : AppTheme.teal,
+  Widget _sendBtn(bool streaming) => Material(
+        color: _uploading ? AppTheme.faint : AppTheme.teal,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
-          onTap: busy ? null : _send,
+          onTap: _uploading ? null : _send, // 生成中照发:controller 守卫转排队
           child: Padding(
             padding: const EdgeInsets.all(11),
             child: _uploading
@@ -909,7 +983,8 @@ class _ChatPageState extends ConsumerState<ChatPage>
                     height: 20,
                     child: CircularProgressIndicator(
                         strokeWidth: 2, color: Colors.white))
-                : const Icon(Icons.arrow_upward, color: Colors.white, size: 20),
+                : Icon(streaming ? Icons.playlist_add : Icons.arrow_upward,
+                    color: Colors.white, size: 20),
           ),
         ),
       );

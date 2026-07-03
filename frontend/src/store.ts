@@ -21,6 +21,10 @@ export interface LiveTurn {
 // 这样「在 A 压缩、切到 B、压缩完成」的反馈只认发起压缩的那个会话,绝不串到 B)。
 export type CompactState = { phase: "running" } | { phase: "result"; result: CompactResult }
 
+// 生成中排队的消息(对标 Claude Code):text 已拼好技能/附件 marker,images 为已上传路径。
+// 按 sessionId 存(Composer 不按会话 remount;切会话各自保留,回合正常结束依次自动发出)。
+export type QueuedMessage = { text: string; images: string[] }
+
 interface AppState {
   user: User | null
   userId: string | null // 由 user 派生(user?.id),组件/query-key 仍按 userId 用
@@ -28,6 +32,7 @@ interface AppState {
   sessionId: string | null
   live: LiveTurn | null
   compactions: Record<string, CompactState> // 按 sessionId;切会话不清(见 CompactState 注释)
+  queues: Record<string, QueuedMessage[]> // 生成中排队的消息,按 sessionId
   composerDraft: string | null // 待回填到输入框的文本(回滚/fork 触发);Composer 消费一次即清
   pendingSkill: string | null // /skills 选中的技能名,待 Composer 加成 chip(一次性信号,消费即清)
   fileDrawerOpen: boolean
@@ -44,6 +49,10 @@ interface AppState {
   startCompaction: (sessionId: string) => void
   finishCompaction: (sessionId: string, result: CompactResult) => void
   clearCompaction: (sessionId: string) => void
+  enqueueMessage: (sessionId: string, msg: QueuedMessage) => void
+  removeQueued: (sessionId: string, index: number) => void
+  takeQueuedFirst: (sessionId: string) => QueuedMessage | null
+  clearQueue: (sessionId: string) => void
   setComposerDraft: (text: string | null) => void
   setPendingSkill: (name: string | null) => void
   toggleFileDrawer: () => void
@@ -63,6 +72,7 @@ export const useStore = create<AppState>((set, get) => ({
   sessionId: localStorage.getItem("ac.sessionId"),
   live: null,
   compactions: {},
+  queues: {},
   composerDraft: null,
   pendingSkill: null,
   fileDrawerOpen: false,
@@ -77,7 +87,7 @@ export const useStore = create<AppState>((set, get) => ({
     if (prev !== null && prev !== uid) {
       localStorage.removeItem("ac.sessionId")
       localStorage.removeItem("ac.agentId")
-      set({ user, userId: uid, agentId: null, sessionId: null, live: null, compactions: {}, composerDraft: null, settingsOpen: false })
+      set({ user, userId: uid, agentId: null, sessionId: null, live: null, compactions: {}, queues: {}, composerDraft: null, settingsOpen: false })
     } else {
       set({ user, userId: uid })
     }
@@ -94,6 +104,7 @@ export const useStore = create<AppState>((set, get) => ({
       sessionId: null,
       live: null,
       compactions: {},
+      queues: {},
       composerDraft: null,
       fileDrawerOpen: false,
       terminalOpen: false,
@@ -131,6 +142,28 @@ export const useStore = create<AppState>((set, get) => ({
     set((s) => {
       const { [sessionId]: _, ...rest } = s.compactions
       return { compactions: rest }
+    }),
+  enqueueMessage: (sessionId, msg) =>
+    set((s) => ({
+      queues: { ...s.queues, [sessionId]: [...(s.queues[sessionId] ?? []), msg] },
+    })),
+  removeQueued: (sessionId, index) =>
+    set((s) => {
+      const q = s.queues[sessionId] ?? []
+      if (index < 0 || index >= q.length) return {}
+      return { queues: { ...s.queues, [sessionId]: q.filter((_, i) => i !== index) } }
+    }),
+  // 取队首并出队(原子:读 + 删一步完成,防收尾并发下重复取同一条)。
+  takeQueuedFirst: (sessionId) => {
+    const q = get().queues[sessionId] ?? []
+    if (q.length === 0) return null
+    set((s) => ({ queues: { ...s.queues, [sessionId]: (s.queues[sessionId] ?? []).slice(1) } }))
+    return q[0]
+  },
+  clearQueue: (sessionId) =>
+    set((s) => {
+      const { [sessionId]: _, ...rest } = s.queues
+      return { queues: rest }
     }),
   toggleFileDrawer: () => set((s) => ({ fileDrawerOpen: !s.fileDrawerOpen })),
   toggleTerminal: () => set((s) => ({ terminalOpen: !s.terminalOpen })),

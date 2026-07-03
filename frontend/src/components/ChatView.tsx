@@ -19,6 +19,8 @@ export function ChatView() {
   const sessionId = useStore((s) => s.sessionId)
   const userId = useStore((s) => s.userId)
   const live = useStore((s) => s.live)
+  const queues = useStore((s) => s.queues)
+  const compactions = useStore((s) => s.compactions)
   const startLive = useStore((s) => s.startLive)
   const setLive = useStore((s) => s.setLive)
   const clearLive = useStore((s) => s.clearLive)
@@ -161,6 +163,20 @@ export function ChatView() {
     }
   }, [sessionId])
 
+  // 队列续发(对标 Claude Code)——单一声明式触发点:当前会话完全空闲(无 live、无压缩)
+  // 且有排队消息 → 取队首发出。统一覆盖三类"收尾":回合正常收尾(clearLive → live=null)、
+  // 切回带队列的 idle 会话、手动 /compact 完成(compacting 变 false;审查 M1 变体)。
+  // live 非 null(含 error)不触发——出错暂停、队列保留;切走再回(setSession 清 live)视为
+  // 重新进入、恢复续发。条件已排除 onSend 的 streaming/compacting 重入守卫,take 后不会被丢。
+  const queuedCount = sessionId ? (queues[sessionId]?.length ?? 0) : 0
+  const compactingNow = sessionId ? compactions[sessionId]?.phase === "running" : false
+  useEffect(() => {
+    if (!sessionId || live !== null || compactingNow || queuedCount === 0) return
+    const next = useStore.getState().takeQueuedFirst(sessionId)
+    if (next) void onSend(next.text, next.images)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onSend 每渲染新引用;条件幂等
+  }, [sessionId, live, compactingNow, queuedCount])
+
   if (!sessionId) {
     return (
       <div className="flex flex-1 items-center justify-center text-slate-400">
@@ -186,7 +202,10 @@ export function ChatView() {
   }
 
   const onStop = () => {
-    if (sessionId) void cancelTurn(sessionId)
+    if (!sessionId) return
+    // 停止 = 止损:排队消息一并清除(自动续发违背停止意图)。
+    useStore.getState().clearQueue(sessionId)
+    void cancelTurn(sessionId)
   }
 
   // 手动重试:重发本回合的用户消息(瞬时错误自动重试耗尽后给用户的兜底入口)。

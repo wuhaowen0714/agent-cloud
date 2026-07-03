@@ -63,6 +63,7 @@ afterEach(() => {
     sessionId: null,
     live: null,
     compactions: {},
+    queues: {},
     composerDraft: null,
     pendingSkill: null,
     settingsOpen: false,
@@ -213,13 +214,14 @@ describe("压缩反馈(per-session)", () => {
     type("/compact")
     fireEvent.keyDown(box(), { key: "Enter" })
     expect(await screen.findByText("正在压缩上下文…")).toBeInTheDocument()
-    expect(box()).toBeDisabled()
+    // 压缩中不再锁输入:可继续打字,发送转入队列(对标 Claude Code)
+    expect(box()).not.toBeDisabled()
+    expect(box()).toHaveAttribute("placeholder", "正在压缩上下文(发送将加入队列)…")
     await act(async () => {
       finish()
     })
     expect(await screen.findByText("已压缩当前会话上下文")).toBeInTheDocument()
     expect(screen.queryByText("正在压缩上下文…")).not.toBeInTheDocument()
-    expect(box()).not.toBeDisabled()
   })
 
   it("不串台:A 压缩中切到 B → B 无提示且可输入;A 完成时在 B 不弹;切回 A 才弹结果", async () => {
@@ -543,5 +545,52 @@ describe("技能选用(chip)", () => {
     fireEvent.click(screen.getByText("发送"))
     expect(onSend).not.toHaveBeenCalled()
     expect(await screen.findByText("补充需求后再发送")).toBeInTheDocument()
+  })
+})
+
+describe("消息队列(生成中排队)", () => {
+  it("生成中(disabled)发送 → 入队显示、可继续输入,不直接 onSend;点 × 移除", async () => {
+    const { onSend } = setup({ disabled: true })
+    expect(box()).not.toBeDisabled() // 生成中不锁输入
+    expect(box()).toHaveAttribute("placeholder", "生成中,发送将加入队列…")
+    type("排队的问题")
+    fireEvent.click(screen.getByText("排队"))
+    expect(onSend).not.toHaveBeenCalled()
+    expect(useStore.getState().queues["s1"]).toEqual([{ text: "排队的问题", images: [] }])
+    expect(await screen.findByText("排队的问题")).toBeInTheDocument() // 队列行
+    expect(box()).toHaveValue("") // 入队后输入框清空
+
+    fireEvent.click(screen.getByTitle("从队列移除"))
+    expect(useStore.getState().queues["s1"]).toEqual([])
+  })
+
+  it("空闲时发送照旧直发,不入队", () => {
+    const { onSend } = setup()
+    type("正常发送")
+    fireEvent.click(screen.getByText("发送"))
+    expect(onSend).toHaveBeenCalledWith("正常发送", [])
+    expect(useStore.getState().queues["s1"] ?? []).toEqual([])
+  })
+
+  it("生成中同时显示停止与排队按钮", () => {
+    setup({ disabled: true })
+    expect(screen.getByText("停止")).toBeInTheDocument()
+    expect(screen.getByText("排队")).toBeInTheDocument()
+  })
+})
+
+describe("store 队列原语", () => {
+  it("enqueue/takeFirst/clear 按会话隔离", () => {
+    const st = useStore.getState()
+    st.enqueueMessage("sA", { text: "a1", images: [] })
+    st.enqueueMessage("sA", { text: "a2", images: ["x.png"] })
+    st.enqueueMessage("sB", { text: "b1", images: [] })
+    expect(useStore.getState().queues["sA"]).toHaveLength(2)
+    expect(useStore.getState().takeQueuedFirst("sA")).toEqual({ text: "a1", images: [] })
+    expect(useStore.getState().queues["sA"]).toEqual([{ text: "a2", images: ["x.png"] }])
+    expect(useStore.getState().queues["sB"]).toHaveLength(1) // B 不受影响
+    useStore.getState().clearQueue("sA")
+    expect(useStore.getState().queues["sA"]).toBeUndefined()
+    expect(useStore.getState().takeQueuedFirst("sA")).toBeNull()
   })
 })

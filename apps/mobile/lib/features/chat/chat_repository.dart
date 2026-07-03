@@ -68,6 +68,10 @@ class ChatRepository {
     return parseSse((r.data as ResponseBody).stream);
   }
 
+  /// 主动停止正在跑的回合(服务端取消 runner;幂等:无在跑回合也 204)。
+  Future<void> cancelTurn(String sessionId) =>
+      _dio.post('/sessions/$sessionId/turn/cancel');
+
   /// 回滚到某条用户消息「之前」:删它及之后的全部消息(销毁性,与回合同一把会话锁:在跑 →
   /// 409)。返回该用户消息的文本,供 UI 回填输入框重问。
   Future<String> rollback(String sessionId, String messageId) async {

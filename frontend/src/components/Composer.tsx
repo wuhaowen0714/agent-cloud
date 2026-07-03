@@ -65,8 +65,11 @@ export function Composer({
   const setPendingSkill = useStore((s) => s.setPendingSkill)
   const compaction = sessionId ? compactions[sessionId] : undefined
   const compacting = compaction?.phase === "running"
-  // 压缩进行中等同回合占用:禁用输入,发不出消息 → 不会撞同会话 409。
-  const busy = disabled || compacting
+  // 回合占用(生成中/压缩中)不再锁输入:此时发送 = 排队(对标 Claude Code),回合正常
+  // 结束后由 ChatView 依次自动发出。仅 uploading(附件上传在途)短暂限制发送/再上传。
+  const midTurn = disabled || compacting
+  const queues = useStore((s) => s.queues)
+  const queued = sessionId ? (queues[sessionId] ?? []) : []
 
   // 切会话先清掉上个会话遗留的通知卡(notice 是 Composer 本地态、不随会话):否则一条压缩结果
   // flash 会滞留到切过去的会话(≤4s)。必须声明在下面的结果 effect 之前——effect 按声明序执行,
@@ -167,7 +170,7 @@ export function Composer({
   // 无匹配则两者都不显示(正常打字),避免引用中途斜杠建议突然顶上来。
   const parsed = parseInput(text)
   const entries: Entry[] = []
-  if (atToken && !busy) {
+  if (atToken && !uploading) {
     if (atDismissed !== atToken.start) {
       if (indexLoading) {
         // 占位条目(无操作):加载中 Enter 不该把半截 "@app" 直通发出去(审查 L1)
@@ -184,7 +187,7 @@ export function Composer({
         }
       }
     }
-  } else if (!dismissed && !busy) {
+  } else if (!dismissed && !uploading) {
     if (parsed.mode === "command") {
       for (const cmd of matchCommands(parsed.prefix)) {
         entries.push({
@@ -249,7 +252,7 @@ export function Composer({
 
   // 上传任意文件到工作区 upload/,记录路径;发送时随消息带上(agent 据类型用 read_file/edit_image 处理)。
   const uploadAttachments = async (files: File[]) => {
-    if (!files.length || busy) return
+    if (!files.length || uploading) return
     setUploading(true)
     try {
       const entries = await api.uploadFiles("upload", files)
@@ -262,7 +265,7 @@ export function Composer({
   }
 
   const send = async () => {
-    if (busy) return
+    if (uploading) return
     const t = text.trim()
     // 仅选了技能、没正文也没附件:技能只说明"用哪个工具"、本身不含需求,提示补充后再发(与 hint 一致)。
     if (!t && attachments.length === 0) {
@@ -299,7 +302,12 @@ export function Composer({
           .join("\n")}`,
       )
     const full = parts.join("\n\n")
-    onSend(full, imagePaths)
+    if (midTurn && sessionId) {
+      // 回合进行中:入队(回合正常结束后 ChatView 取队首自动发出);清空逻辑与直发共用。
+      useStore.getState().enqueueMessage(sessionId, { text: full, images: imagePaths })
+    } else {
+      onSend(full, imagePaths)
+    }
     setText("")
     setAttachments([])
     setSelectedSkills([])
@@ -319,7 +327,7 @@ export function Composer({
         }`}
         onDragOver={(e) => {
           e.preventDefault()
-          if (!busy) setDragOver(true)
+          if (!uploading) setDragOver(true)
         }}
         onDragLeave={(e) => {
           // dragleave 会在跨越子元素边界时冒泡触发;仅当指针真正离开整个拖放区
@@ -333,6 +341,27 @@ export function Composer({
           void uploadAttachments(Array.from(e.dataTransfer.files ?? []))
         }}
       >
+      {queued.length > 0 && sessionId && (
+        <div className="mb-2 space-y-1" data-testid="queued-list">
+          {queued.map((q, i) => (
+            <div
+              key={`${i}-${q.text.slice(0, 16)}`}
+              className="flex items-center gap-2 rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs text-slate-600"
+            >
+              <span className="shrink-0 text-slate-400">⏳</span>
+              <span className="min-w-0 flex-1 truncate">{parseUserMessage(q.text).body || "(附件)"}</span>
+              <button
+                type="button"
+                className="shrink-0 rounded p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-600"
+                title="从队列移除"
+                onClick={() => useStore.getState().removeQueued(sessionId, i)}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       {selectedSkills.length > 0 && (
         <div className="mb-2">
           <SkillChips
@@ -381,11 +410,14 @@ export function Composer({
           ref={taRef}
           className="min-h-[44px] flex-1"
           placeholder={
-            compacting ? "正在压缩上下文…" : disabled ? "生成中…" : "说点什么(/ 命令,@ 引用文件,Enter 发送)"
+            compacting
+              ? "正在压缩上下文(发送将加入队列)…"
+              : disabled
+                ? "生成中,发送将加入队列…"
+                : "说点什么(/ 命令,@ 引用文件,Enter 发送)"
           }
           rows={1}
           value={text}
-          disabled={busy}
           onChange={(e) => {
             const v = e.target.value
             const c = e.target.selectionStart ?? v.length
@@ -440,26 +472,25 @@ export function Composer({
         <Button
           variant="secondary"
           className="h-11 px-3"
-          disabled={busy || uploading}
+          disabled={uploading}
           title="上传文件"
           onClick={() => fileInputRef.current?.click()}
         >
           {uploading ? "…" : "＋"}
         </Button>
-        {disabled && onStop ? (
+        {disabled && onStop && (
           <Button variant="secondary" className="h-11" onClick={onStop}>
             停止
           </Button>
-        ) : (
-          <Button className="h-11" disabled={busy} onClick={() => void send()}>
-            发送
-          </Button>
         )}
+        <Button className="h-11" disabled={uploading} onClick={() => void send()}>
+          {midTurn ? "排队" : "发送"}
+        </Button>
       </div>
       {/* 左下模型 chip(图一):provider + model 两栏,即点即切,落到当前 session。
           streaming 中跟随输入区一起禁用;失败走 flash 反馈。 */}
       {currentSession && (
-        <div className={`mt-1.5 flex items-center ${busy ? "pointer-events-none opacity-50" : ""}`}>
+        <div className={`mt-1.5 flex items-center ${midTurn ? "pointer-events-none opacity-50" : ""}`}>
           <ModelMenu
             variant="chip"
             model={currentSession.model}

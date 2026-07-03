@@ -1,3 +1,5 @@
+import 'dart:async'; // unawaited:队列自动续发不阻塞收尾
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../auth/auth_controller.dart'; // dioProvider
@@ -10,6 +12,9 @@ import '../sessions/sessions_controller.dart'; // sessionsControllerProvider:刷
 
 enum ChatStatus { loading, idle, streaming, error }
 
+/// 排队待发的消息(content 已含技能/附件 marker,images 为已上传的工作区相对路径)。
+typedef QueuedMessage = ({String content, List<String> images});
+
 class ChatState {
   final List<Turn> turns; // 历史回合
   final List<Block> live; // 当前流式回合的 blocks
@@ -19,6 +24,7 @@ class ChatState {
   final String? error;
   final String? failedMessage; // 发起失败的消息(可重试)
   final bool compacting; // 回合前压缩进行中(「正在生成」文案切换为「正在压缩上下文」)
+  final List<QueuedMessage> queued; // 生成中排队的消息:回合正常结束后依次自动发出
 
   const ChatState({
     this.turns = const [],
@@ -29,6 +35,7 @@ class ChatState {
     this.error,
     this.failedMessage,
     this.compacting = false,
+    this.queued = const [],
   });
 
   ChatState copyWith({
@@ -41,6 +48,7 @@ class ChatState {
     String? failedMessage,
     bool clearFailed = false,
     bool? compacting,
+    List<QueuedMessage>? queued,
   }) =>
       ChatState(
         turns: turns ?? this.turns,
@@ -52,6 +60,7 @@ class ChatState {
         failedMessage:
             clearFailed ? null : (failedMessage ?? this.failedMessage),
         compacting: compacting ?? this.compacting,
+        queued: queued ?? this.queued,
       );
 }
 
@@ -83,7 +92,13 @@ class ChatController extends FamilyNotifier<ChatState, String> {
   }
 
   /// 发消息:发起失败 → 可重试;已发起后中途断 → 由 retryResume() 走 resume。
+  /// 回合进行中调用 = 排队(对标 Claude Code):当前回合正常结束后依次自动发出。
   Future<void> send(String content, {List<String> images = const []}) async {
+    if (state.status == ChatStatus.streaming) {
+      state = state.copyWith(
+          queued: [...state.queued, (content: content, images: images)]);
+      return;
+    }
     final wasFirst = state.turns.isEmpty; // 首回合:后端首问即生成标题,发完轮询刷出来
     state = state.copyWith(
         live: const [],
@@ -109,6 +124,36 @@ class ChatController extends FamilyNotifier<ChatState, String> {
   Future<void> retry() async {
     final msg = state.failedMessage;
     if (msg != null) await send(msg);
+  }
+
+  /// 空闲且有排队消息 → 立即取队首发出(审查 M1:队列消费点原只在回合流收尾,覆盖不到
+  /// 「切走再切回、回合已在后台结束」的场景;进入聊天页时调用本方法补上这个触发点)。
+  void kickQueue() {
+    if (state.status != ChatStatus.idle || state.queued.isEmpty) return;
+    final next = state.queued.first;
+    state = state.copyWith(queued: state.queued.sublist(1));
+    unawaited(send(next.content, images: next.images));
+  }
+
+  /// 删除一条排队中的消息。
+  void removeQueued(int index) {
+    if (index < 0 || index >= state.queued.length) return;
+    final next = [...state.queued]..removeAt(index);
+    state = state.copyWith(queued: next);
+  }
+
+  /// 停止当前回合:清空排队(停止=止损,自动续发违背用户意图)→ 掐本地流 → 服务端取消
+  /// (幂等 204)→ 刷历史收尾(半截回复未落库,user 消息保留,assemble 会剥未答 user)。
+  Future<void> stopTurn() async {
+    state = state.copyWith(queued: const []);
+    _cancel?.cancel(); // 本地流先停:其 isCancel 分支静默返回,不再 feed/收尾
+    try {
+      await _repo.cancelTurn(_sid);
+    } catch (_) {
+      // 服务端取消失败(网络等):本地已停;若回合实际仍在跑,后续发消息由 409 重试等锁,
+      // 或回前台 resume 对齐,不在此扩大失败面。
+    }
+    await _finishTurn();
   }
 
   /// 回到某条用户消息「之前」:后端删它及之后的消息,本地刷历史拿最新 turns;返回该消息文本
@@ -219,7 +264,7 @@ class ChatController extends FamilyNotifier<ChatState, String> {
         _ => null,
       };
 
-  /// 回合收尾:刷历史(拿落库的最终结果)+ 清 live。
+  /// 回合收尾:刷历史(拿落库的最终结果)+ 清 live;有排队消息则取队首自动续发。
   Future<void> _finishTurn() async {
     try {
       final msgs = await _repo.history(_sid);
@@ -230,7 +275,14 @@ class ChatController extends FamilyNotifier<ChatState, String> {
           liveUserImages: const [],
           status: ChatStatus.idle,
           compacting: false);
+      if (state.queued.isNotEmpty) {
+        final next = state.queued.first;
+        state = state.copyWith(queued: state.queued.sublist(1));
+        // 不 await:收尾归收尾,续发是新回合(send 内部 streaming 守卫防竞态重入)。
+        unawaited(send(next.content, images: next.images));
+      }
     } catch (_) {
+      // 刷历史失败(网络抖动):只收尾状态,不自动续发(大概率也会失败,留给用户手动)。
       state = state.copyWith(status: ChatStatus.idle, compacting: false);
     }
   }
