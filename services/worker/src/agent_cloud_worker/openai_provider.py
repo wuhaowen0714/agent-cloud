@@ -14,6 +14,7 @@ from agent_cloud_common import (
     Message,
     Role,
     ToolCall,
+    ToolResult,
     ToolSpec,
     Usage,
 )
@@ -135,12 +136,71 @@ def to_openai_tools(tools: list[ToolSpec]) -> list[dict]:
     ]
 
 
+def sanitize_tool_pairing(messages: list[Message]) -> list[Message]:
+    """修复被折叠/裁剪边界切断的 assistant(tool_calls) ↔ tool 配对(P1 防御层)。
+
+    压缩折叠、force_compact(keep_recent=1)或异常历史形态都可能产生:①孤儿 tool 结果
+    (发起它的 assistant 已被折进摘要)②带 tool_calls 却丢了结果的 assistant。严格的
+    OpenAI 兼容端点对两者都直接 400(tool 消息必须紧跟带对应 tool_calls 的 assistant、
+    每个 tool_call 必须有结果)。backend 折叠边界已按回合对齐(第一层),这里兜住其余
+    路径(异常形态/旧数据/摘要请求的折叠段)。正常配对的历史原样直通,零改动。
+    - 孤儿 tool 结果 → 降级为 user 文本(保留内容供模型参考,不再当 tool 协议消息);
+    - 缺结果的 tool_call → 补一条合成 tool 结果说明被折叠。
+    """
+    out: list[Message] = []
+    pending: set[str] = set()  # 最近一条 assistant 尚未拿到结果的 call_id
+    deferred: list[Message] = []  # 孤儿降级出的 user 文本,等当前 tool 段闭合后再插
+
+    def _close_segment() -> None:
+        # 闭合当前 assistant 的 tool 结果段:先给缺失的 call_id 补占位结果,再放孤儿降级
+        # 文本——孤儿 user 绝不插进「assistant(tool_calls) 与其全部结果」之间(那同样违反
+        # 严格端点的紧邻规则,防御层自己不能制造非法序列)。
+        if pending:
+            out.append(
+                Message(
+                    role=Role.TOOL,
+                    tool_results=[
+                        ToolResult(
+                            call_id=cid,
+                            content="[tool result omitted: folded away by context compaction]",
+                        )
+                        for cid in sorted(pending)
+                    ],
+                )
+            )
+            pending.clear()
+        out.extend(deferred)
+        deferred.clear()
+
+    for m in messages:
+        if m.role == Role.TOOL:
+            legit = [r for r in m.tool_results if r.call_id in pending]
+            orphan = [r for r in m.tool_results if r.call_id not in pending]
+            if legit:
+                pending.difference_update(r.call_id for r in legit)
+                out.append(Message(role=Role.TOOL, text=m.text, tool_results=legit))
+            for r in orphan:
+                err = " (error)" if r.is_error else ""
+                deferred.append(
+                    Message(role=Role.USER, text=f"[earlier tool result{err}] {r.content}")
+                )
+            if not pending:
+                _close_segment()  # 本段结果齐了,孤儿文本紧随段后
+            continue
+        _close_segment()  # 下一条非 tool 消息到来,先补齐悬空结果、再放孤儿文本
+        out.append(m)
+        if m.role == Role.ASSISTANT and m.tool_calls:
+            pending.update(c.id for c in m.tool_calls)
+    _close_segment()  # 末尾悬空(折叠段以 assistant(tool_calls)/孤儿结尾)同样闭合
+    return out
+
+
 def to_openai_messages(request: CompletionRequest) -> list[dict]:
     """领域消息 → OpenAI chat messages。tool 角色的每个 result 展开成一条 openai tool 消息。"""
     out: list[dict] = []
     if request.system:
         out.append({"role": "system", "content": request.system})
-    for m in request.messages:
+    for m in sanitize_tool_pairing(request.messages):
         if m.role == Role.USER:
             if m.images:
                 # 多模态:文本 + 图片拼成 content parts(OpenAI vision 格式)。

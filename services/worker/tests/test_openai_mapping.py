@@ -126,13 +126,16 @@ def test_assistant_empty_text_with_tool_calls_allows_null_content():
 
 
 def test_tool_result_error_is_marked_in_content():
+    # 配上合法发起者(裸 tool 消息属孤儿形态,会被 sanitize_tool_pairing 降级——那是 P1 的事,
+    # 本测试只锁「失败标记折进 content」)。
     msgs = [
+        Message(role=Role.ASSISTANT, text="", tool_calls=[ToolCall(id="c1", name="bash", arguments={})]),
         Message(
             role=Role.TOOL, tool_results=[ToolResult(call_id="c1", content="boom", is_error=True)]
-        )
+        ),
     ]
     out = to_openai_messages(CompletionRequest(system="", messages=msgs, tools=[]))
-    assert out[0]["content"] == "[tool error] boom"
+    assert out[1]["content"] == "[tool error] boom"
 
 
 def test_message_from_openai_captures_reasoning_content():
@@ -158,3 +161,118 @@ def test_assistant_without_reasoning_omits_field():
     msgs = [Message(role=Role.ASSISTANT, text="hi")]
     out = to_openai_messages(CompletionRequest(system="", messages=msgs, tools=[]))
     assert "reasoning_content" not in out[0]
+
+
+# ---- P1: sanitize_tool_pairing(折叠边界切断配对的防御层)----
+
+from agent_cloud_worker.openai_provider import sanitize_tool_pairing  # noqa: E402
+
+
+def _tc(cid):
+    return ToolCall(id=cid, name="bash", arguments={})
+
+
+def _tr(cid, content="ok", is_error=False):
+    return ToolResult(call_id=cid, content=content, is_error=is_error)
+
+
+def test_sanitize_passthrough_when_properly_paired():
+    msgs = [
+        Message(role=Role.USER, text="do it"),
+        Message(role=Role.ASSISTANT, text="", tool_calls=[_tc("c1")]),
+        Message(role=Role.TOOL, tool_results=[_tr("c1")]),
+        Message(role=Role.ASSISTANT, text="done"),
+        Message(role=Role.USER, text="next"),
+    ]
+    out = sanitize_tool_pairing(msgs)
+    assert out == msgs  # 正常配对零改动
+
+
+def test_sanitize_orphan_tool_downgrades_to_user_text():
+    # 折叠边界切断:开头就是孤儿 tool(发起者已折进摘要)→ 降级 user 文本,不再当协议消息
+    msgs = [
+        Message(role=Role.TOOL, tool_results=[_tr("gone", content="cmd output")]),
+        Message(role=Role.ASSISTANT, text="continuing"),
+        Message(role=Role.USER, text="next"),
+    ]
+    out = sanitize_tool_pairing(msgs)
+    assert out[0].role == Role.USER
+    assert "cmd output" in out[0].text and "[earlier tool result]" in out[0].text
+    assert all(m.role != Role.TOOL for m in out)
+
+
+def test_sanitize_orphan_error_result_keeps_error_mark():
+    msgs = [Message(role=Role.TOOL, tool_results=[_tr("gone", content="boom", is_error=True)])]
+    out = sanitize_tool_pairing(msgs)
+    assert out[0].role == Role.USER and "(error)" in out[0].text
+
+
+def test_sanitize_missing_result_gets_synthetic_tool_message():
+    # assistant 发起了 c1,但结果被折走、下一条已是 user → 补合成结果,协议完整
+    msgs = [
+        Message(role=Role.ASSISTANT, text="", tool_calls=[_tc("c1")]),
+        Message(role=Role.USER, text="next question"),
+    ]
+    out = sanitize_tool_pairing(msgs)
+    assert [m.role for m in out] == [Role.ASSISTANT, Role.TOOL, Role.USER]
+    assert out[1].tool_results[0].call_id == "c1"
+    assert "folded away" in out[1].tool_results[0].content
+
+
+def test_sanitize_trailing_dangling_assistant_gets_filled():
+    # 折叠段以 assistant(tool_calls) 结尾(Summarize 请求可见此形态)→ 末尾补占位结果
+    msgs = [
+        Message(role=Role.USER, text="q"),
+        Message(role=Role.ASSISTANT, text="", tool_calls=[_tc("c9")]),
+    ]
+    out = sanitize_tool_pairing(msgs)
+    assert out[-1].role == Role.TOOL and out[-1].tool_results[0].call_id == "c9"
+
+
+def test_sanitize_mixed_legit_and_orphan_results_in_one_message():
+    # 同一条 tool 消息里 c1 合法、c2 孤儿 → 拆:合法走 tool,孤儿降级 user
+    msgs = [
+        Message(role=Role.ASSISTANT, text="", tool_calls=[_tc("c1")]),
+        Message(role=Role.TOOL, tool_results=[_tr("c1"), _tr("c2", content="stray")]),
+    ]
+    out = sanitize_tool_pairing(msgs)
+    roles = [m.role for m in out]
+    assert roles == [Role.ASSISTANT, Role.TOOL, Role.USER]
+    assert out[1].tool_results[0].call_id == "c1"
+    assert "stray" in out[2].text
+
+
+def test_to_openai_messages_never_emits_illegal_tool_sequence():
+    # 集成:孤儿 tool 开头 + 缺结果 assistant → 输出序列里每条 role=tool 的 tool_call_id
+    # 都能在紧邻其前的 assistant.tool_calls 里找到(严格端点不 400)
+    msgs = [
+        Message(role=Role.TOOL, tool_results=[_tr("gone")]),
+        Message(role=Role.ASSISTANT, text="", tool_calls=[_tc("c1")]),
+        Message(role=Role.USER, text="next"),
+    ]
+    out = to_openai_messages(CompletionRequest(system="s", messages=msgs, tools=[]))
+    open_ids: set = set()
+    for om in out:
+        if om["role"] == "assistant":
+            open_ids = {c["id"] for c in om.get("tool_calls", [])}
+        elif om["role"] == "tool":
+            assert om["tool_call_id"] in open_ids
+        else:
+            open_ids = set()
+
+
+def test_sanitize_orphan_never_splits_a_multi_result_segment():
+    # 审查低危 A 根治:assistant 发起 c1+c2,第一条 tool 带 c1 结果 + 一个孤儿,c2 结果在
+    # 下一条 tool——孤儿降级的 user 必须等两条结果都放完再插,绝不夹在段中间。
+    msgs = [
+        Message(role=Role.ASSISTANT, text="", tool_calls=[_tc("c1"), _tc("c2")]),
+        Message(role=Role.TOOL, tool_results=[_tr("c1"), _tr("stray", content="ghost")]),
+        Message(role=Role.TOOL, tool_results=[_tr("c2")]),
+        Message(role=Role.USER, text="next"),
+    ]
+    out = sanitize_tool_pairing(msgs)
+    roles = [m.role for m in out]
+    assert roles == [Role.ASSISTANT, Role.TOOL, Role.TOOL, Role.USER, Role.USER]
+    assert out[1].tool_results[0].call_id == "c1"
+    assert out[2].tool_results[0].call_id == "c2"
+    assert "ghost" in out[3].text  # 孤儿排在段闭合之后

@@ -471,7 +471,7 @@ async def test_summarize_disables_thinking_and_caps_output():
     finally:
         await worker_server.stop(None)
     assert provider.last_request.disable_thinking is True
-    assert provider.last_request.max_tokens == 2048
+    assert provider.last_request.max_tokens == 3072  # 预算随「保留路径/报错原文」的 ASCII 密度上调
 
 
 async def test_summarize_only_prior_summary_echoes_without_llm():

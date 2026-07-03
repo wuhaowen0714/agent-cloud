@@ -23,10 +23,32 @@ logger = logging.getLogger(__name__)
 
 
 def _fold_boundary(history_after: list, keep_recent: int):
-    """保留最近 keep_recent 条,其余为待折叠。不足以折叠则 None。返回 (fold_msgs, boundary_seq)。"""
+    """保留最近约 keep_recent 条,其余为待折叠;边界对齐到回合开头(保留段首条是 user)。
+
+    为什么对齐(P1):按条数硬切的边界可能落在回合中间——保留段开头是孤儿 tool 消息
+    (发起它的 assistant tool_calls 已折进摘要)或带 tool_calls 却丢了结果的 assistant,
+    严格的 OpenAI 兼容端点对不配对的 tool 消息直接 400。对齐规则:
+    - 初步边界 idx = len - keep_recent;
+    - 从 idx 向后找第一条 user(把不完整回合整个吞进摘要,保留段从回合开头起);
+    - 向后没有(保留窗口内无回合开头)→ 从 idx 向前找最后一条 user(少折一点);
+    - 对齐后边界为 0(第一条就是保留回合的开头)→ 无可折叠,返回 None;
+    - 整段没有 user(异常形态)→ 按条数切,交给 worker 层孤儿配对清洗兜底。
+    不足以折叠则 None。返回 (fold_msgs, boundary_seq)。
+    """
     if len(history_after) <= keep_recent:
         return None
-    fold = history_after[:-keep_recent]
+    idx = len(history_after) - keep_recent
+    j = next(
+        (k for k in range(idx, len(history_after)) if history_after[k].role == "user"), None
+    )
+    if j is None:
+        j = next((k for k in range(idx - 1, -1, -1) if history_after[k].role == "user"), None)
+    if j is not None:
+        if j == 0:
+            return None
+        fold = history_after[:j]
+    else:
+        fold = history_after[:idx]
     return fold, fold[-1].seq
 
 
