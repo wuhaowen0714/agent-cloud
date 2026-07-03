@@ -28,7 +28,9 @@ export function parseSSE(onEvent: (e: TurnEvent) => void): (chunk: string) => vo
   }
 }
 
-/** POST /turn/stream 并把 SSE 事件流式回调;返回可中断的 AbortController。 */
+/** POST /turn/stream 并把 SSE 事件流式回调;返回可中断的 AbortController。
+ * 409(会话忙)自动短重试:锁通常是上一回合收尾/手动压缩的短暂占用,几秒内自然消退;
+ * 409 时 user 消息尚未落库(端点抢锁在前),重发不会造成重复消息。 */
 export function streamTurn(
   sessionId: string,
   content: string,
@@ -37,16 +39,21 @@ export function streamTurn(
 ): { done: Promise<void>; abort: () => void } {
   const ctrl = new AbortController()
   const done = (async () => {
-    const res = await authedFetch(`/api/sessions/${sessionId}/turn/stream`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content, images }),
-      signal: ctrl.signal,
-    })
+    let res: Response
+    for (let attempt = 0; ; attempt++) {
+      res = await authedFetch(`/api/sessions/${sessionId}/turn/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, images }),
+        signal: ctrl.signal,
+      })
+      if (res.status !== 409 || attempt >= 4) break
+      await new Promise((r) => setTimeout(r, 1500)) // 4 次 × 1.5s ≈ 6s 内自动等锁
+      if (ctrl.signal.aborted) return // 等待期间被 abort(切会话/取消):静默结束,别抛"会话忙"
+    }
     if (!res.ok || !res.body) {
       const body = await res.text().catch(() => "")
-      // 409 = 会话锁被占用(回合进行中或正在压缩上下文)。给人话而非原始 JSON;
-      // 可恢复,用户点「重试」等占用结束即可成功。
+      // 重试耗尽仍 409(长压缩/另一端占用)。给人话而非原始 JSON;可恢复,点「重试」即可。
       if (res.status === 409) throw new Error("会话正忙(可能正在压缩上下文),请稍候重试")
       throw new Error(`turn stream failed: ${res.status} ${body}`)
     }

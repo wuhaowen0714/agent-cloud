@@ -456,17 +456,25 @@ async def test_drain_hub_releases_stranded_lock_for_never_started_runner(engine,
     assert hub.get(sid) is None  # 残留清掉
 
 
-async def test_runner_post_turn_compaction_when_over_threshold(engine, monkeypatch):
-    # 回合后 context_tokens 超阈值 → 主动压缩:session.summary 被填,summary_through_seq 推进。
+async def test_runner_pre_turn_compaction_when_over_threshold(engine, monkeypatch):
+    # 回合前压缩(P0):上一回合落库的 last_context_tokens 超阈值 → 本回合开始先压缩
+    # (发 compacting 提示、summary 被填、边界推进),再正常跑回合。turn_done 后不再压缩
+    # ——否则前端已解锁输入而后端仍持锁,用户下一条必撞 409。
     from agent_cloud_backend.config import Settings
+    from agent_cloud_backend.repositories.session import SessionRepository
     from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub
     from agent_cloud_backend.turn.runner import run_turn
 
     _patch_global_sessionmaker(monkeypatch, engine)
     sid = await _make_session_row(engine)
     await _acquire(engine, sid)
-    # 预置 3 条历史(seq 0,1,2);回合再加 1 条 assistant(seq 3)→ 共 4;keep_recent=2 → 折叠 [0,1]
-    await _seed_messages(engine, sid, 3)
+    # 预置 4 条历史(user,assistant,user,assistant)+ 上一回合 last_context_tokens=999(超阈值
+    # 10)。keep_recent=2 → 折叠 [user0, assistant1](成对,strip 未答 user 后非空可摘要)。
+    await _seed_messages(engine, sid, 4)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        await SessionRepository(db).set_context_tokens(sid, 999)
+        await db.commit()
 
     async def _gen(endpoint, request):
         yield turn_event_to_proto(
@@ -474,7 +482,7 @@ async def test_runner_post_turn_compaction_when_over_threshold(engine, monkeypat
                 new_messages=[Message(role=Role.ASSISTANT, text="done")],
                 usage=Usage(input_tokens=1, output_tokens=2),
                 stop_reason="end_turn",
-                context_tokens=999,
+                context_tokens=5,
             )
         )
 
@@ -496,15 +504,19 @@ async def test_runner_post_turn_compaction_when_over_threshold(engine, monkeypat
         heartbeat_interval=999, settings=settings,
     )
 
-    assert any(e["type"] == "turn_done" for e in active.events)  # 回合本身成功
+    types = [e["type"] for e in active.events]
+    assert "compacting" in types and "turn_done" in types
+    assert types.index("compacting") < types.index("turn_done")  # 压缩发生在回合事件之前
     summary, through = await _summary(engine, sid)
     assert summary == "S"
     assert through >= 1  # 折叠边界已推进
 
 
 async def test_runner_no_compaction_when_under_threshold(engine, monkeypatch):
-    # context_tokens 未超阈值 → 不压缩(summarize 不被调用)。
+    # last_context_tokens 未超阈值(新会话 None 亦然)→ 回合前不压缩(summarize 不被调用,
+    # 不发 compacting 事件)。
     from agent_cloud_backend.config import Settings
+    from agent_cloud_backend.repositories.session import SessionRepository
     from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub
     from agent_cloud_backend.turn.runner import run_turn
 
@@ -512,6 +524,10 @@ async def test_runner_no_compaction_when_under_threshold(engine, monkeypatch):
     sid = await _make_session_row(engine)
     await _acquire(engine, sid)
     await _seed_messages(engine, sid, 3)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        await SessionRepository(db).set_context_tokens(sid, 5)  # 5 <= 阈值 10
+        await db.commit()
 
     async def _gen(endpoint, request):
         yield turn_event_to_proto(
@@ -545,21 +561,27 @@ async def test_runner_no_compaction_when_under_threshold(engine, monkeypatch):
     )
 
     assert called["n"] == 0  # 5 <= 10,未压缩
+    assert all(e["type"] != "compacting" for e in active.events)  # 也不发压缩提示
     summary, through = await _summary(engine, sid)
     assert summary == "" and through == -1
 
 
-async def test_runner_per_model_threshold_override_suppresses_compaction(engine, monkeypatch):
-    # per-model 覆盖:request 的 model("m")阈值被覆盖成很高 → 即便 ctx 超过全局默认也不压缩。
-    # 这验证 model 确实从 request.agent.model 一路传到阈值解析。
+async def test_runner_no_compaction_when_too_few_messages_to_fold(engine, monkeypatch):
+    # 超阈值但可折叠条数不足 keep_recent(少数巨型消息撑爆 token)→ 不 due:不发 compacting、
+    # 不进 compact(否则每回合白跑记忆提炼 + 前端闪"正在压缩"毛刺,审查中低危 1)。
     from agent_cloud_backend.config import Settings
+    from agent_cloud_backend.repositories.session import SessionRepository
     from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub
     from agent_cloud_backend.turn.runner import run_turn
 
     _patch_global_sessionmaker(monkeypatch, engine)
     sid = await _make_session_row(engine)
     await _acquire(engine, sid)
-    await _seed_messages(engine, sid, 3)
+    await _seed_messages(engine, sid, 2)  # 仅 2 条,keep_recent=2 → 无可折叠
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        await SessionRepository(db).set_context_tokens(sid, 999)  # 远超阈值 10
+        await db.commit()
 
     async def _gen(endpoint, request):
         yield turn_event_to_proto(
@@ -567,7 +589,62 @@ async def test_runner_per_model_threshold_override_suppresses_compaction(engine,
                 new_messages=[Message(role=Role.ASSISTANT, text="done")],
                 usage=Usage(input_tokens=1, output_tokens=2),
                 stop_reason="end_turn",
-                context_tokens=500,  # > 全局默认 100,但 < "m" 的 override 10000
+                context_tokens=999,
+            )
+        )
+
+    _fake_worker(monkeypatch, _gen)
+
+    called = {"n": 0}
+
+    async def _fake_summarize(endpoint, req):
+        called["n"] += 1
+        return "S"
+
+    monkeypatch.setattr(
+        "agent_cloud_backend.turn.compaction.summarize_via_worker", _fake_summarize
+    )
+
+    settings = Settings(compaction_token_threshold=10, compaction_keep_recent=2)
+    hub = TurnHub()
+    active = ActiveTurn(session_id=sid)
+    hub.register(active)
+    await run_turn(
+        hub, active, worker_endpoint="x", request=_REQ, reassemble=_reassemble, session_id=sid,
+        heartbeat_interval=999, settings=settings,
+    )
+
+    assert called["n"] == 0
+    assert all(e["type"] != "compacting" for e in active.events)
+    summary, through = await _summary(engine, sid)
+    assert summary == "" and through == -1
+
+
+async def test_runner_per_model_threshold_override_suppresses_compaction(engine, monkeypatch):
+    # per-model 覆盖:session 的 model("m")阈值被覆盖成很高 → 即便上一回合 ctx 超过全局
+    # 默认也不压缩。这验证阈值确实按 session.model 解析(compaction_due)。
+    from agent_cloud_backend.config import Settings
+    from agent_cloud_backend.repositories.session import SessionRepository
+    from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub
+    from agent_cloud_backend.turn.runner import run_turn
+
+    _patch_global_sessionmaker(monkeypatch, engine)
+    sid = await _make_session_row(engine)
+    await _acquire(engine, sid)
+    await _seed_messages(engine, sid, 3)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        # > 全局默认 100,但 < "m" 的 override 10000
+        await SessionRepository(db).set_context_tokens(sid, 500)
+        await db.commit()
+
+    async def _gen(endpoint, request):
+        yield turn_event_to_proto(
+            TurnDone(
+                new_messages=[Message(role=Role.ASSISTANT, text="done")],
+                usage=Usage(input_tokens=1, output_tokens=2),
+                stop_reason="end_turn",
+                context_tokens=500,
             )
         )
 

@@ -16,24 +16,37 @@ class ChatRepository {
   }
 
   /// 发起新回合:POST turn/stream(SSE)。返回事件流。
+  /// 409(会话忙)自动短重试:锁通常是上一回合收尾/手动压缩的短暂占用,几秒内自然消退;
+  /// 409 时 user 消息尚未落库(后端抢锁在先),重发不会造成重复消息。
   Stream<TurnEvent> sendTurn(
     String sessionId,
     String content, {
     List<String> images = const [],
     CancelToken? cancel,
+    Duration retryDelay = const Duration(milliseconds: 1500), // 测试注入 zero
   }) async* {
-    final r = await _dio.post(
-      '/sessions/$sessionId/turn/stream',
-      data: {'content': content, 'images': images, 'client': 'mobile'},
-      // 兜底:流超 8min 无任何数据(连接层卡:网络半开/后端死)→ 抛 receiveTimeout 终止
-      // "正在生成"而非永久转。8min > 后端单工具执行上限 360s,不误切正常长工具;worker 侧
-      // 空转看门狗(~45s)是主防线,这里只兜 worker 管不到的连接层卡,转 error 后可重试。
-      options: Options(
-        responseType: ResponseType.stream,
-        receiveTimeout: const Duration(minutes: 8),
-      ),
-      cancelToken: cancel,
-    );
+    Response<dynamic> r;
+    for (var attempt = 0; ; attempt++) {
+      try {
+        r = await _dio.post(
+          '/sessions/$sessionId/turn/stream',
+          data: {'content': content, 'images': images, 'client': 'mobile'},
+          // 兜底:流超 8min 无任何数据(连接层卡:网络半开/后端死)→ 抛 receiveTimeout 终止
+          // "正在生成"而非永久转。8min > 后端单工具执行上限 360s,不误切正常长工具;worker 侧
+          // 空转看门狗(~45s)是主防线,这里只兜 worker 管不到的连接层卡,转 error 后可重试。
+          options: Options(
+            responseType: ResponseType.stream,
+            receiveTimeout: const Duration(minutes: 8),
+          ),
+          cancelToken: cancel,
+        );
+        break;
+      } on DioException catch (e) {
+        final busy = e.response?.statusCode == 409;
+        if (!busy || attempt >= 4 || (cancel?.isCancelled ?? false)) rethrow;
+        await Future.delayed(retryDelay); // 4 次 × 1.5s ≈ 6s 内自动等锁
+      }
+    }
     yield* parseSse((r.data as ResponseBody).stream);
   }
 

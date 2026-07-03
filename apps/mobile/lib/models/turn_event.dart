@@ -36,6 +36,8 @@ sealed class TurnEvent {
             j['subagent_id'] as String, j['ok'] as bool? ?? true);
       case 'reset':
         return const ResetEvent();
+      case 'compacting':
+        return const CompactingEvent(); // 回合前压缩进行中(上下文超阈值)
       case 'error':
         return ErrorEvent(j['message'] as String? ?? 'error');
       default:
@@ -91,6 +93,11 @@ class SubagentDone extends TurnEvent {
 
 class ResetEvent extends TurnEvent {
   const ResetEvent();
+}
+
+/// 回合前压缩进行中:上下文超阈值,后端先折叠历史再跑本回合(期间无别的事件)。
+class CompactingEvent extends TurnEvent {
+  const CompactingEvent();
 }
 
 class ErrorEvent extends TurnEvent {

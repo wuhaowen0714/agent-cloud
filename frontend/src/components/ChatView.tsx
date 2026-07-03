@@ -52,6 +52,15 @@ export function ChatView() {
   // 把一个回合事件灌进 live(仅当仍停留在该会话,丢弃切走会话的残余事件)
   const feed = (sid: string, e: TurnEvent) => {
     if (useStore.getState().sessionId !== sid) return
+    // 回合前压缩:复用手动 /compact 的 compactions 状态,Composer 占位自动变
+    // "正在压缩上下文…";压缩结束后的首个回合事件到达即清除(能收到回合事件 = 手动
+    // 压缩必不在跑,不会误清)。
+    if (e.type === "compacting") {
+      useStore.getState().startCompaction(sid)
+      return
+    }
+    if (useStore.getState().compactions[sid]?.phase === "running")
+      useStore.getState().clearCompaction(sid)
     if (e.type === "subagent_started")
       setLive((t) => ({
         ...t,

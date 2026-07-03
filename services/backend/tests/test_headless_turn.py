@@ -50,9 +50,9 @@ async def test_execute_turn_headless_persists_and_returns_final_text(engine, mon
     monkeypatch.setattr(H, "materialize_enabled_skills", lambda **k: None)
 
     async def _no_compact(*a, **k):
-        return None
+        return False
 
-    monkeypatch.setattr(H, "maybe_compact_after_turn", _no_compact)
+    monkeypatch.setattr(H, "maybe_compact_before_turn", _no_compact)
 
     async def _fake_worker(endpoint, request):
         return _FakeResp([msg_to_proto(CMessage(role=Role.ASSISTANT, text="今日要点:无新增"))])

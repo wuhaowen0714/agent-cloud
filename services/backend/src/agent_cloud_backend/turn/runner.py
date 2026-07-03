@@ -14,7 +14,11 @@ from agent_cloud_backend.models.message import Message
 from agent_cloud_backend.repositories.message import MessageRepository
 from agent_cloud_backend.repositories.session import SessionRepository
 from agent_cloud_backend.turn import worker_client
-from agent_cloud_backend.turn.compaction import force_compact, maybe_compact_after_turn
+from agent_cloud_backend.turn.compaction import (
+    compaction_due,
+    force_compact,
+    maybe_compact_before_turn,
+)
 from agent_cloud_backend.turn.heartbeat import session_heartbeat
 from agent_cloud_backend.turn.hub import ActiveTurn, TurnHub
 from agent_cloud_backend.turn.messages import common_to_content
@@ -121,6 +125,19 @@ async def run_turn(
     current = request
     try:
         async with session_heartbeat(session_id, heartbeat_interval):
+            # 回合前压缩(P0):上一回合落库的上下文占用超阈值 → 先折叠再跑本回合,压缩耗时
+            # 归入本回合的锁生命周期。此前挂在 turn_done 之后——前端收到 turn_done 已解锁输入,
+            # 后端仍持锁压缩(记忆提炼+摘要两次 LLM 调用),用户紧接着发消息必撞 409 会话正忙。
+            # 先发 compacting 提示再压(压缩可能十几秒,别让首 token 静默变慢);压缩后重组装
+            # 拿新摘要。整段 best-effort:due 查询/重组装任何失败都只记日志,用原请求照常跑
+            # ——绝不因压缩坏掉回合(maybe_compact_before_turn 内部已自吞,这里兜 due/reassemble)。
+            try:
+                if await compaction_due(session_id, settings=settings):
+                    await active.emit({"type": "compacting"})
+                    if await maybe_compact_before_turn(session_id, settings=settings):
+                        current = await reassemble()
+            except Exception:
+                logger.exception("pre-turn compaction step failed for session %s", session_id)
             while True:
                 total_used += 1
                 try:
@@ -187,10 +204,8 @@ async def run_turn(
                             continue
                         await active.emit(error_sse(grpc.StatusCode.DEADLINE_EXCEEDED))
                         return
-                    # 回合成功收尾 → 主动压缩(仍在心跳内续租)→ 异步起名 → 结束
-                    await maybe_compact_after_turn(
-                        session_id, ctx_tokens, model=current.agent.model, settings=settings
-                    )
+                    # 回合成功收尾 → 异步起名 → 立即结束释放锁(压缩已挪到回合开始前,
+                    # turn_done 之后不再持锁做长调用,前端解锁输入即可立刻发下一条)。
                     if spawn_title:
                         spawn_title_generation(session_id, settings=settings)
                     return

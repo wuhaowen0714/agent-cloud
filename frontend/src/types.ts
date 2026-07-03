@@ -31,6 +31,7 @@ export type TurnEvent =
   | { type: "turn_done"; usage: { input_tokens: number; output_tokens: number }; message_ids: string[]; stop_reason: string }
   | { type: "error"; message: string; recoverable: boolean }
   | { type: "reset" }  // 透明自动重试:清掉本回合已显示内容,从头重来
+  | { type: "compacting" }  // 回合前压缩进行中(上下文超阈值):前端显示"正在压缩上下文…"
   // 子 agent(task 派生):start/done 包裹其事件区间,中间事件带 subagent_id 标记归属
   | { type: "subagent_started"; subagent_id: string; description: string; prompt: string }
   | { type: "subagent_done"; subagent_id: string; ok: boolean }

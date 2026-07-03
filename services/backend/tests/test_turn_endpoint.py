@@ -408,8 +408,9 @@ async def test_turn_resource_exhausted_no_progress_returns_413(client, engine, m
     assert r2.status_code == 200, r2.text
 
 
-async def test_turn_post_compaction_when_over_threshold(client, engine, monkeypatch):
-    # 回合后 context_tokens 超阈值 → 主动压缩,session.summary 被填。
+async def test_turn_pre_turn_compaction_when_over_threshold(client, engine, monkeypatch):
+    # 回合前压缩(P0):首回合落库 context_tokens=999(超阈值)但当回合不压(压缩已从
+    # turn_done 后挪走);下一回合开始前按 last_context_tokens 判定 → 先压缩再跑,summary 被填。
     _patch_global_sessionmaker(monkeypatch, engine)
     monkeypatch.setenv("AGENT_CLOUD_COMPACTION_TOKEN_THRESHOLD", "10")
     monkeypatch.setenv("AGENT_CLOUD_COMPACTION_KEEP_RECENT", "2")
@@ -417,7 +418,6 @@ async def test_turn_post_compaction_when_over_threshold(client, engine, monkeypa
     from agent_cloud_backend.turn import headless as turn_module
 
     async def _fake(worker_endpoint, request):
-        # user + 3 新消息 = 4 条;keep_recent=2 → 折叠前 2
         return worker_pb2.RunTurnResponse(
             new_messages=[
                 worker_pb2.Msg(role="assistant", text="a"),
@@ -442,4 +442,9 @@ async def test_turn_post_compaction_when_over_threshold(client, engine, monkeypa
     sid = await _make_session(client)
     r = await client.post(f"/sessions/{sid}/turn", json={"content": "go"})
     assert r.status_code == 200, r.text
+    # 首回合:开始前 last_context_tokens 为 None → 不压;999 在收尾落库
+    assert await _session_summary(engine, sid) == ""
+    # 次回合:开始前 999 > 10 → 先压缩(历史 user,a,b,done + 新 user,keep 2 → 折叠出摘要)
+    r2 = await client.post(f"/sessions/{sid}/turn", json={"content": "again"})
+    assert r2.status_code == 200, r2.text
     assert await _session_summary(engine, sid) == "S"

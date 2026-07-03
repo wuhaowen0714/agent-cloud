@@ -393,23 +393,23 @@ class _ChatPageState extends ConsumerState<ChatPage>
         if (streaming || state.live.isNotEmpty) ...[
           _userSection(state.liveUser, state.liveUserImages),
           TurnBlocks(state.live),
-          if (streaming) _typing(),
+          if (streaming) _typing(state.compacting),
         ],
       ],
     );
   }
 
-  Widget _typing() => Padding(
+  Widget _typing(bool compacting) => Padding(
         padding: const EdgeInsets.only(top: 6),
-        child: Row(children: const [
-          SizedBox(
+        child: Row(children: [
+          const SizedBox(
               width: 14,
               height: 14,
               child: CircularProgressIndicator(
                   strokeWidth: 2, color: AppTheme.teal)),
-          SizedBox(width: 8),
-          Text('正在生成…',
-              style: TextStyle(color: AppTheme.muted, fontSize: 13)),
+          const SizedBox(width: 8),
+          Text(compacting ? '正在压缩上下文…' : '正在生成…',
+              style: const TextStyle(color: AppTheme.muted, fontSize: 13)),
         ]),
       );
 

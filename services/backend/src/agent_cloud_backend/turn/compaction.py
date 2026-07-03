@@ -34,11 +34,6 @@ async def compact(
     session_id: uuid.UUID, *, worker_endpoint: str, keep_recent: int, settings: Settings
 ) -> bool:
     """把 summary_through_seq 之后、最近 keep_recent 条之前的历史折叠进 session.summary(增量)。"""
-    # 折叠前先提炼记忆(否则细节被摘要抹掉);best-effort,不因记忆失败坏掉压缩。
-    try:
-        await extract_session_memory(session_id, settings=settings, reason="compaction")
-    except Exception:
-        logger.exception("pre-compaction memory extract failed for session %s", session_id)
     async with get_sessionmaker()() as db:
         session = await SessionRepository(db).get(session_id)
         if session is None:
@@ -50,6 +45,12 @@ async def compact(
         folded = _fold_boundary(history_after, keep_recent)
         if folded is None:
             return False
+        # 确认有可折叠内容后才提炼记忆(否则细节被摘要抹掉);放在 fold 判断之后——无可折叠时
+        # 直接返回,不白跑一次记忆 LLM 调用(审查中低危 1 修法③)。best-effort,失败不坏压缩。
+        try:
+            await extract_session_memory(session_id, settings=settings, reason="compaction")
+        except Exception:
+            logger.exception("pre-compaction memory extract failed for session %s", session_id)
         fold_msgs, boundary_seq = folded
         # boundary 用未清洗的 fold[-1].seq(已折叠位置都要推进,清洗掉的也不再回看);
         # 但发给 Summarizer 的内容与 assemble 发给模型的一致(去掉被取消回合的未答 user 消息)。
@@ -80,22 +81,41 @@ async def compact(
         return True
 
 
-async def maybe_compact_after_turn(
-    session_id: uuid.UUID, context_tokens: int, *, model: str, settings: Settings
-) -> None:
-    """回合后主动压缩:用模型返回的真实 context_tokens 判阈值(阈值按模型解析,可 per-model
-    覆盖)。best-effort——绝不因压缩失败坏掉已成功的回合。"""
-    if context_tokens <= settings.compaction_threshold_for(model):
-        return
+async def compaction_due(session_id: uuid.UUID, *, settings: Settings) -> bool:
+    """是否该在回合开始前压缩:上一回合落库的 last_context_tokens 超该模型阈值,**且**确有
+    可折叠内容(可折叠条数 > keep_recent,与 compact 的 _fold_boundary 同口径)。后者防
+    「少数几条巨型消息撑爆 token 但条数不足折叠」时每回合白 emit compacting + 白进 compact
+    (审查中低危 1 修法①)。未超阈值时只做一次 session 轻读即返回;rollback 会清
+    last_context_tokens(避免按已删历史误判),None 视为不超。"""
+    async with get_sessionmaker()() as db:
+        session = await SessionRepository(db).get(session_id)
+        if session is None or session.last_context_tokens is None:
+            return False
+        if session.last_context_tokens <= settings.compaction_threshold_for(session.model):
+            return False
+        history = await MessageRepository(db).list_by_session(session_id)
+        history = [m for m in history if not is_subagent_orm(m)]
+        after = [m for m in history if m.seq > session.summary_through_seq]
+    return len(after) > settings.compaction_keep_recent
+
+
+async def maybe_compact_before_turn(session_id: uuid.UUID, *, settings: Settings) -> bool:
+    """回合开始前主动压缩(P0):压缩发生在新回合锁的自然生命周期内——此前挂在 turn_done
+    之后,前端已解锁输入而后端仍持锁压缩(两次串行 LLM 调用),用户紧接着发消息必撞 409。
+    依据是上一回合落库的真实 context_tokens。best-effort——绝不因压缩失败坏掉回合。
+    返回是否有折叠(调用方据此重组装请求,拿到新摘要)。"""
     try:
-        await compact(
+        if not await compaction_due(session_id, settings=settings):
+            return False
+        return await compact(
             session_id,
             worker_endpoint=settings.worker_endpoint,
             keep_recent=settings.compaction_keep_recent,
             settings=settings,
         )
     except Exception:
-        logger.exception("post-turn compaction failed for session %s", session_id)
+        logger.exception("pre-turn compaction failed for session %s", session_id)
+        return False
 
 
 async def force_compact(session_id: uuid.UUID, *, settings: Settings) -> bool:

@@ -16,7 +16,7 @@ from agent_cloud_backend.repositories.session import SessionRepository
 from agent_cloud_backend.repositories.skill import AgentSkillEnableRepository
 from agent_cloud_backend.skills.materialize import materialize_enabled_skills
 from agent_cloud_backend.turn.assemble import build_run_turn_request
-from agent_cloud_backend.turn.compaction import force_compact, maybe_compact_after_turn
+from agent_cloud_backend.turn.compaction import force_compact, maybe_compact_before_turn
 from agent_cloud_backend.turn.heartbeat import session_heartbeat
 from agent_cloud_backend.turn.messages import common_to_content
 from agent_cloud_backend.turn.post_persist import run_tool_side_effects
@@ -105,8 +105,11 @@ async def execute_turn_headless(
 
         policy = RetryPolicy.from_settings(settings)
         overflow_used = transient_used = total_used = 0
+        # 回合前压缩(P0,与 runner 同口径):上一回合 last_context_tokens 超阈值 → 先折叠,
+        # _assemble 随后读到新摘要。压缩耗时在心跳内续租;调用方本就在等本函数返回,无锁尾巴。
+        async with session_heartbeat(session_id, settings.session_heartbeat_seconds):
+            await maybe_compact_before_turn(session_id, settings=settings)
         current = await _assemble()
-        model = current.agent.model
         async with session_heartbeat(session_id, settings.session_heartbeat_seconds):
             while True:
                 total_used += 1
@@ -154,10 +157,6 @@ async def execute_turn_headless(
         # agent 主动工具副作用(remember + schedule_task),独立事务、best-effort。
         await run_tool_side_effects(session_id, commons)
 
-        async with session_heartbeat(session_id, settings.session_heartbeat_seconds):
-            await maybe_compact_after_turn(
-                session_id, response.context_tokens, model=model, settings=settings
-            )
         async with get_sessionmaker()() as db:
             s = await SessionRepository(db).get(session_id)
             if s.title is None:

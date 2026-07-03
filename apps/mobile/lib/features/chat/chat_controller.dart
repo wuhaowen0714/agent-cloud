@@ -18,6 +18,7 @@ class ChatState {
   final ChatStatus status;
   final String? error;
   final String? failedMessage; // 发起失败的消息(可重试)
+  final bool compacting; // 回合前压缩进行中(「正在生成」文案切换为「正在压缩上下文」)
 
   const ChatState({
     this.turns = const [],
@@ -27,6 +28,7 @@ class ChatState {
     this.status = ChatStatus.loading,
     this.error,
     this.failedMessage,
+    this.compacting = false,
   });
 
   ChatState copyWith({
@@ -38,6 +40,7 @@ class ChatState {
     String? error,
     String? failedMessage,
     bool clearFailed = false,
+    bool? compacting,
   }) =>
       ChatState(
         turns: turns ?? this.turns,
@@ -48,6 +51,7 @@ class ChatState {
         error: error ?? this.error,
         failedMessage:
             clearFailed ? null : (failedMessage ?? this.failedMessage),
+        compacting: compacting ?? this.compacting,
       );
 }
 
@@ -172,7 +176,14 @@ class ChatController extends FamilyNotifier<ChatState, String> {
   }
 
   void _feed(TurnEvent e) {
+    // 回合前压缩:compacting 事件置位(「正在生成」切「正在压缩上下文」);压缩结束后的
+    // 首个真实回合事件到达即复位。
+    if (state.compacting && e is! CompactingEvent) {
+      state = state.copyWith(compacting: false);
+    }
     switch (e) {
+      case CompactingEvent():
+        state = state.copyWith(compacting: true);
       case SubagentStarted(:final subagentId, :final description, :final prompt):
         state = state.copyWith(
             live: startSubagent(state.live, subagentId, description, prompt));
@@ -217,9 +228,10 @@ class ChatController extends FamilyNotifier<ChatState, String> {
           live: const [],
           liveUser: '',
           liveUserImages: const [],
-          status: ChatStatus.idle);
+          status: ChatStatus.idle,
+          compacting: false);
     } catch (_) {
-      state = state.copyWith(status: ChatStatus.idle);
+      state = state.copyWith(status: ChatStatus.idle, compacting: false);
     }
   }
 }

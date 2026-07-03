@@ -448,6 +448,32 @@ async def test_summarize_puts_prior_summary_in_system_not_user_message():
     assert "OLD_SUMMARY_TEXT" not in provider.last_request.messages[-1].text
 
 
+async def test_summarize_disables_thinking_and_caps_output():
+    # P2:摘要要关思考(思考模型为摘要烧大段 reasoning,慢且贵)+ 限输出(摘要与旧摘要
+    # 反复合并,无上限会单调增长、最终挤占上下文窗口)。
+    provider = _CapturingProvider(
+        CompletionResult(
+            message=Message(role=Role.ASSISTANT, text="s"),
+            usage=Usage(input_tokens=1, output_tokens=1),
+        )
+    )
+    worker_server, wport = await create_worker_server(provider_factory=lambda *a: provider, port=0)
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            await stub.Summarize(
+                worker_pb2.SummarizeRequest(
+                    agent=worker_pb2.Agent(model="m", provider="fake"),
+                    prior_summary="",
+                    messages=[worker_pb2.Msg(role="user", text="hi")],
+                )
+            )
+    finally:
+        await worker_server.stop(None)
+    assert provider.last_request.disable_thinking is True
+    assert provider.last_request.max_tokens == 2048
+
+
 async def test_summarize_only_prior_summary_echoes_without_llm():
     # I4:无新历史、只有已有摘要 → 原样回显,不调用 provider(空脚本被调用会 IndexError→INTERNAL)。
     provider = FakeProvider([])

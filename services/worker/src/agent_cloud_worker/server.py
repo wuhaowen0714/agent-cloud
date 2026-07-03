@@ -76,11 +76,16 @@ async def _read_turn_images(read_binary, paths: list[str]) -> list[str]:
 ProviderFactory = Callable[[str, str, str, str], Provider]
 
 # 压缩器系统提示词:把历史浓缩成简明要点,保留后续回合需要的信息(spec §6)。
+# 长度预算:摘要每次压缩都与旧摘要合并,无约束会单调增长——最终摘要本身挤占上下文窗口,
+# 反过来加剧超窗(force_compact 只剩 1 条也救不了)。预算 + "优先精简更早内容"让它有损滚动。
 _SUMMARIZE_SYSTEM = (
     "你是对话压缩器。把给定对话浓缩成简明要点,保留:用户的目标与诉求、关键事实与决定、"
-    "已产出的文件与成果、尚未完成的事项。保留后续对话需要的上下文,去掉寒暄与冗余。"
-    "只输出要点本身,不要额外解释。"
+    "已产出的文件与成果(保留文件路径、命令、报错等原文细节)、尚未完成的事项。"
+    "保留后续对话需要的上下文,去掉寒暄与冗余。只输出要点本身,不要额外解释。"
+    "摘要总长控制在 1500 字以内;与已有摘要合并时优先精简更早的内容,越新的信息保留越多细节。"
 )
+# 摘要输出上限:1500 字要点绰绰有余;防话痨模型无界输出(输入折叠段可达数万 token)。
+_SUMMARIZE_MAX_TOKENS = 2048
 
 
 def _build_context_and_history(
@@ -467,7 +472,15 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
 
         try:
             result = await provider.complete(
-                CompletionRequest(system=system, messages=messages, tools=[])
+                # 关思考 + 收紧输出:思考模型(DeepSeek-V4-Pro)会为摘要烧大段 reasoning
+                # (慢且贵,同标题生成踩过的坑);max_tokens 防摘要无界增长(见 _SUMMARIZE_SYSTEM)。
+                CompletionRequest(
+                    system=system,
+                    messages=messages,
+                    tools=[],
+                    max_tokens=_SUMMARIZE_MAX_TOKENS,
+                    disable_thinking=True,
+                )
             )
         except CompletionBudgetExceeded as exc:
             # 配置错误(输出预算 ≥ 模型窗口):压缩救不了,绝不能映射成 RESOURCE_EXHAUSTED

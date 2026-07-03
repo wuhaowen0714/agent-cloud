@@ -49,19 +49,50 @@ describe("resumeTurn", () => {
 })
 
 describe("streamTurn", () => {
-  it("409 session busy → 抛友好提示(而非原始 turn stream failed JSON)", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response('{"detail":"session is busy"}', { status: 409 })),
-    )
-    const { done } = streamTurn("s1", "hi", () => {})
-    await expect(done).rejects.toThrow("会话正忙(可能正在压缩上下文),请稍候重试")
+  it("持续 409 → 自动重试 5 次后抛友好提示(而非原始 turn stream failed JSON)", async () => {
+    vi.useFakeTimers()
+    try {
+      const f = vi.fn(async () => new Response('{"detail":"session is busy"}', { status: 409 }))
+      vi.stubGlobal("fetch", f)
+      const { done } = streamTurn("s1", "hi", () => {})
+      const assertion = expect(done).rejects.toThrow("会话正忙(可能正在压缩上下文),请稍候重试")
+      await vi.runAllTimersAsync() // 快进 4 轮 1.5s 重试间隔
+      await assertion
+      expect(f).toHaveBeenCalledTimes(5) // 首发 + 4 次重试
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
-  it("其他非 2xx 仍带状态码(便于排查)", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("boom", { status: 502 })))
+  it("409 一次后锁释放 → 自动重试成功,不抛错", async () => {
+    vi.useFakeTimers()
+    try {
+      const sse = new Response(
+        'data: {"type":"turn_done","usage":{"input_tokens":1,"output_tokens":1},"message_ids":[],"stop_reason":"end_turn"}\n\n',
+        { status: 200 },
+      )
+      const f = vi
+        .fn()
+        .mockResolvedValueOnce(new Response('{"detail":"session is busy"}', { status: 409 }))
+        .mockResolvedValueOnce(sse)
+      vi.stubGlobal("fetch", f)
+      const events: unknown[] = []
+      const { done } = streamTurn("s1", "hi", (e) => events.push(e))
+      await vi.runAllTimersAsync()
+      await done // 不抛
+      expect(f).toHaveBeenCalledTimes(2)
+      expect(events.map((e) => (e as { type: string }).type)).toEqual(["turn_done"])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("其他非 2xx 仍带状态码(便于排查),不重试", async () => {
+    const f = vi.fn(async () => new Response("boom", { status: 502 }))
+    vi.stubGlobal("fetch", f)
     const { done } = streamTurn("s1", "hi", () => {})
     await expect(done).rejects.toThrow("turn stream failed: 502")
+    expect(f).toHaveBeenCalledTimes(1)
   })
 })
 

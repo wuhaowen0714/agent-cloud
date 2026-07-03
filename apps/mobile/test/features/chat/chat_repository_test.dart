@@ -1,7 +1,45 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http_mock_adapter/http_mock_adapter.dart';
 import 'package:agent_cloud_mobile/features/chat/chat_repository.dart';
+import 'package:agent_cloud_mobile/models/turn_event.dart';
+
+/// 按请求次数变响应的 adapter:前 [busyTimes] 次回 409,之后回 SSE 200(turn_done)。
+/// http_mock_adapter 不支持同一路由按次序列化响应,故手写。
+class _SeqAdapter implements HttpClientAdapter {
+  _SeqAdapter(this.busyTimes);
+  final int busyTimes;
+  int calls = 0;
+
+  @override
+  Future<ResponseBody> fetch(RequestOptions options,
+      Stream<Uint8List>? requestStream, Future<void>? cancelFuture) async {
+    calls++;
+    if (calls <= busyTimes) {
+      return ResponseBody.fromString(
+        '{"detail":"session is busy"}',
+        409,
+        headers: {
+          Headers.contentTypeHeader: ['application/json'],
+        },
+      );
+    }
+    return ResponseBody.fromString(
+      'data: {"type":"turn_done","usage":{"input_tokens":1,"output_tokens":1},'
+      '"message_ids":[],"stop_reason":"end_turn"}\n\n',
+      200,
+      headers: {
+        Headers.contentTypeHeader: ['text/event-stream'],
+      },
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
 
 void main() {
   test('rollback POST + 返回 user_text', () async {
@@ -46,5 +84,32 @@ void main() {
     );
     await expectLater(
         ChatRepository(dio).rollback('s1', 'm5'), throwsA(isA<DioException>()));
+  });
+
+  test('sendTurn:409 两次后锁释放 → 自动重试成功产出事件流', () async {
+    final dio = Dio(BaseOptions(baseUrl: 'http://x/api'));
+    final adapter = _SeqAdapter(2);
+    dio.httpClientAdapter = adapter;
+    final events = await ChatRepository(dio)
+        .sendTurn('s1', 'hi', retryDelay: Duration.zero)
+        .toList();
+    expect(adapter.calls, 3); // 409×2 + 成功 1
+    expect(events.whereType<TurnDoneEvent>().length, 1);
+  });
+
+  test('sendTurn:持续 409 → 重试 5 次后抛 DioException', () async {
+    final dio = Dio(BaseOptions(baseUrl: 'http://x/api'));
+    final adapter = _SeqAdapter(99);
+    dio.httpClientAdapter = adapter;
+    await expectLater(
+      ChatRepository(dio).sendTurn('s1', 'hi', retryDelay: Duration.zero).toList(),
+      throwsA(isA<DioException>()),
+    );
+    expect(adapter.calls, 5); // 首发 + 4 次重试
+  });
+
+  test('TurnEvent.fromJson 解析 compacting 事件', () {
+    expect(TurnEvent.fromJson(jsonDecode('{"type":"compacting"}')),
+        isA<CompactingEvent>());
   });
 }
