@@ -5,9 +5,21 @@ import { stripWorkspaceImageMarkdown } from "../chatText"
 import { Markdown } from "./Markdown"
 import { ThinkingPanel } from "./ThinkingPanel"
 import { ToolCallCard } from "./ToolCallCard"
+import { parseTodoItems, TodoCard } from "./TodoCard"
 
 // 按时间顺序渲染一个回合的块流。streaming 时:最后一块若是思考则自动展开,末尾显示光标。
 export function TurnBlocks({ blocks, streaming = false }: { blocks: Block[]; streaming?: boolean }) {
+  // 任务清单(todo 工具):agent 每次全量重写清单 → 多次调用只在【首现位置】渲染一张卡,
+  // 内容取本组 blocks 里【最新一次】的 items(原位刷新,不逐卡罗列演进);其余 todo 块跳过。
+  // 子 agent 卡内部递归调用本组件时,以其内部 blocks 为一组,天然各自独立。
+  const todoBlocks = blocks.filter(
+    (b): b is Extract<Block, { kind: "tool" }> =>
+      b.kind === "tool" && b.call.name === "todo" && !b.progress, // 只算真卡:pending 进度卡 args 为空
+  )
+  const firstTodoId = todoBlocks[0]?.id
+  const latestTodoItems = todoBlocks.length
+    ? parseTodoItems(todoBlocks[todoBlocks.length - 1].call.arguments)
+    : []
   return (
     <>
       {blocks.map((b, i) => {
@@ -31,6 +43,11 @@ export function TurnBlocks({ blocks, streaming = false }: { blocks: Block[]; str
               ok={b.ok}
             />
           )
+        }
+        if (b.kind === "tool" && b.call.name === "todo") {
+          // 参数生成中的 pending 进度卡照常走 ToolCallCard(此时 args 未知);升级成真卡后按上述策略渲染
+          if (!b.progress && b.id !== firstTodoId) return null
+          if (!b.progress) return <TodoCard key={b.id} items={latestTodoItems} />
         }
         return <ToolCallCard key={b.id} call={b.call} result={b.result} progress={b.progress} />
       })}

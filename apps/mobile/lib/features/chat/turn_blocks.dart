@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_theme.dart';
 import '../files/files_repository.dart'; // sentImageProvider(带 token 取图)
 import '../../models/block.dart';
+import 'todo_card.dart';
 
 // generate_image/edit_image 成功结果文本里嵌着落盘路径(worker 回填 media/picture/..)
 final _imgPathRe = RegExp(
@@ -30,10 +31,28 @@ class TurnBlocks extends StatelessWidget {
   const TurnBlocks(this.blocks, {super.key});
 
   @override
-  Widget build(BuildContext context) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [for (final b in blocks) _block(b)],
-      );
+  Widget build(BuildContext context) {
+    // 任务清单(todo 工具):agent 每次全量重写清单 → 多次调用只在【首现位置】渲染一张卡,
+    // 内容取本组 blocks 里【最新一次】的 items(原位刷新);其余 todo 块跳过。pending 进度卡
+    // (参数生成中,args 空)照走普通工具卡。子 agent 卡内部递归时各自成组,天然独立。
+    final todos = blocks
+        .whereType<ToolBlock>()
+        .where((b) => b.call.name == 'todo' && b.progress == null)
+        .toList();
+    final firstTodoId = todos.isEmpty ? null : todos.first.id;
+    final latestItems =
+        todos.isEmpty ? const <TodoItem>[] : parseTodoItems(todos.last.call.arguments);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final b in blocks)
+          if (b is ToolBlock && b.call.name == 'todo' && b.progress == null)
+            (b.id == firstTodoId ? TodoCard(latestItems) : const SizedBox.shrink())
+          else
+            _block(b),
+      ],
+    );
+  }
 
   Widget _block(Block b) => switch (b) {
         ThinkingBlock(:final text) => _Thinking(text),

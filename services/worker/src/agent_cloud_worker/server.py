@@ -22,6 +22,7 @@ from agent_cloud_common import (
 from agent_cloud_common.codec import msg_from_proto, msg_to_proto, turn_event_to_proto
 
 from agent_cloud_worker.client_actions import ClientActionsExecutor
+from agent_cloud_worker.todos import TodoExecutor, todo_enabled
 from agent_cloud_worker.context import build_system_prompt
 from agent_cloud_worker.image_gen import (
     DEFAULT_IMAGE_EDIT_MODEL,
@@ -121,6 +122,8 @@ def _build_context_and_history(
         network_region=network_region,
         web_search_available=web_search_available,
         current_date=current_date,
+        # 计划模式指引仅在 todo 工具可用时注入(被 enabled_tools 关掉时不误导模型)。
+        todo_available=todo_enabled(list(request.agent.enabled_tools)),
     )
     history = [msg_from_proto(m) for m in request.messages]
     return system, history
@@ -178,6 +181,9 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
             token=request.sandbox_token,
         )
         executor = RememberingExecutor(sandbox_exec, enabled=remember_enabled(enabled_tools))
+        # todo 任务清单(计划模式):worker 本地合成确认,清单本体在 tool_call args 里随消息
+        # 落库,前端据此渲染进度卡。全平台可用。
+        executor = TodoExecutor(executor, enabled=todo_enabled(enabled_tools))
         # 定时任务跑出来的回合(is_scheduled_run)不暴露 schedule_task,防 agent 自我繁殖。
         executor = SchedulingExecutor(
             executor,

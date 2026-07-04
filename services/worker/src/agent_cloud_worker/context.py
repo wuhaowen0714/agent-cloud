@@ -168,6 +168,23 @@ _CN_NETWORK_TAIL = (
 )
 
 
+_PLAN_MODE_DOC = """\
+Plan mode (todo tool):
+- For any task that takes multiple steps (creating documents, research + write-up, multi-file \
+work, anything with 3+ distinct stages), FIRST call the `todo` tool with your full plan (all \
+items pending) BEFORE doing the work — the user sees this checklist as your plan and live \
+progress. Then keep it honest while you work: set an item to in_progress right before starting \
+it and completed right after it is done (send the FULL updated list each time; it replaces the \
+previous one). Exactly one item in_progress at a time; add newly-discovered steps as new items.
+- Skip the todo tool for single-step requests and pure conversation — a checklist there is \
+noise."""
+
+
+def _render_plan_mode(todo_available: bool) -> list[str]:
+    # todo 工具被 agent 的 enabled_tools 关掉时不注入——否则指引会让模型去调一个不存在的工具。
+    return [_PLAN_MODE_DOC] if todo_available else []
+
+
 def _render_network(network_region: str, web_search_available: bool = False) -> list[str]:
     # 仅在已知"受限"区域注入站点可达性提示;其它区域(海外/无限制)留空,保持 prompt 干净。
     # "cn" 或阿里云 region id("cn-hangzhou" 等,运维易这么填)都视为中国大陆。搜索段按是否有
@@ -215,11 +232,13 @@ def build_system_prompt(
     network_region: str = "",
     web_search_available: bool = False,
     current_date: str = "",
+    todo_available: bool = False,
 ) -> str:
     """基础环境提示词 + 当前日期 + 网络区域提示 + 配置文档(用户级在前)+ 记忆 + 技能元数据 +
     此前对话摘要,拼成分层 system 文本(spec §5.3 / §6)。"""
     sections = [
         BASE_SYSTEM_PROMPT,
+        *_render_plan_mode(todo_available),
         *_render_date(current_date),
         *_render_network(network_region, web_search_available),
         *_render_docs(documents),
