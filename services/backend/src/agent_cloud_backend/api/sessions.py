@@ -54,7 +54,13 @@ async def list_sessions(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    return await SessionRepository(session).list_by_user(user.id)
+    sessions = await SessionRepository(session).list_by_user(user.id)
+    # 列表预览:批量取每会话最后一条主消息文本(一次 DISTINCT ON,防 N+1),挂到 ORM 实例
+    # 的非列属性上,SessionRead(from_attributes)按属性读取。
+    previews = await MessageRepository(session).last_texts_for_sessions([s.id for s in sessions])
+    for s in sessions:
+        s.last_message = previews.get(s.id)
+    return sessions
 
 
 @router.patch("/{session_id}", response_model=SessionRead)

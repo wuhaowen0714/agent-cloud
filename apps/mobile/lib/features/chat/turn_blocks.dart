@@ -60,6 +60,11 @@ class TurnBlocks extends StatelessWidget {
   }
 
   Widget _block(Block b) => switch (b) {
+        // 流式中的空块(delta 先建块后填内容)渲染成孤立小方块很突兀,直接跳过
+        ThinkingBlock(:final text) when text.trim().isEmpty =>
+          const SizedBox.shrink(),
+        TextBlock(:final text) when text.trim().isEmpty =>
+          const SizedBox.shrink(),
         ThinkingBlock(:final text) => _Thinking(text),
         TextBlock(:final text) => Padding(
             padding: const EdgeInsets.symmetric(vertical: 2),
@@ -133,6 +138,9 @@ class _PathLinkCodeBuilder extends MarkdownElementBuilder {
 }
 
 final _md = MarkdownStyleSheet(
+  // 表格列平分宽度:flutter_markdown 默认 IntrinsicColumnWidth,列多必横向溢出报错;
+  // Flex 平分让单元格自动换行,窄屏安全(牺牲少量对齐美观)。
+  tableColumnWidth: const FlexColumnWidth(),
   p: const TextStyle(fontSize: 15, height: 1.5, color: AppTheme.ink),
   code: const TextStyle(
       fontSize: 13,

@@ -9,6 +9,31 @@ from agent_cloud_backend.repositories.base import BaseRepository
 class MessageRepository(BaseRepository[Message]):
     model = Message
 
+    async def last_texts_for_sessions(
+        self, session_ids: list[uuid.UUID], *, max_len: int = 120
+    ) -> dict[uuid.UUID, str]:
+        """每个会话最后一条「主消息」(非 tool 角色、非子 agent、文本非空)的截断文本,
+        供会话列表预览。一次 DISTINCT ON 查询,防 N+1。"""
+        if not session_ids:
+            return {}
+        stmt = (
+            select(Message.session_id, Message.content)
+            .where(
+                Message.session_id.in_(session_ids),
+                Message.role != "tool",
+                func.coalesce(Message.content["parent_call_id"].astext, "") == "",
+                func.coalesce(Message.content["text"].astext, "") != "",
+            )
+            .order_by(Message.session_id, Message.seq.desc())
+            .distinct(Message.session_id)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        out: dict[uuid.UUID, str] = {}
+        for sid, content in rows:
+            text = str((content or {}).get("text", ""))
+            out[sid] = text[:max_len]
+        return out
+
     async def _next_seq(self, session_id: uuid.UUID) -> int:
         result = await self.session.execute(
             select(func.coalesce(func.max(Message.seq), -1)).where(Message.session_id == session_id)

@@ -34,6 +34,8 @@ class SessionRead(BaseModel):
     last_context_tokens: int | None = None
     scheduled_task_id: uuid.UUID | None = None
     unread: bool = False
+    # 列表预览:该会话最后一条主消息(非工具/非子 agent、文本非空)的截断文本;无消息为 None。
+    last_message: str | None = None
 
 
 class RollbackRequest(BaseModel):

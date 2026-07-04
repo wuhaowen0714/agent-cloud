@@ -304,6 +304,13 @@ class _ChatPageState extends ConsumerState<ChatPage>
     return pm.visionModels.first;
   }
 
+  /// 当前会话模型(sessions 列表里查;未加载时占位)。
+  String _currentModel() {
+    final sessions = ref.watch(sessionsControllerProvider).asData?.value ?? [];
+    final m = sessions.where((s) => s.id == widget.sessionId);
+    return m.isEmpty ? '模型' : m.first.model;
+  }
+
   String? _agentId() {
     final sessions = ref.read(sessionsControllerProvider).asData?.value ?? [];
     final m = sessions.where((s) => s.id == widget.sessionId);
@@ -422,10 +429,37 @@ class _ChatPageState extends ConsumerState<ChatPage>
           ]),
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.tune),
-            tooltip: '切换模型',
-            onPressed: () => showModelPicker(context, ref, widget.sessionId),
+          // 当前模型 chip:一眼可见在用什么模型,点击切换(替代语义模糊的 tune 图标)
+          Padding(
+            padding: const EdgeInsets.only(right: 2),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: () => showModelPicker(context, ref, widget.sessionId),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: AppTheme.tealSoft,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 130),
+                    child: Text(
+                      _currentModel(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.tealDark),
+                    ),
+                  ),
+                  const Icon(Icons.expand_more,
+                      size: 14, color: AppTheme.tealDark),
+                ]),
+              ),
+            ),
           ),
           PopupMenuButton<String>(
             tooltip: '更多',
@@ -835,8 +869,9 @@ class _ChatPageState extends ConsumerState<ChatPage>
                   maxLines: 5,
                   decoration: InputDecoration(
                     hintText: streaming
-                        ? '继续输入,发送将加入队列…'
+                        ? '生成中,可排队发送…'
                         : '说点什么(/ 技能 · @ 文件)…',
+                    hintMaxLines: 1, // 长 hint 截断,不把输入框撑成两行
                     contentPadding: const EdgeInsets.symmetric(
                         horizontal: 14, vertical: 10),
                   ),
@@ -900,16 +935,16 @@ class _ChatPageState extends ConsumerState<ChatPage>
   /// 停止按钮:取消当前回合(排队消息一并清除)。
   Widget _stopBtn() => Material(
         color: const Color(0xFFFEE2E2), // red-100
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(11),
         child: InkWell(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(11),
           onTap: () => ref
               .read(chatControllerProvider(widget.sessionId).notifier)
               .stopTurn(),
           child: Padding(
-            padding: const EdgeInsets.all(11),
+            padding: const EdgeInsets.all(8), // 次要动作:比发送小一号,给输入框让宽
             child: Icon(Icons.stop_rounded,
-                color: Colors.red.shade600, size: 20),
+                color: Colors.red.shade600, size: 18),
           ),
         ),
       );

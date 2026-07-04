@@ -1,3 +1,4 @@
+import 'dart:async'; // unawaited
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +8,7 @@ import '../../core/util/time_group.dart';
 import '../../models/agent_config.dart';
 import '../../models/session.dart';
 import '../update/update_service.dart';
+import '../chat/upload_compose.dart'; // parseUserMessage(预览剥 marker)
 import 'sessions_controller.dart';
 
 // 选中 agent 后,该 agent 的会话按天分组的列表项
@@ -278,10 +280,6 @@ class _HomePageState extends ConsumerState<HomePage> {
               tooltip: '终端',
               onPressed: () => context.push('/terminal')),
           IconButton(
-              icon: const Icon(Icons.add),
-              tooltip: '新建智能体',
-              onPressed: _createAgent),
-          IconButton(
               icon: const Icon(Icons.settings_outlined),
               tooltip: '设置',
               onPressed: () => context.push('/settings')),
@@ -369,11 +367,23 @@ class _HomePageState extends ConsumerState<HomePage> {
                         fontWeight: FontWeight.w600,
                         color: sel ? Colors.white : AppTheme.ink)),
                 if (c > 0) ...[
-                  const SizedBox(width: 5),
-                  Text('$c',
-                      style: TextStyle(
-                          fontSize: 12,
-                          color: sel ? Colors.white70 : AppTheme.faint)),
+                  const SizedBox(width: 6),
+                  // 会话数徽章:小圆底与名字区隔,避免「Agent 8 2」连读歧义
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: sel
+                          ? Colors.white.withValues(alpha: 0.25)
+                          : AppTheme.borderSoft,
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    child: Text('$c',
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: sel ? Colors.white : AppTheme.muted)),
+                  ),
                 ],
               ]),
             ),
@@ -471,6 +481,14 @@ class _HomePageState extends ConsumerState<HomePage> {
       );
 
   // 紧凑会话卡:无大图标,标题 + 时间在一行,模型在副行。
+  /// 列表副行预览:最后一条消息文本(剥附件/技能 marker,压掉换行);无消息回退模型名。
+  String _preview(Session s) {
+    final raw = s.lastMessage;
+    if (raw == null || raw.trim().isEmpty) return s.model;
+    final body = parseUserMessage(raw).body.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return body.isEmpty ? s.model : body;
+  }
+
   Widget _sessionCard(Session s) => Dismissible(
         key: ValueKey(s.id),
         direction: DismissDirection.endToStart,
@@ -497,24 +515,48 @@ class _HomePageState extends ConsumerState<HomePage> {
             color: Colors.transparent,
             child: InkWell(
               borderRadius: BorderRadius.circular(AppTheme.rCard),
-              onTap: () => context.push('/chat/${s.id}'),
+              onTap: () {
+                if (s.unread) {
+                  // 进会话即消未读点(对齐 web);best-effort,失败下次点击再试
+                  unawaited(ref
+                      .read(sessionsRepoProvider)
+                      .markRead(s.id)
+                      .then((_) => ref
+                          .read(sessionsControllerProvider.notifier)
+                          .refresh())
+                      .catchError((_) {}));
+                }
+                context.push('/chat/${s.id}');
+              },
               onLongPress: () => _showActions(s),
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 11, 12, 11),
+                padding: const EdgeInsets.fromLTRB(14, 9, 12, 9),
                 child: Row(children: [
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(children: [
+                          if (s.unread) ...[
+                            // 未读点(定时任务有新回复):teal 实心小圆
+                            Container(
+                                width: 7,
+                                height: 7,
+                                decoration: const BoxDecoration(
+                                    color: AppTheme.teal,
+                                    shape: BoxShape.circle)),
+                            const SizedBox(width: 6),
+                          ],
                           Expanded(
                             child: Text(s.displayTitle,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
+                                style: TextStyle(
                                     fontSize: 15,
                                     fontWeight: FontWeight.w600,
-                                    color: AppTheme.ink)),
+                                    color: s.unread
+                                        ? AppTheme.tealDark
+                                        : AppTheme.ink)),
                           ),
                           if (s.relativeTime.isNotEmpty)
                             Text(s.relativeTime,
@@ -522,18 +564,14 @@ class _HomePageState extends ConsumerState<HomePage> {
                                     fontSize: 11.5, color: AppTheme.faint)),
                         ]),
                         const SizedBox(height: 3),
-                        Row(children: [
-                          const Icon(Icons.memory,
-                              size: 12.5, color: AppTheme.faint),
-                          const SizedBox(width: 4),
-                          Flexible(
-                            child: Text(s.model,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                    fontSize: 12, color: AppTheme.muted)),
-                          ),
-                        ]),
+                        // 副行:最后一条消息预览(剥附件/技能 marker);无消息回退模型名
+                        Text(
+                          _preview(s),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 12.5, color: AppTheme.muted),
+                        ),
                       ],
                     ),
                   ),

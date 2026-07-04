@@ -41,7 +41,11 @@ class SessionsController extends AsyncNotifier<List<Session>> {
         await ref.read(sessionsRepoProvider).patchSession(id, model: model);
     state = AsyncValue.data([
       for (final x in (state.asData?.value ?? <Session>[]))
-        x.id == id ? s : x,
+        // lastMessage/unread 是 list 端点专属字段,PATCH 响应恒空:保留本地,防副行预览闪回
+        // 模型名(审查:refresh authority race 同类模式)。
+        x.id == id
+            ? s.copyWith(lastMessage: x.lastMessage, unread: x.unread)
+            : x,
     ]);
   }
 
@@ -52,7 +56,12 @@ class SessionsController extends AsyncNotifier<List<Session>> {
         await ref.read(sessionsRepoProvider).patchSession(id, title: title);
     state = AsyncValue.data([
       for (final x in (state.asData?.value ?? <Session>[]))
-        x.id == id ? s.copyWith(model: x.model) : x,
+        x.id == id
+            ? s.copyWith(
+                model: x.model,
+                lastMessage: x.lastMessage,
+                unread: x.unread)
+            : x,
     ]);
   }
 

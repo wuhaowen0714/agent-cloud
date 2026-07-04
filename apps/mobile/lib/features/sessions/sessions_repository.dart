@@ -34,6 +34,10 @@ class SessionsRepository {
     return Session.fromJson(r.data as Map<String, dynamic>);
   }
 
+  /// 标记会话已读(定时任务产物的未读点;幂等)。
+  Future<void> markRead(String id) =>
+      _dio.post('/sessions/$id/mark-read');
+
   Future<void> deleteSession(String id) => _dio.delete('/sessions/$id');
 
   // 删 agent:后端级联删其全部会话/记忆/文档;有会话在跑 → 409。

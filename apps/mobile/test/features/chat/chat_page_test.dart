@@ -209,6 +209,12 @@ void main() {
     expect(st.liveUser == '再举个例子' || st.failedMessage == '再举个例子', isTrue);
   });
 
+  testWidgets('顶栏显示当前模型 chip(点击入口)', (tester) async {
+    await _pump(tester);
+    expect(find.text('m'), findsOneWidget); // sessions mock 的 model
+    expect(find.byIcon(Icons.expand_more), findsOneWidget);
+  });
+
   testWidgets('附件按钮 → 弹菜单含「拍照」与「相册 / 文件」', (tester) async {
     await _pump(tester);
     await tester.tap(find.byIcon(Icons.attach_file));

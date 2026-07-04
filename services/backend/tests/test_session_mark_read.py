@@ -49,3 +49,33 @@ async def test_mark_read_other_user_404(auth_client, client):
         f"/sessions/{sid}/mark-read", headers={"Authorization": f"Bearer {other}"}
     )
     assert r.status_code == 404
+
+
+async def test_list_sessions_exposes_last_message_preview(auth_client, engine):
+    # 列表预览:最后一条主消息(非 tool、非子 agent、文本非空)的截断文本。
+    import uuid as _uuid
+
+    from agent_cloud_backend.models.message import Message
+    from agent_cloud_backend.repositories.message import MessageRepository
+
+    aid = await _agent(auth_client)
+    sid = (await auth_client.post("/sessions", json={"agent_config_id": aid})).json()["id"]
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as s:
+        repo = MessageRepository(s)
+        for role, content in [
+            ("user", {"text": "问题", "tool_calls": [], "tool_results": []}),
+            ("assistant", {"text": "最终回答" * 40, "tool_calls": [], "tool_results": []}),
+            # 其后的 tool 结果与子 agent 消息都不该成为预览
+            ("tool", {"text": "", "tool_calls": [], "tool_results": [{"call_id": "c", "content": "x", "is_error": False}]}),
+            ("assistant", {"text": "子过程", "parent_call_id": "c", "tool_calls": [], "tool_results": []}),
+        ]:
+            await repo.append(
+                _uuid.UUID(sid),
+                Message(session_id=_uuid.UUID(sid), seq=0, role=role, content=content),
+            )
+        await s.commit()
+
+    got = {g["id"]: g for g in (await auth_client.get("/sessions")).json()}[sid]
+    assert got["last_message"].startswith("最终回答")
+    assert len(got["last_message"]) <= 120  # 截断
