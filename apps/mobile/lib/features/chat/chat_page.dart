@@ -237,8 +237,8 @@ class _ChatPageState extends ConsumerState<ChatPage>
     final sent = composeMessage(text, _selectedSkills, paths);
     // 有图但当前模型不支持图片 → 自动切到平台 vision 模型(对标 web;后端从 session 读 model,
     // 故先 await patchModel 落库再发)。无 vision 模型可切则提示、保留待发。
-    if (sent.images.isNotEmpty && !_modelSupportsVision()) {
-      final target = _pickVisionModel();
+    if (sent.images.isNotEmpty && !await _modelSupportsVision()) {
+      final target = await _pickVisionModel();
       if (target == null) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -275,8 +275,20 @@ class _ChatPageState extends ConsumerState<ChatPage>
   }
 
   // 当前会话模型是否支持图片输入。清单未加载/模型未知时保守不拦(返回 true,交后端)。
-  bool _modelSupportsVision() {
-    final pm = ref.read(platformModelsProvider).asData?.value;
+  // 平台模型清单:await 加载完成(有缓存立即返回)。此前用 ref.read 只看一眼——该 provider
+  // 仅模型选择器 watch,用户没打开过面板时它是冷的,read 拿到 AsyncLoading → 误判"支持图片"
+  // → 发图不自动切 vision 模型 → 后端把图降级成路径文本、模型只能 read_file(拍照直接问
+  // 首次必现,第二次因 read 已触发缓存反而正常)。拉取失败 → null(保守放行,后端 gate 兜底)。
+  Future<PlatformModels?> _platformModels() async {
+    try {
+      return await ref.read(platformModelsProvider.future);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> _modelSupportsVision() async {
+    final pm = await _platformModels();
     if (pm == null) return true;
     final sessions = ref.read(sessionsControllerProvider).asData?.value ?? [];
     final m = sessions.where((s) => s.id == widget.sessionId);
@@ -286,8 +298,8 @@ class _ChatPageState extends ConsumerState<ChatPage>
   }
 
   // 选一个 vision 模型来自动切:平台 vision 列表第一个。无则 null。
-  String? _pickVisionModel() {
-    final pm = ref.read(platformModelsProvider).asData?.value;
+  Future<String?> _pickVisionModel() async {
+    final pm = await _platformModels();
     if (pm == null || pm.visionModels.isEmpty) return null;
     return pm.visionModels.first;
   }
