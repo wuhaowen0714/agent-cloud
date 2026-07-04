@@ -22,6 +22,7 @@ from agent_cloud_common import (
 from agent_cloud_common.codec import msg_from_proto, msg_to_proto, turn_event_to_proto
 
 from agent_cloud_worker.client_actions import ClientActionsExecutor
+from agent_cloud_worker.danger import ConfirmingExecutor, extract_approvals
 from agent_cloud_worker.todos import TodoExecutor, todo_enabled
 from agent_cloud_worker.context import build_system_prompt
 from agent_cloud_worker.image_gen import (
@@ -180,7 +181,12 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
             enabled_tools,
             token=request.sandbox_token,
         )
-        executor = RememberingExecutor(sandbox_exec, enabled=remember_enabled(enabled_tools))
+        # 危险操作确认:套在 sandbox 执行器外第一层(只有真正落沙箱的工具经过)。批准码
+        # 只认【本回合】的用户消息(单次放行语义:历史里的旧批准码不复用)。
+        confirming = ConfirmingExecutor(
+            sandbox_exec, approvals=extract_approvals(request.user_message)
+        )
+        executor = RememberingExecutor(confirming, enabled=remember_enabled(enabled_tools))
         # todo 任务清单(计划模式):worker 本地合成确认,清单本体在 tool_call args 里随消息
         # 落库,前端据此渲染进度卡。全平台可用。
         executor = TodoExecutor(executor, enabled=todo_enabled(enabled_tools))

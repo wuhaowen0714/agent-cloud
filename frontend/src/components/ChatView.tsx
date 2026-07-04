@@ -214,6 +214,17 @@ export function ChatView() {
     if (t && t.status === "error") void onSend(t.userText)
   }
 
+  // 批准被拦的危险操作:发送含批准码的确认消息(agent 下一回合重试即放行)。
+  // 回合仍在生成/压缩中 → 走排队(回合结束自动发出),与 Composer 的入队语义一致。
+  const onApprove = (text: string) => {
+    const st = useStore.getState()
+    const busy =
+      st.live?.status === "streaming" ||
+      (!!st.sessionId && st.compactions[st.sessionId]?.phase === "running")
+    if (busy && st.sessionId) st.enqueueMessage(st.sessionId, { text, images: [] })
+    else void onSend(text)
+  }
+
   // 回滚:删该用户消息及其之后,把它的文本回填输入框。与回合同锁,在跑 → 409 提示。
   const onRollback = async (messageId: string) => {
     if (actionBusy.current) return
@@ -266,6 +277,7 @@ export function ChatView() {
         onRetry={onRetry}
         onRollback={onRollback}
         onFork={onFork}
+        onApprove={onApprove}
       />
       <Composer disabled={live?.status === "streaming"} onSend={onSend} onStop={onStop} />
     </div>

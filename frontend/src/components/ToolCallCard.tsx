@@ -114,11 +114,20 @@ function GeneratedImage({ path }: { path: string }) {
   )
 }
 
+// 危险操作拦截结果里的批准码(worker danger.py 契约;含码即渲染确认按钮)
+const APPROVAL_RE = /批准码\s*([a-f0-9]{16})/
+
 export function ToolCallCard({
   call,
   result,
   progress,
-}: { call: ToolCall; result?: ToolResult; progress?: ToolProgress }) {
+  onApprove,
+}: {
+  call: ToolCall
+  result?: ToolResult
+  progress?: ToolProgress
+  onApprove?: (text: string) => void
+}) {
   const [open, setOpen] = useState(false)
   const { summary, details } = describe(call)
   const error = result?.is_error ?? false
@@ -198,6 +207,23 @@ export function ToolCallCard({
         <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words border-t border-slate-100 bg-slate-50 px-2.5 py-2 font-mono text-slate-600">
           {details}
         </pre>
+      )}
+
+      {/* 危险操作被拦:一键批准 —— 发送含批准码的确认消息,agent 下一回合重试即放行 */}
+      {result?.is_error && onApprove && APPROVAL_RE.test(result.content) && (
+        <div className="flex items-center gap-2 border-t border-amber-200 bg-amber-50 px-2.5 py-1.5">
+          <span className="min-w-0 flex-1 text-amber-700">此操作有破坏性,已被拦截,需你确认</span>
+          <button
+            type="button"
+            onClick={() => {
+              const fp = result.content.match(APPROVAL_RE)?.[1]
+              if (fp) onApprove(`允许执行该操作(批准码 ${fp})`)
+            }}
+            className="shrink-0 rounded-md bg-amber-600 px-2 py-1 font-medium text-white hover:bg-amber-700"
+          >
+            允许执行并继续
+          </button>
+        </div>
       )}
 
       {/* 结果:输出或错误(成功 teal 侧、出错红底)。默认折叠,随头部 open 展开(失败自动展开)。 */}

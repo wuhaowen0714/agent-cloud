@@ -279,6 +279,12 @@ class _ChatPageState extends ConsumerState<ChatPage>
     }
   }
 
+  /// 批准被拦的危险操作:发送含批准码的确认消息(生成中自动排队,回合结束发出;
+  /// agent 收到后重试同一命令即被放行)。
+  void _approve(String text) {
+    ref.read(chatControllerProvider(widget.sessionId).notifier).send(text);
+  }
+
   /// 手动压缩会话上下文(对齐 web /compact):把较早的历史折叠成摘要,给长对话腾上下文。
   Future<void> _compact() async {
     final chat = ref.read(chatControllerProvider(widget.sessionId));
@@ -422,13 +428,13 @@ class _ChatPageState extends ConsumerState<ChatPage>
       children: [
         for (final t in state.turns) ...[
           _userSection(t.userText, t.userImages),
-          TurnBlocks(t.blocks),
+          TurnBlocks(t.blocks, onApprove: _approve),
           _turnActionBar(t, streaming), // 豆包式:回答下方常驻操作栏(复制/分叉/回到这里)
           const SizedBox(height: 18),
         ],
         if (streaming || state.live.isNotEmpty) ...[
           _userSection(state.liveUser, state.liveUserImages),
-          TurnBlocks(state.live),
+          TurnBlocks(state.live, onApprove: _approve),
           if (streaming) _typing(state.compacting),
         ],
       ],

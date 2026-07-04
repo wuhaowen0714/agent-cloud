@@ -32,7 +32,8 @@ const _indigoSoft = Color(0xFFEEF2FF);
 /// 渲染一组 block(对标 web TurnBlocks):思考/文本/工具卡/子 agent 折叠卡。
 class TurnBlocks extends StatelessWidget {
   final List<Block> blocks;
-  const TurnBlocks(this.blocks, {super.key});
+  final void Function(String text)? onApprove; // 危险操作确认:发送含批准码的确认消息
+  const TurnBlocks(this.blocks, {super.key, this.onApprove});
 
   @override
   Widget build(BuildContext context) {
@@ -64,7 +65,7 @@ class TurnBlocks extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 2),
             child: _ChatMarkdown(text),
           ),
-        ToolBlock() => _ToolCard(b),
+        ToolBlock() => _ToolCard(b, onApprove),
         SubagentBlock() => _SubagentCard(b),
       };
 }
@@ -180,9 +181,13 @@ class _Thinking extends StatelessWidget {
       );
 }
 
+// 危险操作拦截结果里的批准码(worker danger.py 契约;含码即渲染确认按钮)
+final _approvalRe = RegExp(r'批准码\s*([a-f0-9]{16})');
+
 class _ToolCard extends StatelessWidget {
   final ToolBlock block;
-  const _ToolCard(this.block);
+  final void Function(String text)? onApprove;
+  const _ToolCard(this.block, [this.onApprove]);
   @override
   Widget build(BuildContext context) {
     final done = block.result != null;
@@ -252,6 +257,35 @@ class _ToolCard extends StatelessWidget {
                     fontFamily: 'monospace',
                     height: 1.4)),
           ),
+        ],
+        // 危险操作被拦:一键批准 —— 发送含批准码的确认消息,agent 下一回合重试即放行
+        if (onApprove != null &&
+            (block.result?.isError ?? false) &&
+            _approvalRe.hasMatch(block.result!.content)) ...[
+          const SizedBox(height: 8),
+          Row(children: [
+            const Expanded(
+              child: Text('此操作有破坏性,已被拦截,需你确认',
+                  style: TextStyle(fontSize: 12, color: Color(0xFFB45309))),
+            ),
+            FilledButton.tonal(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFF59E0B),
+                foregroundColor: Colors.white,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: () {
+                final fp = _approvalRe
+                    .firstMatch(block.result!.content)!
+                    .group(1)!;
+                onApprove!('允许执行该操作(批准码 $fp)');
+              },
+              child: const Text('允许执行并继续', style: TextStyle(fontSize: 12)),
+            ),
+          ]),
         ],
         // generate_image/edit_image:把生成的图直接在卡片内渲染
         if (_toolImagePath(block) case final p?) _GeneratedImage(p),
@@ -390,7 +424,9 @@ class _SubagentCardState extends State<_SubagentCard> {
                                     height: 1.4)),
                           ]),
                     ),
-                  TurnBlocks(b.blocks), // 递归渲染子过程
+                  // 子 agent 内不放确认按钮(审查 M2):子 agent 是独立回合、批准码到不了
+                  // 它的 user_message,按钮点了也放行不了;被拦 = 失败汇报。与 web 一致。
+                  TurnBlocks(b.blocks, onApprove: null),
                 ]),
           ),
       ]),

@@ -16,11 +16,13 @@ import { TurnBlocks } from "./TurnBlocks"
 export function MessageList({
   messages,
   onRetry,
+  onApprove,
   onRollback,
   onFork,
 }: {
   messages: Message[]
   onRetry?: () => void
+  onApprove?: (text: string) => void
   onRollback?: (messageId: string) => void
   onFork?: (messageId: string) => void
 }) {
@@ -137,6 +139,7 @@ export function MessageList({
                     blocks={turn.blocks}
                     resolvePath={resolvePath}
                     onOpenPath={openFileDrawerAt}
+                    onApprove={onApprove}
                   />
                 </AssistantBubble>
                 <div className="flex items-center gap-2 pl-1">
@@ -172,6 +175,7 @@ export function MessageList({
               streaming={live.status === "streaming"}
               resolvePath={resolvePath}
               onOpenPath={openFileDrawerAt}
+              onApprove={onApprove}
             />
             {live.status === "error" && (
               <div className="mt-1 text-xs text-red-600">

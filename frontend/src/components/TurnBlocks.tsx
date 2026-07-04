@@ -16,11 +16,13 @@ export function TurnBlocks({
   streaming = false,
   resolvePath,
   onOpenPath,
+  onApprove,
 }: {
   blocks: Block[]
   streaming?: boolean
   resolvePath?: (text: string) => PathHit | null
   onOpenPath?: (hit: PathHit) => void
+  onApprove?: (text: string) => void
 }) {
   // 任务清单(todo 工具):agent 每次全量重写清单 → 多次调用只在【首现位置】渲染一张卡,
   // 内容取本组 blocks 里【最新一次】的 items(原位刷新,不逐卡罗列演进);其余 todo 块跳过。
@@ -68,7 +70,15 @@ export function TurnBlocks({
           if (!b.progress && b.id !== firstTodoId) return null
           if (!b.progress) return <TodoCard key={b.id} items={latestTodoItems} />
         }
-        return <ToolCallCard key={b.id} call={b.call} result={b.result} progress={b.progress} />
+        return (
+          <ToolCallCard
+            key={b.id}
+            call={b.call}
+            result={b.result}
+            progress={b.progress}
+            onApprove={onApprove}
+          />
+        )
       })}
       {streaming && <span className="ml-0.5 animate-pulse text-brand-600">▍</span>}
     </>
@@ -134,6 +144,9 @@ function SubagentCard({
               <p className="mt-0.5 whitespace-pre-wrap break-words text-slate-600">{prompt}</p>
             </div>
           )}
+          {/* 子 agent 内不放确认按钮(审查 M2):子 agent 是独立回合、批准码到不了它的
+              user_message,按钮点了也放行不了。子 agent 被拦 = 失败汇报,主 agent 可改由
+              自己直接执行(那时确认流正常生效)。与 app 端一致。 */}
           <TurnBlocks
             blocks={blocks}
             streaming={running}

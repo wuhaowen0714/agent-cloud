@@ -1062,3 +1062,57 @@ async def test_run_turn_hides_client_actions_on_web():
     tool_names = {t.name for t in provider.last_request.tools}
     assert "set_alarm" not in tool_names and "add_calendar_event" not in tool_names
     assert "remember" in tool_names  # 其余 worker 原生工具不受影响
+
+
+# ---- E2E wiring:批准码从 RunTurnRequest.user_message 一路进拦截层(防挂链漏接)----
+
+
+async def test_run_turn_blocks_dangerous_bash_e2e(sandbox):
+    sandbox_addr, _ = sandbox
+    provider = FakeProvider([_call("bash", {"command": "rm -rf junk"}), _final("好的")])
+    worker_server, wport = await create_worker_server(provider_factory=lambda *a: provider, port=0)
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            resp = await stub.RunTurn(
+                worker_pb2.RunTurnRequest(
+                    agent=worker_pb2.Agent(model="m", provider="fake"),
+                    user_message="清理一下",
+                    sandbox_endpoint=sandbox_addr,
+                    work_subdir="s1",
+                )
+            )
+    finally:
+        await worker_server.stop(None)
+    tool_msgs = [m for m in resp.new_messages if m.role == "tool"]
+    assert tool_msgs, "应有工具结果"
+    result = tool_msgs[0].tool_results[0]
+    assert result.is_error and "批准码" in result.content  # 被拦,未真执行
+
+
+async def test_run_turn_approval_in_user_message_unblocks_e2e(sandbox):
+    sandbox_addr, _ = sandbox
+    cmd = "rm -rf junk_ok"
+    from agent_cloud_common import ToolCall as _TC
+    from agent_cloud_worker.danger import fingerprint as _fp
+
+    fp = _fp(_TC(id="x", name="bash", arguments={"command": cmd}))
+    provider = FakeProvider([_call("bash", {"command": cmd}), _final("已删除")])
+    worker_server, wport = await create_worker_server(provider_factory=lambda *a: provider, port=0)
+    try:
+        async with grpc.aio.insecure_channel(f"localhost:{wport}") as channel:
+            stub = worker_pb2_grpc.WorkerStub(channel)
+            resp = await stub.RunTurn(
+                worker_pb2.RunTurnRequest(
+                    agent=worker_pb2.Agent(model="m", provider="fake"),
+                    user_message=f"允许执行该操作(批准码 {fp})",
+                    sandbox_endpoint=sandbox_addr,
+                    work_subdir="s1",
+                )
+            )
+    finally:
+        await worker_server.stop(None)
+    tool_msgs = [m for m in resp.new_messages if m.role == "tool"]
+    result = tool_msgs[0].tool_results[0]
+    assert "批准码" not in result.content  # 放行:真跑了命令(rm 一个不存在目录,成功)
+    assert not result.is_error
