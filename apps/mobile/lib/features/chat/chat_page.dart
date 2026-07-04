@@ -1,3 +1,4 @@
+import 'dart:async'; // unawaited
 import 'dart:io';
 import 'package:dio/dio.dart'; // DioException(区分 409/422 错误文案)
 import 'package:flutter/material.dart';
@@ -5,6 +6,7 @@ import 'package:flutter/services.dart'; // Clipboard
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:file_selector/file_selector.dart';
+import 'package:image_picker/image_picker.dart'; // 拍照直接问(系统相机,无需权限声明)
 import '../../core/theme/app_theme.dart';
 import '../../models/block.dart'; // TextBlock(提取「复制回答」文本)
 import '../../models/skill.dart';
@@ -83,6 +85,51 @@ class _ChatPageState extends ConsumerState<ChatPage>
     _input.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  /// 附件入口:拍照直接问(对齐豆包拍题场景)或选相册/文件。
+  Future<void> _pickAttachment() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(height: 8),
+          ListTile(
+            leading: const Icon(Icons.photo_camera_outlined, color: AppTheme.teal),
+            title: const Text('拍照', style: TextStyle(fontSize: 15)),
+            onTap: () => Navigator.pop(c, 'camera'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.attach_file, color: AppTheme.teal),
+            title: const Text('相册 / 文件', style: TextStyle(fontSize: 15)),
+            onTap: () => Navigator.pop(c, 'files'),
+          ),
+          const SizedBox(height: 4),
+        ]),
+      ),
+    );
+    if (choice == 'camera') {
+      await _takePhoto();
+    } else if (choice == 'files') {
+      await _pickFiles();
+    }
+  }
+
+  Future<void> _takePhoto() async {
+    try {
+      // 系统相机 Intent(image_picker):无需 CAMERA 权限声明;取消返回 null。
+      final shot = await ImagePicker().pickImage(source: ImageSource.camera);
+      if (shot != null && mounted) setState(() => _pending.add(shot));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('拍照失败: $e')));
+      }
+    }
   }
 
   Future<void> _pickFiles() async {
@@ -429,7 +476,8 @@ class _ChatPageState extends ConsumerState<ChatPage>
         for (final t in state.turns) ...[
           _userSection(t.userText, t.userImages),
           TurnBlocks(t.blocks, onApprove: _approve),
-          _turnActionBar(t, streaming), // 豆包式:回答下方常驻操作栏(复制/分叉/回到这里)
+          _turnActionBar(t, streaming,
+              isLast: identical(t, state.turns.last)), // 豆包式常驻操作栏
           const SizedBox(height: 18),
         ],
         if (streaming || state.live.isNotEmpty) ...[
@@ -560,7 +608,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
   /// 回答下方常驻操作栏(仿豆包):复制回答 / 从这里分叉 / 回到这里。一行轻量按钮,
   /// 直接可见可点,不再走长按弹窗。回滚销毁性、与回合同锁 → 本会话生成中禁用(后端也会 409);
   /// 复制、分叉只读,始终可用。回答为空(纯工具回合)时不显示「复制」。
-  Widget _turnActionBar(Turn t, bool streaming) {
+  Widget _turnActionBar(Turn t, bool streaming, {bool isLast = false}) {
     final answer = _assistantText(t);
     return Padding(
       padding: const EdgeInsets.only(top: 8, left: 2),
@@ -573,9 +621,32 @@ class _ChatPageState extends ConsumerState<ChatPage>
           _actionChip(Icons.call_split, '分叉', () => _fork(t.id)),
           _actionChip(
               Icons.history, '回到这里', streaming ? null : () => _rewind(t)),
+          // 重新生成(对齐豆包):删掉本回合回答、用原文原图立即重发。仅最后一个回合
+          // 提供——中间回合重发会连带删掉其后所有历史,那是「回到这里」的职责。
+          if (isLast)
+            _actionChip(Icons.refresh, '重新生成',
+                streaming ? null : () => _regenerate(t)),
         ],
       ),
     );
+  }
+
+  /// 重新生成 = 回滚该回合 + 用原始内容(含技能/附件 marker 与图片)自动重发。
+  Future<void> _regenerate(Turn t) async {
+    if (_actionBusy) return;
+    _actionBusy = true;
+    try {
+      final ctrl = ref.read(chatControllerProvider(widget.sessionId).notifier);
+      final text = await ctrl.rollback(t.id); // 原始 content(含 marker),回填语义同 rewind
+      unawaited(
+          ref.read(sessionsControllerProvider.notifier).refresh()); // 列表时间戳
+      if (!mounted) return;
+      unawaited(ctrl.send(text, images: t.userImages)); // 原图路径仍在工作区,直接重发
+    } catch (e) {
+      _toast(_errMsg(e, '重新生成失败,请重试'));
+    } finally {
+      _actionBusy = false;
+    }
   }
 
   /// 单个操作按钮(纯图标 + 浅底方块,仿豆包):长按弹 tooltip 文字辅助识别,兼顾可发现性。
@@ -740,7 +811,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
             padding: const EdgeInsets.all(8),
             child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
               IconButton(
-                onPressed: _uploading ? null : _pickFiles,
+                onPressed: _uploading ? null : _pickAttachment,
                 icon: const Icon(Icons.attach_file),
                 color: AppTheme.muted,
                 tooltip: '添加文件',

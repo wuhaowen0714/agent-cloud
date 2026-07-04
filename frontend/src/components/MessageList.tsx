@@ -19,12 +19,14 @@ export function MessageList({
   onApprove,
   onRollback,
   onFork,
+  onRegenerate,
 }: {
   messages: Message[]
   onRetry?: () => void
   onApprove?: (text: string) => void
   onRollback?: (messageId: string) => void
   onFork?: (messageId: string) => void
+  onRegenerate?: (messageId: string) => void
 }) {
   const live = useStore((s) => s.live)
   // 正文里的工作区路径 → 可点链接:文件索引与 @ 引用共用 query(30s stale);索引未就绪时
@@ -125,6 +127,12 @@ export function MessageList({
                     text={parseUserMessage(turn.userText).body}
                     onRollback={onRollback ? () => onRollback(turn.id) : undefined}
                     onFork={onFork ? () => onFork(turn.id) : undefined}
+                    onRegenerate={
+                      // 仅最后一轮:中间回合重发会连带删其后历史,那是「回滚到此处」的职责
+                      onRegenerate && i === turns.length - 1
+                        ? () => onRegenerate(turn.id)
+                        : undefined
+                    }
                   />
                   {turn.userAt && (
                     <span className="text-[11px] text-slate-400">{fmtTime(turn.userAt)}</span>

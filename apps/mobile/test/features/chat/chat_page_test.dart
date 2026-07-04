@@ -5,12 +5,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http_mock_adapter/http_mock_adapter.dart';
 import 'package:agent_cloud_mobile/features/auth/auth_controller.dart';
+import 'package:agent_cloud_mobile/features/chat/chat_controller.dart';
 import 'package:agent_cloud_mobile/features/chat/chat_page.dart';
 
 Dio _dio({void Function(DioAdapter)? extra}) {
   final dio = Dio(BaseOptions(baseUrl: 'http://x/api'));
   final a = DioAdapter(dio: dio);
-  // 历史:一条用户提问 + 一条 assistant 回答 → 合成一个带操作栏的历史回合
+  // 历史:两轮问答 → 「重新生成」仅出现在最后一轮的操作栏
   a.onGet('/sessions/s1/messages', (s) => s.reply(200, [
         {
           'id': 'm1',
@@ -23,6 +24,18 @@ Dio _dio({void Function(DioAdapter)? extra}) {
           'seq': 1,
           'role': 'assistant',
           'content': {'text': '快排是分治排序'},
+        },
+        {
+          'id': 'm3',
+          'seq': 2,
+          'role': 'user',
+          'content': {'text': '再举个例子'},
+        },
+        {
+          'id': 'm4',
+          'seq': 3,
+          'role': 'assistant',
+          'content': {'text': '例如 [3,1,2] 排成 [1,2,3]'},
         },
       ]));
   // resume:无进行中回合
@@ -69,15 +82,16 @@ void main() {
     await _pump(tester);
     expect(find.text('解释快排'), findsOneWidget);
     // 操作栏直接渲染在回答下方,不靠长按
-    expect(find.byTooltip('复制'), findsOneWidget);
-    expect(find.byTooltip('分叉'), findsOneWidget);
-    expect(find.byTooltip('回到这里'), findsOneWidget);
+    expect(find.byTooltip('复制'), findsNWidgets(2)); // 两轮各一
+    expect(find.byTooltip('分叉'), findsNWidgets(2));
+    expect(find.byTooltip('回到这里'), findsNWidgets(2));
+    expect(find.byTooltip('重新生成'), findsOneWidget); // 仅最后一轮
   });
 
   testWidgets('点操作栏「复制」→ 复制回答正文 + 提示已复制', (tester) async {
     final copied = _mockClipboard();
     await _pump(tester);
-    await tester.tap(find.byTooltip('复制'));
+    await tester.tap(find.byTooltip('复制').first); // 第一轮的复制
     await tester.pumpAndSettle();
     expect(copied(), '快排是分治排序');
     expect(find.text('已复制'), findsOneWidget);
@@ -100,7 +114,7 @@ void main() {
         data: {'message_id': 'm1'},
       );
     });
-    await tester.tap(find.byTooltip('回到这里'));
+    await tester.tap(find.byTooltip('回到这里').first); // 第一轮(mock 的 m1)
     await tester.pumpAndSettle();
     // 确认弹窗 → 删除
     await tester.tap(find.text('删除'));
@@ -168,6 +182,39 @@ void main() {
     await tester.enterText(find.byType(TextField), '/usr/bin');
     await tester.pumpAndSettle();
     expect(find.text('文档整理'), findsNothing); // 含第二个 / → 不触发技能浮层
+  });
+
+  testWidgets('重新生成:仅最后一轮显示;点击 → rollback(m3)后自动重发原文', (tester) async {
+    var rolledBack = false;
+    await _pump(tester, extra: (a) {
+      a.onPost(
+        '/sessions/s1/rollback',
+        (s) {
+          rolledBack = true;
+          return s.reply(200, {'deleted_count': 2, 'user_text': '再举个例子'});
+        },
+        data: {'message_id': 'm3'}, // 最后一轮的 user 消息 id
+      );
+    });
+    // 两轮回合,但「重新生成」chip 只有一个(最后一轮)
+    expect(find.byTooltip('重新生成'), findsOneWidget);
+    expect(find.byTooltip('复制'), findsNWidgets(2)); // 其余操作两轮都有
+
+    await tester.tap(find.byTooltip('重新生成'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(rolledBack, isTrue); // rollback 已按最后一轮的 id 发出
+    // 随后自动重发原文:send 走 turn/stream(mock 未配 → 落 failedMessage,内容即原文)
+    final st = ProviderScope.containerOf(tester.element(find.byType(ChatPage)))
+        .read(chatControllerProvider('s1'));
+    expect(st.liveUser == '再举个例子' || st.failedMessage == '再举个例子', isTrue);
+  });
+
+  testWidgets('附件按钮 → 弹菜单含「拍照」与「相册 / 文件」', (tester) async {
+    await _pump(tester);
+    await tester.tap(find.byIcon(Icons.attach_file));
+    await tester.pumpAndSettle();
+    expect(find.text('拍照'), findsOneWidget);
+    expect(find.text('相册 / 文件'), findsOneWidget);
   });
 
   testWidgets('@ 浮层点 ✕ → 关闭', (tester) async {

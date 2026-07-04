@@ -1,4 +1,4 @@
-import { Check, Copy, GitBranch, Undo2 } from "lucide-react"
+import { Check, Copy, GitBranch, RefreshCw, Undo2 } from "lucide-react"
 import { type ReactNode, useEffect, useRef, useState } from "react"
 import { copyText } from "../clipboard"
 
@@ -48,10 +48,12 @@ export function MessageActions({
   text,
   onRollback,
   onFork,
+  onRegenerate,
 }: {
   text: string
   onRollback?: () => void
   onFork?: () => void
+  onRegenerate?: () => void
 }) {
   // 复制结果反馈:成功/失败都要可感知(HTTP 公网下 clipboard API 不存在,copyText 内部
   // 退回 execCommand;真失败也不能再无声无息)。短暂显示后回常态。
@@ -103,6 +105,16 @@ export function MessageActions({
           onClick={onFork}
         >
           <GitBranch className="h-3.5 w-3.5" />
+        </ActionBtn>
+      )}
+      {onRegenerate && (
+        <ActionBtn
+          label="重新生成"
+          tip="重新生成:删掉本回合回答,用原话重新回答"
+          align="right"
+          onClick={onRegenerate}
+        >
+          <RefreshCw className="h-3.5 w-3.5" />
         </ActionBtn>
       )}
     </div>

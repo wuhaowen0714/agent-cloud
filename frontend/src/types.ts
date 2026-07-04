@@ -18,7 +18,7 @@ export interface ScheduledTask {
 
 export interface ToolCall { id: string; name: string; arguments: Record<string, unknown> }
 export interface ToolResult { call_id: string; content: string; is_error: boolean }
-export interface MessageContent { text: string; tool_calls: ToolCall[]; tool_results: ToolResult[]; parent_call_id?: string }
+export interface MessageContent { text: string; tool_calls: ToolCall[]; tool_results: ToolResult[]; parent_call_id?: string; images?: string[] }
 export interface Message { id: string; seq: number; role: "user" | "assistant" | "tool"; content: MessageContent; created_at: string }
 
 // SSE 回合事件(后端 turn_event_to_sse 的形状)

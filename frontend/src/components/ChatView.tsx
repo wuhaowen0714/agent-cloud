@@ -246,6 +246,31 @@ export function ChatView() {
     }
   }
 
+  // 重新生成(对齐豆包):回滚该回合 + 用原始内容(含 marker 与图片)立即重发。
+  const onRegenerate = async (messageId: string) => {
+    if (actionBusy.current) return
+    const sid = sessionId
+    // 先从缓存拿该 user 消息的图片(rollback 会删它,之后就查不到了)
+    const msg = (messagesQ.data ?? []).find((m) => m.id === messageId)
+    const images: string[] = msg?.content.images ?? []
+    actionBusy.current = true
+    try {
+      const r = await api.rollbackSession(sid, messageId)
+      await qc.invalidateQueries({ queryKey: ["messages", sid] })
+      if (useStore.getState().sessionId === sid) {
+        clearLive()
+        actionBusy.current = false // onSend 自带 streaming 守卫;先释放再发,避免自锁
+        await onSend(r.user_text, images) // 原图路径仍在工作区
+        return
+      }
+    } catch (e) {
+      if (e instanceof HttpError && e.status === 409) window.alert("会话正忙,请稍候再试")
+      else window.alert("重新生成失败,请稍后再试")
+    } finally {
+      actionBusy.current = false
+    }
+  }
+
   // Fork:复制该用户消息「之前」的历史到新会话,切过去并回填(原会话不动)。
   const onFork = async (messageId: string) => {
     if (actionBusy.current) return
@@ -278,6 +303,7 @@ export function ChatView() {
         onRollback={onRollback}
         onFork={onFork}
         onApprove={onApprove}
+        onRegenerate={onRegenerate}
       />
       <Composer disabled={live?.status === "streaming"} onSend={onSend} onStop={onStop} />
     </div>
