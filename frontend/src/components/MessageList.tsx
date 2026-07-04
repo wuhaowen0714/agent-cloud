@@ -1,5 +1,7 @@
+import { useQuery } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
-import { Fragment, useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { api } from "../api/client"
 import { messagesToTurns } from "../blocks"
 import { parseUserMessage } from "../chatText"
 import { isNearBottom } from "../scroll"
@@ -8,6 +10,7 @@ import { fmtTime } from "../time"
 import type { Message } from "../types"
 import { AssistantBubble, UserBubble } from "./Bubble"
 import { MessageActions } from "./MessageActions"
+import { resolveWorkspacePath } from "../workspacePaths"
 import { TurnBlocks } from "./TurnBlocks"
 
 export function MessageList({
@@ -22,6 +25,20 @@ export function MessageList({
   onFork?: (messageId: string) => void
 }) {
   const live = useStore((s) => s.live)
+  // 正文里的工作区路径 → 可点链接:文件索引与 @ 引用共用 query(30s stale);索引未就绪时
+  // resolve 恒 null(普通 code),渐进增强。点击 → 文件抽屉定位/预览。
+  const userId = useStore((s) => s.userId)
+  const openFileDrawerAt = useStore((s) => s.openFileDrawerAt)
+  const { data: fileIndex = [] } = useQuery({
+    queryKey: ["fileIndex", userId],
+    queryFn: () => api.indexFiles(),
+    enabled: !!userId,
+    staleTime: 30_000,
+  })
+  const resolvePath = useCallback(
+    (text: string) => resolveWorkspacePath(text, fileIndex),
+    [fileIndex],
+  )
   // 当前会话正在压缩 → 藏掉「重试」:重试会触发回合,而压缩与回合同锁,必撞 409(onSend 也兜底拦)。
   const compacting = useStore((s) => !!s.sessionId && s.compactions[s.sessionId]?.phase === "running")
   const endRef = useRef<HTMLDivElement>(null)
@@ -116,7 +133,11 @@ export function MessageList({
             {turn.blocks.length > 0 && (
               <div className="group space-y-1">
                 <AssistantBubble>
-                  <TurnBlocks blocks={turn.blocks} />
+                  <TurnBlocks
+                    blocks={turn.blocks}
+                    resolvePath={resolvePath}
+                    onOpenPath={openFileDrawerAt}
+                  />
                 </AssistantBubble>
                 <div className="flex items-center gap-2 pl-1">
                   {turn.doneAt && (
@@ -146,7 +167,12 @@ export function MessageList({
             </div>
           )}
           <AssistantBubble>
-            <TurnBlocks blocks={live.blocks} streaming={live.status === "streaming"} />
+            <TurnBlocks
+              blocks={live.blocks}
+              streaming={live.status === "streaming"}
+              resolvePath={resolvePath}
+              onOpenPath={openFileDrawerAt}
+            />
             {live.status === "error" && (
               <div className="mt-1 text-xs text-red-600">
                 {live.recoverable === false ? (

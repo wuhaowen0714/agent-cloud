@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { api } from "../../api/client"
 import { useStore } from "../../store"
 import type { FileEntry } from "../../types"
@@ -14,6 +14,30 @@ export function FileDrawer() {
   const userId = useStore((s) => s.userId)
   const [path, setPath] = useState("")
   const [preview, setPreview] = useState<FileEntry | null>(null)
+  const target = useStore((s) => s.fileDrawerTarget)
+  const clearTarget = useStore((s) => s.clearFileDrawerTarget)
+  // 从聊天正文点路径进来:目录 → 定位到该目录;文件 → 定位到其父目录并直接打开预览
+  // (FilePreview 只消费 path/name,合成轻量 entry 即可,不必等目录列表)。消费后即清。
+  useEffect(() => {
+    if (!target) return
+    if (target.isDir) {
+      setPath(target.path)
+      setPreview(null)
+    } else {
+      const dir = target.path.includes("/")
+        ? target.path.slice(0, target.path.lastIndexOf("/"))
+        : ""
+      setPath(dir)
+      setPreview({
+        name: target.path.split("/").pop() ?? target.path,
+        path: target.path,
+        is_dir: false,
+        size: 0,
+        mtime: 0,
+      })
+    }
+    clearTarget()
+  }, [target, clearTarget])
   const qc = useQueryClient()
   const refresh = () => qc.invalidateQueries({ queryKey: ["files", userId] })
 

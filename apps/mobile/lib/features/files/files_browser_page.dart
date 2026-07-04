@@ -63,15 +63,24 @@ String _extOf(String name) {
 
 /// 工作区文件浏览器:目录导航 + 多格式预览 + 下载 + 删除 + 新建文件夹 + 上传图片。
 class FilesPage extends ConsumerStatefulWidget {
-  const FilesPage({super.key});
+  final String initialDir; // 初始定位目录(聊天正文点目录路径进来)
+  final String? previewPath; // 进入后自动预览的文件(聊天正文点文件路径进来)
+  const FilesPage({super.key, this.initialDir = '', this.previewPath});
   @override
   ConsumerState<FilesPage> createState() => _FilesPageState();
 }
 
 class _FilesPageState extends ConsumerState<FilesPage> {
-  String _path = ''; // 当前目录(根 = 空)
+  late String _path = widget.initialDir; // 当前目录(根 = 空)
+  String? _pendingPreview; // 待自动预览:目录列表加载出该项后 _open 并清除
   bool _showHidden = false; // 默认隐藏 . 开头文件/夹
   final Set<String> _downloading = {}; // 下载中的 path,防重复点 + 显示进度
+
+  @override
+  void initState() {
+    super.initState();
+    _pendingPreview = widget.previewPath;
+  }
 
   bool get _atRoot => _path.isEmpty;
   void _enter(String dir) => setState(() => _path = dir);
@@ -240,6 +249,22 @@ class _FilesPageState extends ConsumerState<FilesPage> {
   @override
   Widget build(BuildContext context) {
     final files = ref.watch(filesListProvider(_path));
+    // 待自动预览(聊天正文点文件路径进来):目录列表就绪且含该项 → 打开预览并清除。
+    // 从列表取真实 entry(而非合成)——文本预览的大小限制(_maxTextPreview)依赖真实 size。
+    final pending = _pendingPreview;
+    if (pending != null) {
+      final entry = files.asData?.value
+          .where((e) => e.path == pending)
+          .firstOrNull;
+      if (entry != null) {
+        _pendingPreview = null;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _open(entry);
+        });
+      } else if (files.hasValue) {
+        _pendingPreview = null; // 列表已加载但没有该文件(已被删):静默落在目录页
+      }
+    }
     return Scaffold(
       appBar: AppBar(
         title: Text(_atRoot ? '文件' : _path.split('/').last),

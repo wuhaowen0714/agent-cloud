@@ -2,13 +2,26 @@ import { Bot, ChevronDown, ChevronRight } from "lucide-react"
 import { useState } from "react"
 import type { Block } from "../blocks"
 import { stripWorkspaceImageMarkdown } from "../chatText"
+import type { PathHit } from "../workspacePaths"
 import { Markdown } from "./Markdown"
 import { ThinkingPanel } from "./ThinkingPanel"
 import { ToolCallCard } from "./ToolCallCard"
 import { parseTodoItems, TodoCard } from "./TodoCard"
 
 // 按时间顺序渲染一个回合的块流。streaming 时:最后一块若是思考则自动展开,末尾显示光标。
-export function TurnBlocks({ blocks, streaming = false }: { blocks: Block[]; streaming?: boolean }) {
+// resolvePath/onOpenPath:正文工作区路径 → 可点链接(由调用方注入,如 MessageList 用
+// 文件索引 + 文件抽屉;不传则纯渲染,测试/其它场景零依赖)。递归子 agent 卡时原样透传。
+export function TurnBlocks({
+  blocks,
+  streaming = false,
+  resolvePath,
+  onOpenPath,
+}: {
+  blocks: Block[]
+  streaming?: boolean
+  resolvePath?: (text: string) => PathHit | null
+  onOpenPath?: (hit: PathHit) => void
+}) {
   // 任务清单(todo 工具):agent 每次全量重写清单 → 多次调用只在【首现位置】渲染一张卡,
   // 内容取本组 blocks 里【最新一次】的 items(原位刷新,不逐卡罗列演进);其余 todo 块跳过。
   // 子 agent 卡内部递归调用本组件时,以其内部 blocks 为一组,天然各自独立。
@@ -30,7 +43,11 @@ export function TurnBlocks({ blocks, streaming = false }: { blocks: Block[]; str
         }
         if (b.kind === "text") {
           // 剥掉指向工作区的 markdown 图(已由工具卡片展示;正文裸路径渲染会破损)
-          return <Markdown key={b.id}>{stripWorkspaceImageMarkdown(b.text)}</Markdown>
+          return (
+            <Markdown key={b.id} resolvePath={resolvePath} onOpenPath={onOpenPath}>
+              {stripWorkspaceImageMarkdown(b.text)}
+            </Markdown>
+          )
         }
         if (b.kind === "subagent") {
           return (
@@ -41,6 +58,8 @@ export function TurnBlocks({ blocks, streaming = false }: { blocks: Block[]; str
               blocks={b.blocks}
               running={b.running}
               ok={b.ok}
+              resolvePath={resolvePath}
+              onOpenPath={onOpenPath}
             />
           )
         }
@@ -64,12 +83,16 @@ function SubagentCard({
   blocks,
   running,
   ok,
+  resolvePath,
+  onOpenPath,
 }: {
   description: string
   prompt: string
   blocks: Block[]
   running: boolean
   ok: boolean
+  resolvePath?: (text: string) => PathHit | null
+  onOpenPath?: (hit: PathHit) => void
 }) {
   const [open, setOpen] = useState(false)
   const expanded = running || open // 运行中强制展开;完成后默认折叠
@@ -111,7 +134,12 @@ function SubagentCard({
               <p className="mt-0.5 whitespace-pre-wrap break-words text-slate-600">{prompt}</p>
             </div>
           )}
-          <TurnBlocks blocks={blocks} streaming={running} />
+          <TurnBlocks
+            blocks={blocks}
+            streaming={running}
+            resolvePath={resolvePath}
+            onOpenPath={onOpenPath}
+          />
         </div>
       )}
     </div>

@@ -1,5 +1,6 @@
 import "katex/dist/katex.min.css"
 import { memo } from "react"
+import type { ReactNode } from "react"
 import ReactMarkdown from "react-markdown"
 import rehypeHighlight from "rehype-highlight"
 import rehypeKatex from "rehype-katex"
@@ -31,12 +32,57 @@ function normalizeMath(s: string): string {
 // 大文件预览/流式重渲染下是纯浪费,LLM 输出几乎总带语言标注。token 配色在 index.css。
 // memo:流式期间 MessageList 每个 delta 都重渲染,历史回合的 Markdown 文本不变——
 // 跳过它们的重解析+重高亮(live 块 children 在变,照常更新)。
-export const Markdown = memo(function Markdown({ children }: { children: string }) {
+// 工作区路径链接(可选,聊天正文启用):inline code 文本命中传入的解析器 → 渲染成可点
+// 击的 code 样式按钮(打开文件预览 / 文件管理定位)。仅替换渲染出的 React 元素,不引入
+// 任何原始 HTML,不触碰上方 XSS 红线。block code(className 带 language- 或含换行)不处理。
+export const Markdown = memo(function Markdown({
+  children,
+  resolvePath,
+  onOpenPath,
+}: {
+  children: string
+  resolvePath?: (text: string) => { path: string; isDir: boolean } | null
+  onOpenPath?: (hit: { path: string; isDir: boolean }) => void
+}) {
+  const components =
+    resolvePath && onOpenPath
+      ? {
+          code: ({ className, children: c, ...rest }: { className?: string; children?: ReactNode }) => {
+            const text =
+              typeof c === "string"
+                ? c
+                : Array.isArray(c) && c.every((x) => typeof x === "string")
+                  ? c.join("")
+                  : null
+            const isInline =
+              text !== null && !text.includes("\n") && !(className ?? "").includes("language-")
+            const hit = isInline && text ? resolvePath(text) : null
+            if (!hit) {
+              return (
+                <code className={className} {...rest}>
+                  {c}
+                </code>
+              )
+            }
+            return (
+              <button
+                type="button"
+                onClick={() => onOpenPath(hit)}
+                title={hit.isDir ? "在文件管理中打开" : "预览文件"}
+                className="cursor-pointer rounded bg-brand-50 px-1 py-0.5 font-mono text-[0.875em] text-brand-700 underline decoration-brand-300 underline-offset-2 hover:bg-brand-100"
+              >
+                {text}
+              </button>
+            )
+          },
+        }
+      : undefined
   return (
     <div className="prose prose-sm prose-slate max-w-none prose-pre:bg-slate-800 prose-pre:text-slate-100 prose-code:text-brand-700 prose-code:before:content-none prose-code:after:content-none [&_pre_code]:text-inherit">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }], rehypeHighlight]}
+        components={components}
       >
         {normalizeMath(children)}
       </ReactMarkdown>

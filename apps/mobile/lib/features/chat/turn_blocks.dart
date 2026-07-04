@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart' show GoRouterHelper; // 只要 context.push(Block 与本地模型撞名)
+import 'package:markdown/markdown.dart' as md;
 import '../../core/theme/app_theme.dart';
-import '../files/files_repository.dart'; // sentImageProvider(带 token 取图)
+import '../files/files_repository.dart'; // sentImageProvider / fileIndexProvider
 import '../../models/block.dart';
 import 'edit_diff.dart';
 import 'todo_card.dart';
+import 'workspace_paths.dart';
 
 // generate_image/edit_image 成功结果文本里嵌着落盘路径(worker 回填 media/picture/..)
 final _imgPathRe = RegExp(
@@ -59,11 +62,73 @@ class TurnBlocks extends StatelessWidget {
         ThinkingBlock(:final text) => _Thinking(text),
         TextBlock(:final text) => Padding(
             padding: const EdgeInsets.symmetric(vertical: 2),
-            child: MarkdownBody(data: text, shrinkWrap: true, styleSheet: _md),
+            child: _ChatMarkdown(text),
           ),
         ToolBlock() => _ToolCard(b),
         SubagentBlock() => _SubagentCard(b),
       };
+}
+
+/// 聊天正文 markdown:inline code 里的工作区路径 → 可点链接(文件开预览 / 目录进文件
+/// 管理)。与 @ 引用共用 fileIndexProvider;索引未加载时按普通 code 渲染,渐进增强。
+class _ChatMarkdown extends ConsumerWidget {
+  final String text;
+  const _ChatMarkdown(this.text);
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final index = ref.watch(fileIndexProvider).asData?.value ?? const <String>[];
+    // key 随「索引是否就绪」变化:flutter_markdown 仅在 data/styleSheet 变化时重解析
+    // (didUpdateWidget 门槛),索引异步到位后只换 builders 不会重建 children ——
+    // 历史消息的路径链接会永不出现(审查高危,已实测坐实)。换 key 强制重建 State 重解析。
+    return MarkdownBody(
+      key: ValueKey(index.isEmpty),
+      data: text,
+      shrinkWrap: true,
+      styleSheet: _md,
+      builders: index.isEmpty
+          ? const {}
+          : {'code': _PathLinkCodeBuilder(index, context)},
+    );
+  }
+}
+
+/// inline code 定制:命中工作区路径 → teal 下划线可点;未命中/块级(含换行)返回 null
+/// 走默认渲染。文件 → /files 自动预览;目录 → /files 定位到该目录。
+class _PathLinkCodeBuilder extends MarkdownElementBuilder {
+  final List<String> index;
+  final BuildContext context;
+  _PathLinkCodeBuilder(this.index, this.context);
+
+  @override
+  Widget? visitElementAfter(md.Element element, TextStyle? preferredStyle) {
+    final text = element.textContent;
+    if (text.contains('\n')) return null; // 块级代码走默认
+    final hit = resolveWorkspacePath(text, index);
+    if (hit == null) return null;
+    final dir = hit.isDir
+        ? hit.path
+        : (hit.path.contains('/')
+            ? hit.path.substring(0, hit.path.lastIndexOf('/'))
+            : '');
+    final query = hit.isDir
+        ? 'dir=${Uri.encodeComponent(dir)}'
+        : 'dir=${Uri.encodeComponent(dir)}&preview=${Uri.encodeComponent(hit.path)}';
+    return GestureDetector(
+      onTap: () => context.push('/files?$query'),
+      child: Text(
+        text,
+        style: const TextStyle(
+          fontSize: 13,
+          fontFamily: 'monospace',
+          color: AppTheme.teal,
+          decoration: TextDecoration.underline,
+          decorationColor: AppTheme.teal,
+          backgroundColor: AppTheme.tealSoft,
+        ),
+      ),
+    );
+  }
 }
 
 final _md = MarkdownStyleSheet(

@@ -78,7 +78,12 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
           path: '/agent/:aid/memory',
           builder: (_, st) => AgentMemoryPage(st.pathParameters['aid']!)),
-      GoRoute(path: '/files', builder: (_, _) => const FilesPage()),
+      GoRoute(
+          path: '/files',
+          // dir/preview:从聊天正文点工作区路径进来的定位(目录 / 待预览文件)。
+          builder: (_, st) => FilesPage(
+              initialDir: st.uri.queryParameters['dir'] ?? '',
+              previewPath: st.uri.queryParameters['preview'])),
       GoRoute(path: '/terminal', builder: (_, _) => const TerminalPage()),
     ],
   );

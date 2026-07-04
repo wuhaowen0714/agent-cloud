@@ -1,8 +1,19 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { fireEvent, render as rtlRender, screen } from "@testing-library/react"
+import type { ReactElement } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useStore } from "../store"
 import type { Message } from "../types"
 import { MessageList } from "./MessageList"
+
+// MessageList 内部 useQuery(文件索引,路径链接用)→ 测试统一包 QueryClientProvider
+// (retry 关掉,查询失败即静默,不产生真实请求依赖)。
+function render(ui: ReactElement) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, enabled: false } } })
+  const wrap = (el: ReactElement) => <QueryClientProvider client={qc}>{el}</QueryClientProvider>
+  const result = rtlRender(wrap(ui))
+  return { ...result, rerender: (next: ReactElement) => result.rerender(wrap(next)) }
+}
 
 afterEach(() => {
   useStore.setState({ live: null, sessionId: null, compactions: {} })

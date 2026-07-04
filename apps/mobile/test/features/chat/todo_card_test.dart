@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:agent_cloud_mobile/features/files/files_repository.dart';
 import 'package:agent_cloud_mobile/features/chat/todo_card.dart';
 import 'package:agent_cloud_mobile/features/chat/turn_blocks.dart';
 import 'package:agent_cloud_mobile/models/block.dart';
@@ -55,8 +57,14 @@ void main() {
         {'content': 'b', 'status': 'in_progress'},
       ]),
     ];
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(body: SingleChildScrollView(child: TurnBlocks(blocks))),
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        // TextBlock 渲染(_ChatMarkdown)watch 文件索引;测试给空索引即可
+        fileIndexProvider.overrideWith((ref) => Future.value(const <String>[])),
+      ],
+      child: MaterialApp(
+        home: Scaffold(body: SingleChildScrollView(child: TurnBlocks(blocks))),
+      ),
     ));
     expect(find.text('任务清单'), findsOneWidget); // 只一张卡
     expect(find.text('1/2'), findsOneWidget); // 内容是最新一次

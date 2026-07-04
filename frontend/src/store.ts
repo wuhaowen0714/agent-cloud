@@ -36,6 +36,8 @@ interface AppState {
   composerDraft: string | null // 待回填到输入框的文本(回滚/fork 触发);Composer 消费一次即清
   pendingSkill: string | null // /skills 选中的技能名,待 Composer 加成 chip(一次性信号,消费即清)
   fileDrawerOpen: boolean
+  // 从聊天正文点路径打开文件管理的定位目标(FileDrawer 挂载后消费并清除)
+  fileDrawerTarget: { path: string; isDir: boolean } | null
   terminalOpen: boolean
   settingsOpen: boolean
   settingsTab: SettingsTab
@@ -56,6 +58,8 @@ interface AppState {
   setComposerDraft: (text: string | null) => void
   setPendingSkill: (name: string | null) => void
   toggleFileDrawer: () => void
+  openFileDrawerAt: (target: { path: string; isDir: boolean }) => void
+  clearFileDrawerTarget: () => void
   toggleTerminal: () => void
   openSettings: (tab?: SettingsTab) => void
   closeSettings: () => void
@@ -102,6 +106,7 @@ export const useStore = create<AppState>((set, get) => ({
   composerDraft: null,
   pendingSkill: null,
   fileDrawerOpen: false,
+  fileDrawerTarget: null,
   terminalOpen: false,
   settingsOpen: false,
   settingsTab: "agent",
@@ -192,6 +197,8 @@ export const useStore = create<AppState>((set, get) => ({
       return { queues: rest }
     }),
   toggleFileDrawer: () => set((s) => ({ fileDrawerOpen: !s.fileDrawerOpen })),
+  openFileDrawerAt: (target) => set({ fileDrawerOpen: true, fileDrawerTarget: target }),
+  clearFileDrawerTarget: () => set({ fileDrawerTarget: null }),
   toggleTerminal: () => set((s) => ({ terminalOpen: !s.terminalOpen })),
   openSettings: (tab = "agent") => set({ settingsOpen: true, settingsTab: tab }),
   closeSettings: () => set({ settingsOpen: false }),
