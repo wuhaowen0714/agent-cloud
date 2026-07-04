@@ -1,4 +1,6 @@
 import 'package:dio/dio.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../auth/auth_controller.dart'; // dioProvider
 import '../../core/sse/sse_parser.dart';
 import '../../models/message.dart';
 import '../../models/turn_event.dart';
@@ -68,6 +70,12 @@ class ChatRepository {
     return parseSse((r.data as ResponseBody).stream);
   }
 
+  /// 手动压缩会话上下文(与回合同一把会话锁:回合进行中 → 409)。返回是否有内容被折叠。
+  Future<bool> compactSession(String sessionId) async {
+    final r = await _dio.post('/sessions/$sessionId/compact');
+    return (r.data as Map<String, dynamic>)['compacted'] as bool? ?? false;
+  }
+
   /// 主动停止正在跑的回合(服务端取消 runner;幂等:无在跑回合也 204)。
   Future<void> cancelTurn(String sessionId) =>
       _dio.post('/sessions/$sessionId/turn/cancel');
@@ -98,3 +106,6 @@ class ChatRepository {
     );
   }
 }
+
+final chatRepoProvider =
+    Provider<ChatRepository>((ref) => ChatRepository(ref.read(dioProvider)));

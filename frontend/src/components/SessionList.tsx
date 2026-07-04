@@ -19,6 +19,7 @@ export function SessionList() {
   const qc = useQueryClient()
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(DEFAULT_COLLAPSED))
+  const [search, setSearch] = useState("")
   const [confirmingGroup, setConfirmingGroup] = useState<string | null>(null)
   const [clearNote, setClearNote] = useState<string | null>(null)
   const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -39,7 +40,12 @@ export function SessionList() {
 
   // 只显示当前 agent 的会话。定时任务产物(scheduled_task_id 非空)单独成组(置顶,便于看
   // 未读),其余按最近活跃降序 + 时间分组。
-  const mine = agentId ? sessions.filter((s) => s.agent_config_id === agentId) : []
+  const allMine = agentId ? sessions.filter((s) => s.agent_config_id === agentId) : []
+  // 标题搜索(纯前端过滤):命中项直接可见——搜索态忽略分组折叠。
+  const q = search.trim().toLowerCase()
+  const mine = q
+    ? allMine.filter((s) => (s.title ?? `会话 ${s.id.slice(0, 6)}`).toLowerCase().includes(q))
+    : allMine
   const byActive = (a: Session, b: Session) =>
     +new Date(b.last_active_at) - +new Date(a.last_active_at)
   const scheduled = mine.filter((s) => s.scheduled_task_id).sort(byActive)
@@ -70,6 +76,7 @@ export function SessionList() {
 
   const removeSession = async (id: string) => {
     await api.deleteSession(id) // 409(回合进行中)→ 抛 HttpError,由 RowMenu 原位提示
+    useStore.getState().clearQueue(id) // 清持久化的排队消息,防僵尸残留 localStorage
     await invalidate()
     if (useStore.getState().sessionId === id) setSession(null)
   }
@@ -114,6 +121,27 @@ export function SessionList() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <div className="relative mx-1 mb-1.5">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="搜索会话…"
+          className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 pr-6 text-xs text-slate-700 placeholder:text-slate-400 focus:border-brand-300 focus:outline-none"
+        />
+        {search && (
+          <button
+            type="button"
+            onClick={() => setSearch("")}
+            aria-label="清除搜索"
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+          >
+            ×
+          </button>
+        )}
+      </div>
+      {q && mine.length === 0 && (
+        <div className="mx-1 py-2 text-center text-[11px] text-slate-400">无匹配会话</div>
+      )}
       {clearNote && (
         <div className="mx-1 mb-1 rounded-md bg-red-50 px-2 py-1 text-[11px] text-red-600">
           {clearNote}
@@ -121,7 +149,7 @@ export function SessionList() {
       )}
       <ul className="min-h-0 flex-1 space-y-0.5 overflow-auto">
         {groups.map((g) => {
-          const isCollapsed = collapsed.has(g.label)
+          const isCollapsed = !q && collapsed.has(g.label) // 搜索态强制展开,命中直接可见
           const unread = g.items.filter((s) => s.unread).length
           return (
             <Fragment key={g.label}>

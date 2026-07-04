@@ -15,6 +15,7 @@ import '../settings/platform_repository.dart';
 import '../settings/skills_page.dart'; // skillsProvider(全部技能池)
 import 'blocks.dart'; // Turn
 import 'chat_controller.dart';
+import 'chat_repository.dart'; // chatRepoProvider(手动压缩)
 import 'file_ref.dart'; // atTokenAt / filterPaths(@ 文件引用)
 import 'model_picker.dart';
 import 'turn_blocks.dart';
@@ -260,6 +261,10 @@ class _ChatPageState extends ConsumerState<ChatPage>
       context.push('/terminal');
       return;
     }
+    if (v == 'compact') {
+      _compact();
+      return;
+    }
     final aid = _agentId();
     if (aid == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -271,6 +276,24 @@ class _ChatPageState extends ConsumerState<ChatPage>
         context.push('/agent/$aid/tools');
       case 'skills':
         context.push('/agent/$aid/skills');
+    }
+  }
+
+  /// 手动压缩会话上下文(对齐 web /compact):把较早的历史折叠成摘要,给长对话腾上下文。
+  Future<void> _compact() async {
+    final chat = ref.read(chatControllerProvider(widget.sessionId));
+    if (chat.status == ChatStatus.streaming) {
+      _toast('回合进行中,结束后再压缩');
+      return;
+    }
+    _toast('正在压缩上下文…');
+    try {
+      final compacted = await ref
+          .read(chatRepoProvider)
+          .compactSession(widget.sessionId);
+      _toast(compacted ? '压缩完成' : '当前没有可压缩的内容');
+    } catch (e) {
+      _toast(_errMsg(e, '压缩失败,请重试'));
     }
   }
 
@@ -366,6 +389,12 @@ class _ChatPageState extends ConsumerState<ChatPage>
                   child: ListTile(
                       leading: Icon(Icons.terminal),
                       title: Text('终端'),
+                      contentPadding: EdgeInsets.zero)),
+              PopupMenuItem(
+                  value: 'compact',
+                  child: ListTile(
+                      leading: Icon(Icons.compress),
+                      title: Text('压缩上下文'),
                       contentPadding: EdgeInsets.zero)),
             ],
           ),

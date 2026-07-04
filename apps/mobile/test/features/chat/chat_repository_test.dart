@@ -108,6 +108,15 @@ void main() {
     expect(adapter.calls, 5); // 首发 + 4 次重试
   });
 
+  test('compactSession POST + 解析 compacted', () async {
+    final dio = Dio(BaseOptions(baseUrl: 'http://x/api'));
+    DioAdapter(dio: dio).onPost(
+      '/sessions/s1/compact',
+      (s) => s.reply(200, {'compacted': true}),
+    );
+    expect(await ChatRepository(dio).compactSession('s1'), isTrue);
+  });
+
   test('TurnEvent.fromJson 解析 compacting 事件', () {
     expect(TurnEvent.fromJson(jsonDecode('{"type":"compacting"}')),
         isA<CompactingEvent>());

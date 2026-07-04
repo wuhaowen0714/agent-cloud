@@ -1,6 +1,8 @@
 import 'dart:async'; // unawaited:队列自动续发不阻塞收尾
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../auth/auth_controller.dart'; // dioProvider
 import '../../models/block.dart';
@@ -65,6 +67,7 @@ class ChatState {
 }
 
 class ChatController extends FamilyNotifier<ChatState, String> {
+  static const _storage = FlutterSecureStorage(); // 队列持久化(app 被杀不丢排队消息)
   late final ChatRepository _repo;
   late final String _sid;
   CancelToken? _cancel;
@@ -77,6 +80,7 @@ class ChatController extends FamilyNotifier<ChatState, String> {
     _repo = ChatRepository(ref.read(dioProvider));
     ref.onDispose(() => _cancel?.cancel());
     _loadHistory();
+    unawaited(_restoreQueue()); // 恢复上次未发完的排队消息(空闲则自动续发)
     return const ChatState(status: ChatStatus.loading);
   }
 
@@ -97,6 +101,7 @@ class ChatController extends FamilyNotifier<ChatState, String> {
     if (state.status == ChatStatus.streaming) {
       state = state.copyWith(
           queued: [...state.queued, (content: content, images: images)]);
+      unawaited(_persistQueue());
       return;
     }
     final wasFirst = state.turns.isEmpty; // 首回合:后端首问即生成标题,发完轮询刷出来
@@ -132,6 +137,7 @@ class ChatController extends FamilyNotifier<ChatState, String> {
     if (state.status != ChatStatus.idle || state.queued.isEmpty) return;
     final next = state.queued.first;
     state = state.copyWith(queued: state.queued.sublist(1));
+    unawaited(_persistQueue());
     unawaited(send(next.content, images: next.images));
   }
 
@@ -140,12 +146,14 @@ class ChatController extends FamilyNotifier<ChatState, String> {
     if (index < 0 || index >= state.queued.length) return;
     final next = [...state.queued]..removeAt(index);
     state = state.copyWith(queued: next);
+    unawaited(_persistQueue());
   }
 
   /// 停止当前回合:清空排队(停止=止损,自动续发违背用户意图)→ 掐本地流 → 服务端取消
   /// (幂等 204)→ 刷历史收尾(半截回复未落库,user 消息保留,assemble 会剥未答 user)。
   Future<void> stopTurn() async {
     state = state.copyWith(queued: const []);
+    unawaited(_persistQueue());
     _cancel?.cancel(); // 本地流先停:其 isCancel 分支静默返回,不再 feed/收尾
     try {
       await _repo.cancelTurn(_sid);
@@ -197,14 +205,23 @@ class ChatController extends FamilyNotifier<ChatState, String> {
     // (旧流稍后抛 cancel → send 的 isCancel 分支静默返回,不污染状态)。注:即使旧流其实健康
     // 也会重连——宁可多一次 resume(后端支持续看),不可卡死。
     _cancel?.cancel();
+    // 记录发起 resume 时刻的状态:204(无进行中回合)只对「发起时就卡在 streaming」的场景
+    // 做漏收 turn_done 兜底。若发起时是 idle(正常进会话),GET 在飞期间用户可能已发起新回合
+    // ——那时的 streaming 是新回合的,绝不能被 _finishTurn 强刷成 idle(误杀正在跑的回合)。
+    final wasStreaming = state.status == ChatStatus.streaming;
     try {
       _cancel = CancelToken();
       final stream = await _repo.resumeTurn(_sid, cancel: _cancel);
       if (stream == null) {
-        // 没有进行中回合:若本地仍卡在 streaming(典型:客户端动作工具把 app 切后台、漏收了
-        // turn_done,而回合其实已在服务端跑完),刷历史拿最终结果并清掉"生成中";否则(正常
-        // 进会话)无需动作。
-        if (state.status == ChatStatus.streaming) await _finishTurn();
+        // 没有进行中回合:若发起时就卡在 streaming(典型:客户端动作工具把 app 切后台、漏收
+        // turn_done,回合其实已在服务端跑完),刷历史拿最终结果并清掉"生成中"。
+        if (wasStreaming && state.status == ChatStatus.streaming) {
+          await _finishTurn();
+        }
+        // 确认无进行中回合后补踢队列:_restoreQueue 完成时状态常还是 loading(其内部
+        // kickQueue 被拦),这里是进会话链路上「确定空闲」的最早触发点(幂等,空队列 no-op;
+        // 状态非 idle——如飞行中新开的回合——内部自拦)。
+        kickQueue();
         return;
       }
       state = state.copyWith(status: ChatStatus.streaming);
@@ -278,12 +295,60 @@ class ChatController extends FamilyNotifier<ChatState, String> {
       if (state.queued.isNotEmpty) {
         final next = state.queued.first;
         state = state.copyWith(queued: state.queued.sublist(1));
+        unawaited(_persistQueue());
         // 不 await:收尾归收尾,续发是新回合(send 内部 streaming 守卫防竞态重入)。
         unawaited(send(next.content, images: next.images));
       }
     } catch (_) {
       // 刷历史失败(网络抖动):只收尾状态,不自动续发(大概率也会失败,留给用户手动)。
       state = state.copyWith(status: ChatStatus.idle, compacting: false);
+    }
+  }
+
+  // ── 队列持久化:app 被杀/重启不丢排队消息(按会话一个 key;secure_storage 现成零新依赖)──
+
+  Future<void> _persistQueue() async {
+    try {
+      if (state.queued.isEmpty) {
+        await _storage.delete(key: 'queue.$_sid');
+      } else {
+        await _storage.write(
+          key: 'queue.$_sid',
+          value: jsonEncode([
+            for (final q in state.queued)
+              {'content': q.content, 'images': q.images},
+          ]),
+        );
+      }
+    } catch (_) {
+      // 存储不可用(极少数 ROM keystore 抽风):队列仍在内存,仅重启后丢,不影响当前功能
+    }
+  }
+
+  Future<void> _restoreQueue() async {
+    try {
+      final raw = await _storage.read(key: 'queue.$_sid');
+      if (raw == null) return;
+      final list = jsonDecode(raw);
+      if (list is! List) return;
+      final restored = <QueuedMessage>[
+        for (final e in list)
+          if (e is Map && e['content'] is String)
+            (
+              content: e['content'] as String,
+              images: [
+                for (final i in (e['images'] as List? ?? const []))
+                  if (i is String) i,
+              ],
+            ),
+      ];
+      if (restored.isEmpty) return;
+      // 追加而非覆盖:恢复期间用户可能已排了新消息(先到先发,恢复的更早、放前面)。
+      state = state.copyWith(queued: [...restored, ...state.queued]);
+      unawaited(_persistQueue()); // 合并结果落盘:防「恢复窗口内又入队」交错覆盖丢恢复项
+      kickQueue(); // 空闲则立即续发(loading/streaming 时内部自拦,回合收尾会再消费)
+    } catch (_) {
+      // 坏数据/存储异常:按无持久化处理,绝不影响进会话
     }
   }
 }

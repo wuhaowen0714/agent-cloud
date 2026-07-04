@@ -1,3 +1,6 @@
+import 'dart:async'; // unawaited
+
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../auth/auth_controller.dart'; // dioProvider
 import '../../models/agent_config.dart';
@@ -25,6 +28,9 @@ class SessionsController extends AsyncNotifier<List<Session>> {
 
   Future<void> remove(String id) async {
     await ref.read(sessionsRepoProvider).deleteSession(id);
+    // 清该会话持久化的排队消息(防僵尸残留 secure_storage);best-effort。
+    unawaited(
+        const FlutterSecureStorage().delete(key: 'queue.$id').catchError((_) {}));
     state = AsyncValue.data(
         [...?state.asData?.value.where((s) => s.id != id)]);
   }

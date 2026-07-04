@@ -13,11 +13,51 @@ function describe(call: ToolCall): { summary: string; details: string | null } {
     return { summary: String(a.path ?? ""), details: content || null }
   }
   if (call.name === "read_file") return { summary: String(a.path ?? ""), details: null }
+  if (call.name === "edit") return { summary: String(a.path ?? ""), details: null } // diff 专区渲染
   if (call.name === "generate_image" || call.name === "edit_image") {
     return { summary: String(a.prompt ?? ""), details: null }
   }
   const keys = Object.keys(a)
   return { summary: keys.length ? JSON.stringify(a) : "", details: keys.length ? JSON.stringify(a, null, 2) : null }
+}
+
+// edit 工具的 edits 参数 → 结构化(不可信模型输出,逐项容错)。
+export function parseEdits(args: Record<string, unknown>): { old_text: string; new_text: string }[] {
+  const raw = args?.edits
+  if (!Array.isArray(raw)) return []
+  const out: { old_text: string; new_text: string }[] = []
+  for (const e of raw) {
+    if (typeof e !== "object" || e === null) continue
+    const { old_text, new_text } = e as { old_text?: unknown; new_text?: unknown }
+    if (typeof old_text !== "string" || typeof new_text !== "string") continue
+    out.push({ old_text, new_text })
+  }
+  return out
+}
+
+// edit 的红绿 diff 区:old_text 整块红(- 前缀)、new_text 整块绿(+ 前缀)。edit 是「精确
+// 替换」,直接呈现被换走/换来的文本就是最诚实的 diff,不做行内 LCS。
+function EditDiff({ edits }: { edits: { old_text: string; new_text: string }[] }) {
+  return (
+    <div className="max-h-72 overflow-auto border-t border-slate-100 bg-slate-50 px-2.5 py-2 font-mono">
+      {edits.map((e, i) => (
+        <div key={`${i}-${e.old_text.slice(0, 12)}`} className={i > 0 ? "mt-2 border-t border-dashed border-slate-200 pt-2" : ""}>
+          {e.old_text.split("\n").map((line, j) => (
+            <div key={`o${j}`} className="whitespace-pre-wrap break-words bg-red-50 text-red-700">
+              <span className="select-none text-red-400">- </span>
+              {line}
+            </div>
+          ))}
+          {e.new_text.split("\n").map((line, j) => (
+            <div key={`n${j}`} className="whitespace-pre-wrap break-words bg-emerald-50 text-emerald-700">
+              <span className="select-none text-emerald-500">+ </span>
+              {line}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function fmtChars(n: number): string {
@@ -122,8 +162,8 @@ export function ToolCallCard({
       {/* 头部:工具名徽章 + 主摘要 + 状态;有细节时整行可点开 */}
       <button
         type="button"
-        disabled={!details && !result?.content}
-        aria-expanded={details || result?.content ? open : undefined}
+        disabled={call.name !== "edit" && !details && !result?.content}
+        aria-expanded={call.name === "edit" || details || result?.content ? open : undefined}
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-start gap-2 px-2.5 py-1.5 text-left disabled:cursor-default"
       >
@@ -140,13 +180,18 @@ export function ToolCallCard({
             <span className="font-semibold text-brand-600">✓</span>
           )}
         </span>
-        {(details || result?.content) && (
+        {(call.name === "edit" || details || result?.content) && (
           <span className="mt-0.5 shrink-0 text-slate-400">{open ? "▾" : "▸"}</span>
         )}
       </button>
 
       {/* generate_image:成功时把生成的图片在卡片内直接大图展示(不随折叠,常显) */}
       {imagePath && <GeneratedImage path={imagePath} />}
+
+      {/* edit:展开时渲染红绿 diff(替代参数 JSON) */}
+      {open && call.name === "edit" && (
+        <EditDiff edits={parseEdits((call.arguments ?? {}) as Record<string, unknown>)} />
+      )}
 
       {/* 展开:完整写入内容 / 参数 */}
       {open && details && (

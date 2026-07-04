@@ -63,6 +63,32 @@ interface AppState {
 
 const EMPTY: LiveTurn = { userText: "", sessionId: "", startedAt: "", blocks: [], status: "streaming" }
 
+// 排队消息持久化:刷新/重开页面不丢(对齐 Claude Code 之上的增强——手机/浏览器更常被杀)。
+// 按 sessionId 存(uuid 全局唯一,跨用户不串);解析失败按空处理,绝不因坏数据白屏。
+const QUEUES_KEY = "ac.queues"
+function loadQueues(): Record<string, QueuedMessage[]> {
+  try {
+    const raw = localStorage.getItem(QUEUES_KEY)
+    if (!raw) return {}
+    const parsed: unknown = JSON.parse(raw)
+    if (typeof parsed !== "object" || parsed === null) return {}
+    const out: Record<string, QueuedMessage[]> = {}
+    for (const [sid, list] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!Array.isArray(list)) continue
+      const items: QueuedMessage[] = []
+      for (const m of list) {
+        const { text, images } = (m ?? {}) as { text?: unknown; images?: unknown }
+        if (typeof text !== "string") continue
+        items.push({ text, images: Array.isArray(images) ? images.filter((i) => typeof i === "string") : [] })
+      }
+      if (items.length) out[sid] = items
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
 export const useStore = create<AppState>((set, get) => ({
   user: null, // 由 bootstrap(refresh→me)决定,不再从 localStorage 假造
   userId: null,
@@ -72,7 +98,7 @@ export const useStore = create<AppState>((set, get) => ({
   sessionId: localStorage.getItem("ac.sessionId"),
   live: null,
   compactions: {},
-  queues: {},
+  queues: loadQueues(),
   composerDraft: null,
   pendingSkill: null,
   fileDrawerOpen: false,
@@ -173,3 +199,13 @@ export const useStore = create<AppState>((set, get) => ({
 
 // 401 刷新也失败时,api 层会调用 onUnauth → 这里登出回到登录页。
 setOnUnauth(() => useStore.getState().logout())
+
+// queues 任何变更(入队/消费/删除/登出清空)同步写 localStorage;写失败(隐私模式/满)静默。
+useStore.subscribe((state, prev) => {
+  if (state.queues === prev.queues) return
+  try {
+    localStorage.setItem(QUEUES_KEY, JSON.stringify(state.queues))
+  } catch {
+    /* 忽略 */
+  }
+})

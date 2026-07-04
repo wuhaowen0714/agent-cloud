@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:agent_cloud_mobile/features/auth/auth_controller.dart';
 import 'package:agent_cloud_mobile/features/chat/chat_controller.dart';
 
@@ -87,6 +88,13 @@ Future<void> _until(bool Function() cond,
 }
 
 void main() {
+  // 全文件统一初始化 binding + 空 storage mock:secure_storage 在无 binding 的纯 test 里
+  // 行为未定义(不同顺序下抛/挂不一致),统一 mock 让持久化路径确定(读空、写内存)。
+  setUp(() {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    FlutterSecureStorage.setMockInitialValues({});
+  });
+
   test('streaming 中 send → 入队不发 POST;回合正常结束自动续发队首', () async {
     final (:container, :adapter) = _setup();
     addTearDown(container.dispose);
@@ -151,5 +159,45 @@ void main() {
     // 稍等确认不会冒出自动续发
     await Future.delayed(const Duration(milliseconds: 100));
     expect(adapter.turnBodies.length, 1);
+  });
+
+  test('队列持久化:重建 controller 恢复排队消息并空闲自动续发', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    // 预置持久化的队列(上次 app 被杀时留下的)
+    FlutterSecureStorage.setMockInitialValues({
+      'queue.s1': '[{"content":"复活的排队消息","images":[]}]',
+    });
+    final (:container, :adapter) = _setup();
+    addTearDown(container.dispose);
+    ChatState st() => container.read(chatControllerProvider('s1'));
+    container.read(chatControllerProvider('s1').notifier); // 触发 build
+    // 恢复后空闲 → kickQueue 自动把它发出去
+    await _until(() => adapter.turnBodies.isNotEmpty);
+    expect(adapter.turnBodies.first, contains('复活的排队消息'));
+    await _until(() => st().queued.isEmpty);
+  });
+
+  test('入队即持久化:secure_storage 里能读到', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    FlutterSecureStorage.setMockInitialValues({});
+    final (:container, :adapter) = _setup();
+    addTearDown(container.dispose);
+    ChatState st() => container.read(chatControllerProvider('s1'));
+    final ctrl = container.read(chatControllerProvider('s1').notifier);
+    await _until(() => st().status == ChatStatus.idle);
+
+    unawaited(ctrl.send('第一条'));
+    await _until(() => adapter.turnBodies.length == 1);
+    await ctrl.send('排队的');
+    // 持久化是 unawaited 异步写:轮询读到为止
+    const storage = FlutterSecureStorage();
+    final end = DateTime.now().add(const Duration(seconds: 5));
+    String? raw;
+    while (raw == null && DateTime.now().isBefore(end)) {
+      raw = await storage.read(key: 'queue.s1');
+      if (raw == null) await Future.delayed(const Duration(milliseconds: 10));
+    }
+    expect(raw, isNotNull);
+    expect(raw, contains('排队的'));
   });
 }

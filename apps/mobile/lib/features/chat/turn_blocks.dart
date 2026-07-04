@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_theme.dart';
 import '../files/files_repository.dart'; // sentImageProvider(带 token 取图)
 import '../../models/block.dart';
+import 'edit_diff.dart';
 import 'todo_card.dart';
 
 // generate_image/edit_image 成功结果文本里嵌着落盘路径(worker 回填 media/picture/..)
@@ -157,6 +158,19 @@ class _ToolCard extends StatelessWidget {
                 height: 12,
                 child: CircularProgressIndicator(strokeWidth: 1.6)),
         ]),
+        // edit 工具:红绿 diff 直观展示替换内容(替代不可读的参数 JSON)
+        if (block.call.name == 'edit') ...[
+          if (block.call.arguments['path'] case final String p) ...[
+            const SizedBox(height: 6),
+            Text(p,
+                style: const TextStyle(
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                    color: AppTheme.muted)),
+          ],
+          const SizedBox(height: 6),
+          EditDiffView(parseEdits(block.call.arguments)),
+        ],
         if (block.result != null) ...[
           const SizedBox(height: 8),
           Container(

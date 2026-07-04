@@ -33,6 +33,7 @@ class HomePage extends ConsumerStatefulWidget {
 }
 
 class _HomePageState extends ConsumerState<HomePage> {
+  final _search = TextEditingController(); // 会话标题搜索(纯前端过滤)
   String? _selectedAgentId;
   final Set<String> _toggledDates = {}; // 手动 toggle 的天分组(今天默认开,其它默认折叠)
 
@@ -244,6 +245,12 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final agents = ref.watch(agentsProvider).asData?.value ?? const [];
     final sessionsAsync = ref.watch(sessionsControllerProvider);
@@ -288,6 +295,26 @@ class _HomePageState extends ConsumerState<HomePage> {
       body: Column(children: [
         if (agents.isNotEmpty) _agentBar(agents, selectedId, countByAgent),
         const Divider(height: 1),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          child: TextField(
+            controller: _search,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              hintText: '搜索会话…',
+              prefixIcon: const Icon(Icons.search, size: 18),
+              suffixIcon: _search.text.isEmpty
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.clear, size: 16),
+                      onPressed: () => setState(_search.clear),
+                    ),
+              isDense: true,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            ),
+          ),
+        ),
         Expanded(child: _sessionArea(sessionsAsync, selectedId)),
       ]),
     );
@@ -364,8 +391,15 @@ class _HomePageState extends ConsumerState<HomePage> {
         if (selectedId == null) {
           return _empty('还没有智能体', '点右上角 + 新建一个开始');
         }
-        final mine =
+        var mine =
             all.where((s) => s.agentConfigId == selectedId).toList();
+        final q = _search.text.trim().toLowerCase();
+        if (q.isNotEmpty) {
+          mine = mine
+              .where((s) => s.displayTitle.toLowerCase().contains(q))
+              .toList();
+          if (mine.isEmpty) return _empty('无匹配会话', '换个关键词试试');
+        }
         if (mine.isEmpty) {
           return _empty('还没有会话', '点右下角「新对话」开始');
         }
