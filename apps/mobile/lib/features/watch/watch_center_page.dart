@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -16,6 +18,9 @@ class WatchCenterPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final tasks = ref.watch(watchTasksProvider);
+    // 预热 + 保活:详情的产出时间线依赖会话列表。深链进入(点推送)时该 provider
+    // 从未 build,不 watch 的话时间线恒为空。
+    ref.watch(sessionsControllerProvider);
     return Scaffold(
       appBar: AppBar(title: const Text('值守中心')),
       floatingActionButton: FloatingActionButton.extended(
@@ -116,7 +121,13 @@ class _TaskCard extends ConsumerWidget {
                 onChanged: (v) async {
                   try {
                     await ref.read(watchRepoProvider).setEnabled(t.id, v);
+                  } catch (_) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('操作失败,请重试')));
+                    }
                   } finally {
+                    // 失败时重拉真实状态,开关自动回弹
                     ref.invalidate(watchTasksProvider);
                   }
                 },
@@ -149,16 +160,20 @@ class _TaskCard extends ConsumerWidget {
   }
 
   void _showDetail(BuildContext context, WidgetRef ref) {
+    // 拉最新会话列表:刚运行完的产出才能出现在时间线里;best-effort。
+    unawaited(
+        ref.read(sessionsControllerProvider.notifier).refresh().catchError((_) {}));
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (sheetCtx) {
+      // Consumer:sheet 存活期间订阅会话列表,上面的 refresh 落地后时间线自动更新
+      builder: (sheetCtx) => Consumer(builder: (_, sheetRef, _) {
         // 产出时间线:该任务历次运行生成的会话(sessions.scheduled_task_id 关联)
-        final sessions = ref
-                .read(sessionsControllerProvider)
+        final sessions = sheetRef
+                .watch(sessionsControllerProvider)
                 .asData
                 ?.value
                 .where((s) => s.scheduledTaskId == t.id)
@@ -244,6 +259,11 @@ class _TaskCard extends ConsumerWidget {
                       if (sheetCtx.mounted) Navigator.pop(sheetCtx);
                       try {
                         await ref.read(watchRepoProvider).delete(t.id);
+                      } catch (_) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('删除失败,请重试')));
+                        }
                       } finally {
                         ref.invalidate(watchTasksProvider);
                       }
@@ -300,7 +320,7 @@ class _TaskCard extends ConsumerWidget {
             ),
           ),
         );
-      },
+      }),
     );
   }
 }
@@ -339,11 +359,19 @@ class _CreateSheetState extends ConsumerState<_CreateSheet> {
     final name = _name.text.trim();
     final prompt = _prompt.text.trim();
     if (name.isEmpty || prompt.isEmpty || _busy) return;
-    final agents = ref.read(agentsProvider).asData?.value ?? [];
-    if (agents.isEmpty) return;
     setState(() => _busy = true);
     final (kind, expr) = _schedule();
     try {
+      // .future:深链进入时 agentsProvider 可能从未加载,现场拉取而非读空快照
+      final agents = await ref.read(agentsProvider.future);
+      if (agents.isEmpty) {
+        if (mounted) {
+          setState(() => _busy = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('还没有可用的 Agent,请先登录或稍后重试')));
+        }
+        return;
+      }
       await ref.read(watchRepoProvider).create(
             name: name,
             prompt: prompt,

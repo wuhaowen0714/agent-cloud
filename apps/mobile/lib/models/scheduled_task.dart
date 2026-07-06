@@ -46,8 +46,18 @@ class ScheduledTask {
   /// 周期的人话描述(列表副行)。
   String get scheduleLabel => switch (scheduleKind) {
         'cron' => 'Cron:$scheduleExpr',
-        'interval' => '每 $scheduleExpr',
+        'interval' => '每 ${_intervalHuman(scheduleExpr)}',
         'once' => '一次性',
         _ => scheduleExpr,
       };
+
+  /// 后端把 interval 归一化成纯秒("30m"→"1800"),展示时转回人话。
+  static String _intervalHuman(String expr) {
+    final secs = int.tryParse(expr);
+    if (secs == null || secs <= 0) return expr; // "30m" 等带单位形式原样
+    if (secs % 86400 == 0) return '${secs ~/ 86400} 天';
+    if (secs % 3600 == 0) return '${secs ~/ 3600} 小时';
+    if (secs % 60 == 0) return '${secs ~/ 60} 分钟';
+    return '$secs 秒';
+  }
 }

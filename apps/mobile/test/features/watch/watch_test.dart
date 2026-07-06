@@ -34,8 +34,14 @@ void main() {
     expect(t.name, '晨报');
     expect(t.scheduleLabel, contains('Cron'));
     expect(t.enabled, isTrue);
-    expect(ScheduledTask.fromJson(_task()..['schedule_kind'] = 'interval')
-        .scheduleLabel, startsWith('每 '));
+    // 后端把 interval 归一化成纯秒:展示要转回人话
+    ScheduledTask interval(String expr) => ScheduledTask.fromJson(_task()
+      ..['schedule_kind'] = 'interval'
+      ..['schedule_expr'] = expr);
+    expect(interval('1800').scheduleLabel, '每 30 分钟');
+    expect(interval('3600').scheduleLabel, '每 1 小时');
+    expect(interval('86400').scheduleLabel, '每 1 天');
+    expect(interval('90').scheduleLabel, '每 90 秒');
   });
 
   test('repository:list/create/setEnabled/runNow 请求形状', () async {
@@ -83,6 +89,43 @@ void main() {
     expect(find.textContaining('Cron'), findsOneWidget);
     expect(find.byType(Switch), findsOneWidget);
     expect(find.text('新建值守'), findsOneWidget);
+  });
+
+  testWidgets('详情:产出时间线按 scheduled_task_id 关联(深链场景 provider 冷启)', (tester) async {
+    final dio = Dio(BaseOptions(baseUrl: 'http://x/api'));
+    DioAdapter(dio: dio)
+      ..onGet('/scheduled-tasks', (s) => s.reply(200, [_task()]))
+      ..onGet(
+          '/sessions',
+          (s) => s.reply(200, [
+                {
+                  'id': 's1',
+                  'agent_config_id': 'a1',
+                  'model': 'm',
+                  'title': '晨报 · 7月6日',
+                  'status': 'idle',
+                  'last_active_at': DateTime.now().toIso8601String(),
+                  'scheduled_task_id': 't1',
+                },
+                {
+                  'id': 's2',
+                  'agent_config_id': 'a1',
+                  'model': 'm',
+                  'title': '无关会话',
+                  'status': 'idle',
+                  'last_active_at': DateTime.now().toIso8601String(),
+                },
+              ]));
+    await tester.pumpWidget(ProviderScope(
+      overrides: [dioProvider.overrideWithValue(dio)],
+      child: const MaterialApp(home: WatchCenterPage()),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('晨报'));
+    await tester.pumpAndSettle();
+    expect(find.text('产出记录(1)'), findsOneWidget);
+    expect(find.text('晨报 · 7月6日'), findsOneWidget);
+    expect(find.text('无关会话'), findsNothing);
   });
 
   testWidgets('空态引导', (tester) async {
