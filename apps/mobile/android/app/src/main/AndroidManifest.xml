@@ -5,6 +5,14 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <!-- 客户端工具:设置系统闹钟(set_alarm)-->
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM"/>
+    <!-- 推送通道(自建 WS 长连接):前台服务 + Android 13+ 通知权限 + 开机自启 + 保活 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <!-- specialUse 而非 dataSync:targetSdk 35+ 对 dataSync 有 6h/24h 硬时限(超时被系统
+         强停且无法自恢复),长连推送必须用不限时类型;侧载分发无 Play 审核负担 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <application
         android:label="agent_cloud_mobile"
         android:name="${applicationName}"
@@ -48,6 +56,15 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/ota_update_filepaths" />
         </provider>
+        <!-- 推送前台服务(flutter_foreground_task):dataSync 类型,Android 14+ 必须声明 -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="specialUse"
+            android:exported="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="self-hosted push channel (websocket long-connection for AI assistant notifications)" />
+        </service>
         <receiver
             android:name="sk.fourq.otaupdate.InstallResultReceiver"
             android:exported="false">

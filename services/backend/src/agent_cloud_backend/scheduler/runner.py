@@ -12,6 +12,7 @@ from agent_cloud_backend.repositories.scheduled_task import ScheduledTaskReposit
 from agent_cloud_backend.repositories.session import SessionRepository
 from agent_cloud_backend.sandbox.deps import get_sandbox_manager
 from agent_cloud_backend.skills.deps import get_object_store
+from agent_cloud_backend.api.push import push_to_user
 from agent_cloud_backend.turn.headless import SessionBusy, execute_turn_headless
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,23 @@ async def run_scheduled_task(snap: dict, settings: Settings) -> None:
         async with get_sessionmaker()() as db:
             await SessionRepository(db).set_unread(session_id, False)
             await db.commit()
+
+    # 手机端 WS 推送:任务真跑出了结果才推(skipped/[SILENT] 不打扰);best-effort,
+    # 无设备在线静默(app 内未读点 + web 通知兜底)。点通知直达产物会话(session_id)。
+    if status == "ok":
+        try:
+            body = result.final_text.strip().replace("\n", " ")[:200]
+            await push_to_user(
+                snap["user_id"],
+                {
+                    "type": "scheduled_done",
+                    "title": f"📅 {name} 已完成",
+                    "body": body or "已产出结果,点开查看",
+                    "session_id": str(session_id),
+                },
+            )
+        except Exception:
+            logger.exception("push scheduled_done failed for task %s", snap["id"])
 
     # 回执(仅 agent 排的期 + 跑成了 + 发起会话空闲,避免与活跃回合抢 seq)
     origin = snap.get("origin_session_id")

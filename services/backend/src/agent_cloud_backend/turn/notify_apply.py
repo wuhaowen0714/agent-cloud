@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import uuid
 
+from agent_cloud_backend.api.push import push_to_user
 from agent_cloud_backend.db import get_sessionmaker
 from agent_cloud_backend.models.notification import Notification
 from agent_cloud_backend.models.session import Session
@@ -51,6 +52,7 @@ async def apply_notify_calls(session_id: uuid.UUID, new_messages) -> int:
         if enabled and "notify" not in enabled:
             return 0
         created = 0
+        accepted: list[tuple[str, str]] = []
         for c in calls:
             args = c.arguments or {}
             title, body = args.get("title"), args.get("body")
@@ -64,6 +66,17 @@ async def apply_notify_calls(session_id: uuid.UUID, new_messages) -> int:
                     origin_session_id=session_id,
                 )
             )
+            accepted.append((title.strip()[:TITLE_MAX], body.strip()[:BODY_MAX]))
             created += 1
         await db.commit()
-        return created
+        user_id = s.user_id
+    # 手机端 WS 推送(落库之后、事务之外;best-effort——无设备在线就静默,web 轮询兜底)
+    for title, body in accepted:
+        try:
+            await push_to_user(
+                user_id,
+                {"type": "notify", "title": title, "body": body, "session_id": str(session_id)},
+            )
+        except Exception:
+            logger.exception("push notify failed for session %s", session_id)
+    return created

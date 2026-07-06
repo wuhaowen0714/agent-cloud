@@ -18,6 +18,7 @@ from agent_cloud_backend.api import (
     messages,
     notifications,
     platform,
+    push,
     scheduled_tasks,
     sessions,
     skills,
@@ -117,6 +118,7 @@ def create_app() -> FastAPI:
         credentials,
         user_models,
         terminal,
+        push,
     ):
         app.include_router(module.router)
 

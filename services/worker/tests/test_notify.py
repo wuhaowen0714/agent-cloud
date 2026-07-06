@@ -21,25 +21,19 @@ def test_specs_gated():
     assert "notify" not in [s.name for s in NotifyingExecutor(_Inner(), enabled=False).specs()]
 
 
-def test_specs_gated_by_client():
-    # mobile 无 notifications 接收通道 → 不暴露 notify(与 client_actions 的 mobile-only 相反)。
-    assert "notify" not in [
-        s.name for s in NotifyingExecutor(_Inner(), enabled=True, client="mobile").specs()
-    ]
-    # web / 空 client(默认端)→ 暴露。
+def test_specs_exposed_when_enabled():
+    # 2026-07 起 mobile 有 WS 推送通道(backend api/push.py),notify 全平台暴露、
+    # 不再按 client 门控(此前「App 无接收通道 → mobile 隐藏」的历史门控解除)。
     assert "notify" in [
-        s.name for s in NotifyingExecutor(_Inner(), enabled=True, client="web").specs()
-    ]
-    assert "notify" in [
-        s.name for s in NotifyingExecutor(_Inner(), enabled=True, client="").specs()
+        s.name for s in NotifyingExecutor(_Inner(), enabled=True).specs()
     ]
 
 
-async def test_mobile_rejects_execute():
-    # specs 不暴露 + execute 门控双保险:mobile 即便 LLM 硬调 notify 也拒。
-    ex = NotifyingExecutor(_Inner(), enabled=True, client="mobile")
+async def test_mobile_executes_notify():
+    # mobile 调 notify 正常合成确认(落库 + WS 推送在 backend 侧)。
+    ex = NotifyingExecutor(_Inner(), enabled=True)
     r = await ex.execute(ToolCall(id="1", name="notify", arguments={"title": "a", "body": "b"}))
-    assert r.is_error is True
+    assert r.is_error is False
 
 
 async def test_intercept_returns_confirmation_not_forwarded():

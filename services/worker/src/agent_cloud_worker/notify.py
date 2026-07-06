@@ -34,14 +34,13 @@ class NotifyingExecutor:
     """装饰 ToolExecutor:加 worker 原生 ``notify`` 工具。本地校验 + 合成确认,**不碰 DB、不转
     沙箱**;其余委托内层。真正落库由 backend 扫 new_messages 完成(含 enabled_tools 重校验)。
     与 schedule_task 不同:**不**按 is_scheduled_run 关闭——定时任务到点提醒正是主用例。
-    按 client 门控:notify 只送达浏览器(OS 通知 + 网页弹窗),mobile App 无接收通道,故 mobile
-    不暴露(与 ClientActionsExecutor 的 mobile-only 正好相反)。"""
+    全平台暴露:web 走浏览器通知 + 网页弹窗;mobile 自 2026-07 起有 WS 推送长连接通道
+    (backend api/push.py),app 前台服务收到即弹系统通知——此前因 App 无接收通道而对
+    mobile 隐藏的历史门控已解除。"""
 
-    def __init__(self, inner: ToolExecutor, *, enabled: bool, client: str = "") -> None:
+    def __init__(self, inner: ToolExecutor, *, enabled: bool) -> None:
         self._inner = inner
-        # mobile 无 notifications 消费端,暴露只会诱导 LLM 调个落不了地的工具、白费回合;空/未知
-        # client 按非 mobile 处理(保留 notify,web 是默认端)。
-        self._enabled = enabled and client != "mobile"
+        self._enabled = enabled
 
     def specs(self) -> list[ToolSpec]:
         specs = list(self._inner.specs())

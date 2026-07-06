@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+import '../../core/push/push_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -67,6 +70,8 @@ class SettingsPage extends ConsumerWidget {
             _navTile(context, Icons.extension_outlined, '技能', '已安装的技能',
                 '/settings/skills'),
           ]),
+          const SizedBox(height: 20),
+          _section('通知', const [_PushToggleTile()]),
           const SizedBox(height: 20),
           _section('关于', const [_AboutTile()]),
           const SizedBox(height: 20),
@@ -160,5 +165,78 @@ class _AboutTile extends ConsumerWidget {
             child: const Text('检查更新'),
           ),
         ),
+      );
+}
+
+/// 「后台推送」开关:开=请求通知权限 + 启动前台服务(WS 长连,AI 主动提醒/定时任务结果
+/// 推到系统通知);关=停服务。状态存 secure_storage,app 启动时按它自动拉起(main.dart)。
+class _PushToggleTile extends StatefulWidget {
+  const _PushToggleTile();
+  @override
+  State<_PushToggleTile> createState() => _PushToggleTileState();
+}
+
+class _PushToggleTileState extends State<_PushToggleTile> {
+  static const _storage = FlutterSecureStorage();
+  bool _enabled = false;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _storage.read(key: kPushEnabledKey).then((v) {
+      if (mounted) setState(() => _enabled = v == 'true');
+    });
+  }
+
+  Future<void> _toggle(bool on) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      if (on) {
+        final granted = await requestNotificationPermission();
+        if (!granted && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('需要通知权限才能推送,请在系统设置中允许')));
+        }
+        await startPushService();
+        await _storage.write(key: kPushEnabledKey, value: 'true');
+        if (mounted) {
+          setState(() => _enabled = true);
+          // 国产 ROM 杀后台狠:引导一次性设置(不设的话锁屏久了连接会被杀)
+          showDialog<void>(
+            context: context,
+            builder: (c) => AlertDialog(
+              title: const Text('保持推送在线'),
+              content: const Text(
+                  '为了锁屏后也能收到提醒,请在系统设置中允许本应用「自启动」和「后台无限制运行」'
+                  '(通常在 设置 → 应用 → Agent Cloud → 耗电管理/自启动)。'),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(c),
+                    child: const Text('知道了')),
+              ],
+            ),
+          );
+        }
+      } else {
+        await stopPushService();
+        await _storage.write(key: kPushEnabledKey, value: 'false');
+        if (mounted) setState(() => _enabled = false);
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => ListTile(
+        leading: const Icon(Icons.notifications_active_outlined,
+            color: AppTheme.teal),
+        title: const Text('后台推送',
+            style: TextStyle(fontSize: 15, color: AppTheme.ink)),
+        subtitle: const Text('AI 主动提醒与定时任务结果推送到系统通知(常驻一条低优先级通知保持连接)',
+            style: TextStyle(fontSize: 12, color: AppTheme.muted)),
+        trailing: Switch(value: _enabled, onChanged: _busy ? null : _toggle),
       );
 }

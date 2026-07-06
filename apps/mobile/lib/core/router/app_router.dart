@@ -32,12 +32,16 @@ String? authRedirect({
   return location == '/login' ? null : '/login';
 }
 
+/// 通知点击跳转用的全局 router 引用(provider 创建时赋值;push 服务的系统通知
+/// 点击回调在 widget 树外,拿不到 ref)。
+GoRouter? appRouter;
+
 /// router 作为 provider 缓存(稳定);监听登录态变化 → refresh 重新 redirect。
 final routerProvider = Provider<GoRouter>((ref) {
   final refresh = ValueNotifier(0);
   ref.listen(authControllerProvider, (_, _) => refresh.value++);
   ref.onDispose(refresh.dispose);
-  return GoRouter(
+  final router = GoRouter(
     refreshListenable: refresh,
     initialLocation: '/splash',
     redirect: (ctx, state) {
@@ -87,4 +91,6 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/terminal', builder: (_, _) => const TerminalPage()),
     ],
   );
+  appRouter = router;
+  return router;
 });

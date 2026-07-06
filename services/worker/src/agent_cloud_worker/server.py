@@ -195,12 +195,9 @@ class WorkerServicer(worker_pb2_grpc.WorkerServicer):
             executor,
             enabled=schedule_task_enabled(enabled_tools) and not request.is_scheduled_run,
         )
-        # notify 不按 is_scheduled_run 关闭——定时任务到点提醒正是主用例。按 client 门控:notify
-        # 送达浏览器(OS 通知 + 网页弹窗),mobile App 无接收通道,故仅非 mobile 暴露(与下面
-        # client_actions 的 mobile-only 相反)。
-        executor = NotifyingExecutor(
-            executor, enabled=notify_enabled(enabled_tools), client=request.client
-        )
+        # notify 不按 is_scheduled_run 关闭——定时任务到点提醒正是主用例。全平台暴露:
+        # web 走浏览器通知,mobile 走 WS 推送长连(backend api/push.py,2026-07 起)。
+        executor = NotifyingExecutor(executor, enabled=notify_enabled(enabled_tools))
         # set_alarm / add_calendar_event:worker 合成确认,真正副作用在用户设备上由 App 执行。
         # 按 client 过滤:仅 mobile 暴露(web 没有系统闹钟/日历执行通道,见 ClientActionsExecutor)。
         executor = ClientActionsExecutor(
