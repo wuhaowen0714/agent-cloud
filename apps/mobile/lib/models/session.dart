@@ -7,6 +7,7 @@ class Session {
   final DateTime? lastActiveAt;
   final bool unread; // 定时任务产物:有新回复未读
   final String? lastMessage; // 列表预览:最后一条主消息截断文本(可能含 marker,渲染时剥)
+  final String? scheduledTaskId; // 非空 = 值守任务的产出会话(值守中心按它列产出时间线)
 
   const Session({
     required this.id,
@@ -17,6 +18,7 @@ class Session {
     this.lastActiveAt,
     this.unread = false,
     this.lastMessage,
+    this.scheduledTaskId,
   });
 
   factory Session.fromJson(Map<String, dynamic> j) => Session(
@@ -30,6 +32,7 @@ class Session {
             : null,
         unread: j['unread'] as bool? ?? false,
         lastMessage: j['last_message'] as String?,
+        scheduledTaskId: j['scheduled_task_id'] as String?,
       );
 
   Session copyWith({
@@ -48,6 +51,7 @@ class Session {
         status: status ?? this.status,
         unread: unread ?? this.unread,
         lastMessage: lastMessage ?? this.lastMessage,
+        scheduledTaskId: scheduledTaskId,
         lastActiveAt: lastActiveAt ?? this.lastActiveAt,
       );
 

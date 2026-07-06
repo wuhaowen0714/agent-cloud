@@ -14,6 +14,7 @@ import '../../features/agent/skills_toggle_page.dart';
 import '../../features/agent/agent_settings_page.dart';
 import '../../features/agent/agent_memory_page.dart';
 import '../../features/files/files_browser_page.dart';
+import '../../features/watch/watch_center_page.dart';
 import '../../features/terminal/terminal_page.dart';
 import '../../features/chat/chat_page.dart';
 
@@ -88,6 +89,7 @@ final routerProvider = Provider<GoRouter>((ref) {
           builder: (_, st) => FilesPage(
               initialDir: st.uri.queryParameters['dir'] ?? '',
               previewPath: st.uri.queryParameters['preview'])),
+      GoRoute(path: '/watch', builder: (_, _) => const WatchCenterPage()),
       GoRoute(path: '/terminal', builder: (_, _) => const TerminalPage()),
     ],
   );
