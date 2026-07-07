@@ -17,7 +17,12 @@ void main() async {
   // 开关开着就拉起推送前台服务(app 每次打开都确保在跑;停留由服务自己维持)
   final enabled =
       await const FlutterSecureStorage().read(key: kPushEnabledKey) == 'true';
-  if (enabled) await startPushService();
+  if (enabled) {
+    await startPushService();
+    // 已开推送但没拿到电池豁免的存量用户:补一次系统豁免对话框(已豁免则无感)。
+    // 不豁免的话 Doze/ROM 冻结 FGS,息屏后连接死、周期重连也不跑,推送只能等打开 app 补送。
+    await requestBatteryExemption();
+  }
   // 冷启动:点通知拉起 app 的场景,等首帧+登录 bootstrap 后再跳会话
   final launch = await launchNotificationSession();
   if (launch != null) {

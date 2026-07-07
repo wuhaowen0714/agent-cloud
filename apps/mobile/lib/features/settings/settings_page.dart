@@ -200,17 +200,23 @@ class _PushToggleTileState extends State<_PushToggleTile> {
               content: Text('需要通知权限才能推送,请在系统设置中允许')));
         }
         await startPushService();
+        // 系统级电池豁免对话框(Doze/冻结致息屏断连的主修复,一键允许)
+        await requestBatteryExemption();
         await _storage.write(key: kPushEnabledKey, value: 'true');
         if (mounted) {
           setState(() => _enabled = true);
-          // 国产 ROM 杀后台狠:引导一次性设置(不设的话锁屏久了连接会被杀)
+          // 国产 ROM 杀后台狠:引导一次性设置(不设的话息屏后网络被掐、连接秒死,
+          // 提醒只能等下次打开 app 补送 —— 2026-07-07 实测 ColorOS 如此)
           showDialog<void>(
             context: context,
             builder: (c) => AlertDialog(
               title: const Text('保持推送在线'),
               content: const Text(
-                  '为了锁屏后也能收到提醒,请在系统设置中允许本应用「自启动」和「后台无限制运行」'
-                  '(通常在 设置 → 应用 → Agent Cloud → 耗电管理/自启动)。'),
+                  '刚才如果弹了「忽略电池优化」请选允许。另外请在系统设置中给本应用开启:\n\n'
+                  '① 自启动\n'
+                  '② 耗电管理 → 允许完全后台行为(ColorOS)\n\n'
+                  '路径:设置 → 应用管理 → Agent Cloud。不开的话息屏后系统会掐断连接,'
+                  '提醒要等下次打开 app 才补送。'),
               actions: [
                 TextButton(
                     onPressed: () => Navigator.pop(c),

@@ -75,8 +75,20 @@ void initForegroundTask() {
       eventAction: ForegroundTaskEventAction.repeat(240000), // 4min 心跳(NAT 保活)
       autoRunOnBoot: true, // 重启后随系统拉起(仍受 ROM 自启动白名单约束)
       allowWakeLock: true,
+      allowWifiLock: true, // 息屏不放 WiFi(2026-07-07:ColorOS 息屏断网致连接秒死)
     ),
   );
+}
+
+/// 电池优化豁免:Doze/ROM 冻结 FGS 是「息屏收不到推送」的根因之一(2026-07-07 实测
+/// 息屏后连 4min 周期重连都不跑)。系统级豁免对话框,用户一键允许;已豁免则 no-op。
+Future<void> requestBatteryExemption() async {
+  try {
+    if (await FlutterForegroundTask.isIgnoringBatteryOptimizations) return;
+    await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+  } catch (_) {
+    // 个别 ROM 不支持该 intent:静默,靠设置页文案引导手动设置
+  }
 }
 
 Future<void> startPushService() async {
