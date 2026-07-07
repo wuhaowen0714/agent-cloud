@@ -14,7 +14,9 @@ class NotificationRepository(BaseRepository[Notification]):
         result = await self.session.execute(
             select(Notification)
             .where(Notification.user_id == user_id, Notification.delivered_at.is_(None))
-            .order_by(Notification.created_at)
+            # id tiebreaker:同事务落的多条 created_at 相同(PG now() 事务内恒定),
+            # 无 tiebreaker 时补投顺序/超限截断非确定(审查 MEDIUM-1)
+            .order_by(Notification.created_at, Notification.id)
         )
         return list(result.scalars().all())
 

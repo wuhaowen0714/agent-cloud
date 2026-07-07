@@ -170,6 +170,7 @@ async def push_ws(websocket: WebSocket):
         except Exception:
             # DB 抖动等:补投失败不掐连接,实时推送仍可用;下次重连再补
             logger.exception("push backlog failed for user %s", uid)
+        acked: set[str] = set()  # 连接内去重:重复 ack 不重复打库(审查 MEDIUM-2)
         while True:
             # 客户端应用层心跳(NAT 保活)+ 送达回执;其余消息忽略。断开抛 WebSocketDisconnect。
             msg = await websocket.receive_json()
@@ -178,7 +179,10 @@ async def push_ws(websocket: WebSocket):
             if msg.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
             elif msg.get("type") == "ack":
-                await _mark_acked(uid, msg.get("id"))
+                rid = str(msg.get("id"))
+                if rid not in acked:
+                    acked.add(rid)
+                    await _mark_acked(uid, msg.get("id"))
     except WebSocketDisconnect:
         pass
     except Exception:

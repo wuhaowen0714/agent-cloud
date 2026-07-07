@@ -20,6 +20,15 @@ import '../api/dio_client.dart' show kBaseUrl;
 const _channelId = 'agent_cloud_push';
 const kPushEnabledKey = 'push.enabled'; // secure_storage 开关(设置页读写)
 
+/// 通知 id(uuid 字符串)→ 稳定 31-bit 系统通知 id。
+/// 不能用 String.hashCode:Dart 对 String 的 hash 带进程随机种子,FGS 被杀重启后同一
+/// 通知算出不同 id → 补投跨重启双弹(审查 HIGH-1)。取 uuid 前 8 hex 确定性派生。
+int stableNotifId(String nid) {
+  final hex = nid.replaceAll('-', '');
+  final v = hex.length >= 8 ? int.tryParse(hex.substring(0, 8), radix: 16) : null;
+  return v != null ? v & 0x7fffffff : nid.codeUnits.fold(0, (a, c) => (a * 31 + c) & 0x7fffffff);
+}
+
 final _notifications = FlutterLocalNotificationsPlugin();
 
 /// 主 isolate 调用:初始化本地通知(含点击回调注册)。冷启动点通知的 payload 由
@@ -173,9 +182,10 @@ class _PushTaskHandler extends TaskHandler {
     final sid = m['session_id'] as String?;
     final nid = m['id'] as String?;
     await _notifications.show(
-      // 有通知 id 用其 hash(补投/重发幂等:同一条只覆盖不叠加);无 id 退回秒级时间戳
+      // 有通知 id 用稳定派生(补投/重发/跨 FGS 重启幂等:同一条只覆盖不叠加);
+      // 无 id 退回秒级时间戳
       id: nid != null && nid.isNotEmpty
-          ? nid.hashCode & 0x7fffffff
+          ? stableNotifId(nid)
           : DateTime.now().millisecondsSinceEpoch ~/ 1000,
       title: title,
       body: body,

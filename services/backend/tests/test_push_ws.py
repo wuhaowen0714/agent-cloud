@@ -268,3 +268,20 @@ async def test_backlog_drops_expired(engine, monkeypatch):
         # 过期的被放弃(标 delivered)不再出现;新的未 ack 保持未送达(at-least-once)
         remaining = await NotificationRepository(db).list_undelivered(uid)
         assert [n.title for n in remaining] == ["new"]
+
+
+async def test_acked_not_resent_on_reconnect(engine, monkeypatch):
+    """端到端闭环:ack 过的通知,重连补投不再出现(审查补测)。"""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    import agent_cloud_backend.api.push as push_mod
+    from agent_cloud_backend.api.push import _mark_acked, _send_backlog
+
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr(push_mod, "get_sessionmaker", lambda: maker)
+    uid, ids = await _mk_user_with_notifications(maker, 2, "ackbk@e.com")
+
+    await _mark_acked(uid, str(ids[0]))
+    ws = _FakeWs()
+    await _send_backlog(ws, uid)
+    assert [m["title"] for m in ws.sent] == ["t1"]  # t0 已 ack,不再补
