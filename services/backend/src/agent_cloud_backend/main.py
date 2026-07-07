@@ -30,6 +30,12 @@ from agent_cloud_backend.scheduler.poller import scheduler_loop
 
 logger = logging.getLogger(__name__)
 
+# 应用日志落地:uvicorn 默认只给自家 access log 配 handler,root 无 handler → 应用
+# logger 的 INFO/ERROR 全被吞(推送链路排障时才发现连 logger.exception 都从没输出过)。
+# basicConfig 幂等(root 已有 handler 时 no-op),不与 uvicorn 自身日志冲突。
+logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)  # 防 SQL 回显刷屏
+
 
 async def _reaper_loop(interval_seconds: float, manager) -> None:
     """周期性回收空闲沙箱。单次失败不退出循环(spec §4.1:接上原本无调用方的 reap_idle)。"""
