@@ -34,7 +34,8 @@ class HomePage extends ConsumerStatefulWidget {
   ConsumerState<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends ConsumerState<HomePage> {
+class _HomePageState extends ConsumerState<HomePage>
+    with WidgetsBindingObserver {
   final _search = TextEditingController(); // 会话标题搜索(纯前端过滤)
   String? _selectedAgentId;
   final Set<String> _toggledDates = {}; // 手动 toggle 的天分组(今天默认开,其它默认折叠)
@@ -47,9 +48,18 @@ class _HomePageState extends ConsumerState<HomePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) checkUpdate(context, ref, silent: true);
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 回前台自动拉新:定时任务在后台产出的新会话不用手动下拉刷新
+    if (state == AppLifecycleState.resumed) {
+      ref.read(sessionsControllerProvider.notifier).refresh();
+    }
   }
 
   void _toast(String m) {
@@ -248,6 +258,7 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _search.dispose();
     super.dispose();
   }

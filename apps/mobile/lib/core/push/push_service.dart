@@ -165,13 +165,15 @@ class _PushTaskHandler extends TaskHandler {
           try {
             final m = jsonDecode(data as String) as Map<String, dynamic>;
             if (m['type'] == 'notify' || m['type'] == 'scheduled_done') {
-              _show(m);
-              // 送达回执:服务端据此标 delivered;没 ack 到的由重连补投兜底(at-least-once,
-              // _show 按通知 id 幂等,重复补投只是覆盖同一条系统通知)。
+              // 送达回执必须在【弹窗成功】之后:show 失败就 ack 会让服务端标已送达、
+              // 补投兜底失效(2026-07-07 实锤:ack 到了但通知栏没弹,消息从此消失)。
+              // show 失败不 ack → 保持未送达 → 下次重连补投重试;_show 按通知 id 幂等。
               final id = m['id'];
-              if (id is String && id.isNotEmpty) {
-                ws.add(jsonEncode({'type': 'ack', 'id': id}));
-              }
+              unawaited(_show(m).then((ok) {
+                if (ok && id is String && id.isNotEmpty) {
+                  ws.add(jsonEncode({'type': 'ack', 'id': id}));
+                }
+              }).catchError((_) {}));
             }
           } catch (_) {
             // 坏消息忽略,连接保持
@@ -188,29 +190,52 @@ class _PushTaskHandler extends TaskHandler {
     }
   }
 
-  Future<void> _show(Map<String, dynamic> m) async {
+  /// 弹系统通知。返回是否成功 —— 调用方以此决定是否回 ack(失败不 ack,留给补投重试)。
+  Future<bool> _show(Map<String, dynamic> m) async {
     final title = m['title'] as String? ?? '新消息';
     final body = m['body'] as String? ?? '';
     final sid = m['session_id'] as String?;
     final nid = m['id'] as String?;
-    await _notifications.show(
-      // 有通知 id 用稳定派生(补投/重发/跨 FGS 重启幂等:同一条只覆盖不叠加);
-      // 无 id 退回秒级时间戳
-      id: nid != null && nid.isNotEmpty
-          ? stableNotifId(nid)
-          : DateTime.now().millisecondsSinceEpoch ~/ 1000,
-      title: title,
-      body: body,
-      notificationDetails: const NotificationDetails(
-        android: AndroidNotificationDetails(
-          _channelId,
-          '助手通知',
-          channelDescription: 'AI 主动提醒与定时任务结果',
-          importance: Importance.high,
-          priority: Priority.high,
-        ),
-      ),
-      payload: sid, // 点击直达对应会话(主 isolate onTap 消费)
-    );
+    Future<void> doShow() => _notifications.show(
+          // 有通知 id 用稳定派生(补投/重发/跨 FGS 重启幂等:同一条只覆盖不叠加);
+          // 无 id 退回秒级时间戳
+          id: nid != null && nid.isNotEmpty
+              ? stableNotifId(nid)
+              : DateTime.now().millisecondsSinceEpoch ~/ 1000,
+          title: title,
+          body: body,
+          notificationDetails: const NotificationDetails(
+            android: AndroidNotificationDetails(
+              _channelId,
+              '助手通知',
+              channelDescription: 'AI 主动提醒与定时任务结果',
+              importance: Importance.high,
+              priority: Priority.high,
+            ),
+          ),
+          payload: sid, // 点击直达对应会话(主 isolate onTap 消费)
+        );
+    try {
+      await doShow();
+      return true;
+    } catch (_) {
+      // FGS isolate 插件状态偶发失效 → 重初始化后重试一次;再失败返回 false(不 ack,
+      // 服务端保持未送达,下次重连补投重试)。
+      try {
+        await _ensureNotificationsInit();
+        await doShow();
+        return true;
+      } catch (e) {
+        // FGS 无日志通道:把错误亮到常驻通知上当「错误显示器」,用户可见可反馈
+        final msg = e.toString();
+        try {
+          await FlutterForegroundTask.updateService(
+            notificationTitle: 'Agent Cloud 在线(通知显示异常)',
+            notificationText: msg.length > 80 ? msg.substring(0, 80) : msg,
+          );
+        } catch (_) {}
+        return false;
+      }
+    }
   }
 }
