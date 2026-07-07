@@ -52,30 +52,33 @@ async def apply_notify_calls(session_id: uuid.UUID, new_messages) -> int:
         if enabled and "notify" not in enabled:
             return 0
         created = 0
-        accepted: list[tuple[str, str]] = []
+        added: list[Notification] = []
         for c in calls:
             args = c.arguments or {}
             title, body = args.get("title"), args.get("body")
             if not all(isinstance(x, str) and x.strip() for x in (title, body)):
                 continue
-            db.add(
-                Notification(
-                    user_id=s.user_id,
-                    title=title.strip()[:TITLE_MAX],
-                    body=body.strip()[:BODY_MAX],
-                    origin_session_id=session_id,
-                )
+            n = Notification(
+                user_id=s.user_id,
+                title=title.strip()[:TITLE_MAX],
+                body=body.strip()[:BODY_MAX],
+                origin_session_id=session_id,
             )
-            accepted.append((title.strip()[:TITLE_MAX], body.strip()[:BODY_MAX]))
+            db.add(n)
+            added.append(n)
             created += 1
+        await db.flush()  # 触发 uuid 默认值:commit 前把 id 取出来,推送带上供 app 回 ack
+        accepted = [(n.id, n.title, n.body) for n in added]
         await db.commit()
         user_id = s.user_id
-    # 手机端 WS 推送(落库之后、事务之外;best-effort——无设备在线就静默,web 轮询兜底)
-    for title, body in accepted:
+    # 手机端 WS 推送(落库之后、事务之外;best-effort——断链/半开由 ack+重连补投兜底,
+    # web 轮询同一张表)
+    for nid, title, body in accepted:
         try:
             await push_to_user(
                 user_id,
                 {"type": "notify", "title": title, "body": body, "session_id": str(session_id)},
+                notification_id=nid,
             )
         except Exception:
             logger.exception("push notify failed for session %s", session_id)

@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from agent_cloud_backend.config import Settings
 from agent_cloud_backend.db import get_sessionmaker
 from agent_cloud_backend.models.message import Message
+from agent_cloud_backend.models.notification import Notification
 from agent_cloud_backend.repositories.message import MessageRepository
 from agent_cloud_backend.repositories.scheduled_task import ScheduledTaskRepository
 from agent_cloud_backend.repositories.session import SessionRepository
@@ -68,19 +69,37 @@ async def run_scheduled_task(snap: dict, settings: Settings) -> None:
             await SessionRepository(db).set_unread(session_id, False)
             await db.commit()
 
-    # 手机端 WS 推送:任务真跑出了结果才推(skipped/[SILENT] 不打扰);best-effort,
-    # 无设备在线静默(app 内未读点 + web 通知兜底)。点通知直达产物会话(session_id)。
+    # 完成通知:任务真跑出了结果才发(skipped/[SILENT] 不打扰)。先落 notifications 表
+    # (事实源:web 轮询展示 + 断链后重连补投都靠它),再尝试 WS 实时推(带 id,app 回
+    # ack 才标 delivered)。点通知直达产物会话(session_id)。
     if status == "ok":
         try:
-            body = result.final_text.strip().replace("\n", " ")[:200]
+            body = result.final_text.strip().replace("\n", " ")[:200] or "已产出结果,点开查看"
+            push_title = f"📅 {name} 已完成"
+            nid = None
+            try:
+                async with get_sessionmaker()() as db:
+                    n = Notification(
+                        user_id=snap["user_id"],
+                        title=push_title,
+                        body=body,
+                        origin_session_id=session_id,
+                    )
+                    db.add(n)
+                    await db.flush()  # 触发 uuid 默认值,commit 前取 id
+                    nid = n.id
+                    await db.commit()
+            except Exception:
+                logger.exception("persist scheduled_done notification failed for task %s", snap["id"])
             await push_to_user(
                 snap["user_id"],
                 {
                     "type": "scheduled_done",
-                    "title": f"📅 {name} 已完成",
-                    "body": body or "已产出结果,点开查看",
+                    "title": push_title,
+                    "body": body,
                     "session_id": str(session_id),
                 },
+                notification_id=nid,
             )
         except Exception:
             logger.exception("push scheduled_done failed for task %s", snap["id"])

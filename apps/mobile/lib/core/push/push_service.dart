@@ -135,6 +135,9 @@ class _PushTaskHandler extends TaskHandler {
           '${kBaseUrl.replaceFirst('http', 'ws')}/push/ws'; // https→wss, http→ws
       final ws = await WebSocket.connect(wsUrl, protocols: ['refresh', token])
           .timeout(const Duration(seconds: 15)); // 防黑洞连接把 _connecting 闩死
+      // 协议层探活:半开连接(NAT/VPN/息屏静默断,发数据假成功)在 ~2 个周期内触发
+      // onDone → 走下个 4min 周期重连。8 点战报丢推送(2026-07-07)的治标层。
+      ws.pingInterval = const Duration(seconds: 60);
       _ws = ws;
       ws.listen(
         (data) {
@@ -142,6 +145,12 @@ class _PushTaskHandler extends TaskHandler {
             final m = jsonDecode(data as String) as Map<String, dynamic>;
             if (m['type'] == 'notify' || m['type'] == 'scheduled_done') {
               _show(m);
+              // 送达回执:服务端据此标 delivered;没 ack 到的由重连补投兜底(at-least-once,
+              // _show 按通知 id 幂等,重复补投只是覆盖同一条系统通知)。
+              final id = m['id'];
+              if (id is String && id.isNotEmpty) {
+                ws.add(jsonEncode({'type': 'ack', 'id': id}));
+              }
             }
           } catch (_) {
             // 坏消息忽略,连接保持
@@ -162,8 +171,12 @@ class _PushTaskHandler extends TaskHandler {
     final title = m['title'] as String? ?? '新消息';
     final body = m['body'] as String? ?? '';
     final sid = m['session_id'] as String?;
+    final nid = m['id'] as String?;
     await _notifications.show(
-      id: DateTime.now().millisecondsSinceEpoch ~/ 1000, // 秒级 id:多条不互相覆盖
+      // 有通知 id 用其 hash(补投/重发幂等:同一条只覆盖不叠加);无 id 退回秒级时间戳
+      id: nid != null && nid.isNotEmpty
+          ? nid.hashCode & 0x7fffffff
+          : DateTime.now().millisecondsSinceEpoch ~/ 1000,
       title: title,
       body: body,
       notificationDetails: const NotificationDetails(
